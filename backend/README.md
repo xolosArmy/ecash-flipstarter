@@ -19,3 +19,6 @@ Quick checks:
 curl http://127.0.0.1:3001/api/health
 curl https://chronik.xolosarmy.xyz/xec/chronik-info
 ```
+
+## Testing
+Tests do not start a server; they call handlers directly to avoid socket binding restrictions.
