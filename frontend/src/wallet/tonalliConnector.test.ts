@@ -17,7 +17,10 @@ beforeEach(() => {
 
 function getRequestIdFromPopup(openMock: ReturnType<typeof vi.fn>) {
   const popupUrl = openMock.mock.calls[0][0] as string;
-  const requestParam = new URL(popupUrl).searchParams.get('request') as string;
+  const url = new URL(popupUrl);
+  const fragment = url.hash.startsWith('#') ? url.hash.slice(1) : url.hash;
+  const query = fragment.includes('?') ? fragment.split('?')[1] : url.search.slice(1);
+  const requestParam = new URLSearchParams(query).get('request') as string;
   const payload = JSON.parse(decodeBase64Url(requestParam));
   return payload.requestId as string;
 }
@@ -79,7 +82,7 @@ describe('signAndBroadcastWithTonalli', () => {
       unsignedTxHex: '00',
     });
 
-    await vi.advanceTimersByTimeAsync(60);
+    await vi.runAllTimersAsync();
     const result = await promise;
     expect(result.ok).toBe(false);
     expect(result.error).toBe('timeout');
