@@ -97,4 +97,21 @@ curl -X POST http://localhost:3001/api/tx/broadcast \
   -d '{"rawTxHex":"<signed-hex>"}'
 ```
 
+## Smoke test
+A minimal end-to-end script to verify the backend flow (Chronik mode, campaign creation, pledge build, optional broadcast).
+
+Required env vars:
+- `CONTRIBUTOR_ADDRESS`
+- `BENEFICIARY_ADDRESS`
+
+Example:
+```
+CONTRIBUTOR_ADDRESS="ecash:..." BENEFICIARY_ADDRESS="ecash:..." ./scripts/smoke-test.sh
+```
+
+Optional broadcast:
+```
+SIGNED_TX_HEX="..." ./scripts/smoke-test.sh
+```
+
 If you see `EADDRINUSE`, stop the existing process or change `API_PORT` (backend) or the Vite port (frontend) before retrying.
