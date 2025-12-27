@@ -60,7 +60,7 @@ tip_height="$(echo "$health_json" | jq -r '.tipHeight // 0')"
 if [ "$backend_mode" != "chronik" ]; then
   echo "Warning: backendMode is $backend_mode (expected chronik)" >&2
 fi
-echo "$health_json" | jq -e '.tipHeight > 0' >/dev/null
+echo "$health_json" | jq -e '(.tipHeight | tonumber) > 0' >/dev/null
 echo "Health OK. tipHeight=$tip_height backendMode=$backend_mode"
 
 now_ts="$(now_epoch)"
@@ -69,8 +69,8 @@ expiration_time="$(add_seconds "$now_ts" "$EXPIRATION_SECONDS_FROM_NOW")"
 campaign_payload="$(jq -n \
   --arg name "Smoke Test Campaign" \
   --arg description "Smoke test via script" \
-  --arg goal "$GOAL_SATS" \
-  --arg expirationTime "$expiration_time" \
+  --argjson goal "$GOAL_SATS" \
+  --argjson expirationTime "$expiration_time" \
   --arg beneficiaryAddress "$BENEFICIARY_ADDRESS" \
   '{name:$name,description:$description,goal:$goal,expirationTime:$expirationTime,beneficiaryAddress:$beneficiaryAddress}')"
 
@@ -92,7 +92,7 @@ echo "$campaign_detail" | jq '{id, name, goal, expirationTime, beneficiaryAddres
 
 pledge_payload="$(jq -n \
   --arg contributorAddress "$CONTRIBUTOR_ADDRESS" \
-  --arg amount "$PLEDGE_SATS" \
+  --argjson amount "$PLEDGE_SATS" \
   '{contributorAddress:$contributorAddress,amount:$amount}')"
 
 pledge_json="$(curl -sS -f -X POST "${API_BASE_URL}/campaign/${campaign_id}/pledge" \
