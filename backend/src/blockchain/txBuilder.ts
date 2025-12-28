@@ -1,4 +1,4 @@
-import { rpcCall } from './ecashClient';
+import { addressToScriptPubKey } from './ecashClient';
 import type { Utxo, UnsignedTx } from './types';
 
 // TODO: replace manual serializer and script derivation with @ecash/lib primitives.
@@ -71,13 +71,6 @@ export async function buildRefundTx(params: RefundTxParams): Promise<BuiltTx> {
     outputs,
   };
   return { unsignedTx: unsigned, rawHex: serializeUnsignedTx(unsigned) };
-}
-
-async function addressToScriptPubKey(address: string): Promise<string> {
-  // Delegates to node RPC so we avoid local address parsing discrepancies.
-  const info = await rpcCall<any>('validateaddress', [address]);
-  if (info && info.scriptPubKey) return info.scriptPubKey as string;
-  throw new Error('could-not-derive-scriptPubKey');
 }
 
 function serializeUnsignedTx(unsignedTx: UnsignedTx): string {
