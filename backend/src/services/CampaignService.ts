@@ -1,6 +1,7 @@
-import { CampaignDefinition } from '../covenants/campaignDefinition.js';
-import { compileCampaignScript } from '../covenants/scriptCompiler.js';
-import { CovenantIndex, type CovenantRef } from '../blockchain/covenantIndex.js';
+import { CampaignDefinition } from '../covenants/campaignDefinition';
+import { CovenantIndex, type CovenantRef } from '../blockchain/covenantIndex';
+import { compileCampaignScript } from '../covenants/scriptCompiler';
+
 
 const campaigns = new Map<string, CampaignDefinition>();
 const covenantIndex = new CovenantIndex();

@@ -20,7 +20,18 @@ router.post('/campaign', async (req, res) => {
 
 router.get('/campaign', async (_req, res) => {
   try {
-    res.json(service.listCampaigns());
+    const campaigns = service.listCampaigns();
+    const payload = Array.isArray(campaigns)
+      ? campaigns.map((campaign) => ({
+          id: campaign.id,
+          name: campaign.name,
+          goal: campaign.goal,
+          expirationTime: campaign.expirationTime,
+          beneficiaryAddress: campaign.beneficiaryAddress,
+          progress: campaign.progress,
+        }))
+      : [];
+    res.json(payload);
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
   }
