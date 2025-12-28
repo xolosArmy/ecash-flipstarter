@@ -5,7 +5,11 @@ import finalizeRouter from './routes/finalize.routes';
 import refundRouter from './routes/refund.routes';
 import broadcastRouter from './routes/broadcast.routes';
 import { ECASH_BACKEND, USE_CHRONIK } from './config/ecash';
-import { getEffectiveChronikBaseUrl, getTipHeight } from './blockchain/ecashClient';
+import {
+  getBlockchainInfo,
+  getEffectiveChronikBaseUrl,
+  getTipHeight,
+} from './blockchain/ecashClient';
 
 export function createApp() {
   const app = express();
@@ -57,7 +61,11 @@ export async function healthHandler(_req: express.Request, res: express.Response
   try {
     if (USE_CHRONIK) {
       try {
-        const tipHeight = await getTipHeight();
+        const blockchainInfo = await getBlockchainInfo();
+        const tipHeight =
+          (blockchainInfo as { tipHeight?: number }).tipHeight ??
+          (blockchainInfo as { tip_height?: number }).tip_height ??
+          0;
         res.json({
           status: 'ok',
           network: 'XEC',
@@ -68,12 +76,13 @@ export async function healthHandler(_req: express.Request, res: express.Response
         });
         return;
       } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
         res.json({
           status: 'error',
           network: 'XEC',
           backendMode: 'chronik',
           chronikBaseUrl: getEffectiveChronikBaseUrl(),
-          error: (err as Error).message,
+          error: `Chronik protobuf client failed: ${message}`,
           timestamp,
         });
         return;

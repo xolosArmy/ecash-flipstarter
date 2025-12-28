@@ -3,7 +3,6 @@ import {
   USE_CHRONIK,
   USE_MOCK,
   ecashConfig,
-  normalizeChronikBaseUrl,
 } from '../config/ecash';
 import { ChronikClient, type ScriptType } from 'chronik-client';
 import type { BroadcastResult, Utxo } from './types';
@@ -13,65 +12,11 @@ const rpcUrl = ecashConfig.rpcUrl;
 const rpcUser = ecashConfig.rpcUsername;
 const rpcPass = ecashConfig.rpcPassword;
 
-let effectiveChronikBaseUrl = CHRONIK_BASE_URL;
-let chronik = new ChronikClient([effectiveChronikBaseUrl]);
-let chronikBaseResolved = false;
+const effectiveChronikBaseUrl = CHRONIK_BASE_URL;
+const chronik = new ChronikClient([effectiveChronikBaseUrl]);
 
 export function getEffectiveChronikBaseUrl(): string {
   return effectiveChronikBaseUrl;
-}
-
-function setChronikBaseUrl(baseUrl: string) {
-  if (baseUrl === effectiveChronikBaseUrl) return;
-  effectiveChronikBaseUrl = baseUrl;
-  chronik = new ChronikClient([effectiveChronikBaseUrl]);
-}
-
-function getChronikBaseCandidates(baseUrl: string) {
-  const normalized = normalizeChronikBaseUrl(baseUrl);
-  const hasXecSuffix = normalized.endsWith('/xec');
-  const withoutXec = hasXecSuffix ? normalized.slice(0, -4) : normalized;
-  const withXec = hasXecSuffix ? normalized : `${normalized}/xec`;
-  return {
-    primary: normalized,
-    fallback: hasXecSuffix ? withoutXec : withXec,
-  };
-}
-
-type ChronikBlockchainInfo = {
-  tipHeight: number;
-};
-
-async function fetchChronikBlockchainInfo(baseUrl: string): Promise<ChronikBlockchainInfo> {
-  const res = await fetch(`${baseUrl}/blockchain-info`);
-  if (res.status === 404) {
-    const error = new Error('chronik-blockchain-info-not-found');
-    (error as Error & { status?: number }).status = 404;
-    throw error;
-  }
-  if (!res.ok) {
-    throw new Error(`chronik blockchain info failed: ${res.status}`);
-  }
-  return (await res.json()) as ChronikBlockchainInfo;
-}
-
-async function resolveChronikBlockchainInfo(): Promise<ChronikBlockchainInfo> {
-  const { primary, fallback } = getChronikBaseCandidates(effectiveChronikBaseUrl);
-  try {
-    const info = await fetchChronikBlockchainInfo(primary);
-    setChronikBaseUrl(primary);
-    chronikBaseResolved = true;
-    return info;
-  } catch (err) {
-    const status = (err as Error & { status?: number }).status;
-    if (status !== 404 || fallback === primary) {
-      throw err;
-    }
-    const info = await fetchChronikBlockchainInfo(fallback);
-    setChronikBaseUrl(fallback);
-    chronikBaseResolved = true;
-    return info;
-  }
 }
 
 function normalizeChronikAddress(address: string): string {
@@ -127,11 +72,7 @@ export async function getTipHeight(): Promise<number> {
     return 0;
   }
   if (USE_CHRONIK) {
-    if (chronikBaseResolved) {
-      const info = await chronikRequest('blockchain info', () => chronik.blockchainInfo());
-      return info.tipHeight;
-    }
-    const info = await resolveChronikBlockchainInfo();
+    const info = await getBlockchainInfo();
     return info.tipHeight;
   }
   return rpcCall<number>('getblockcount');
@@ -190,10 +131,17 @@ async function broadcastRawTxViaChronik(rawTxHex: string): Promise<BroadcastResu
 }
 
 export async function getChronikBlockchainInfo() {
-  if (!chronikBaseResolved) {
-    return resolveChronikBlockchainInfo();
+  return getBlockchainInfo();
+}
+
+export async function getBlockchainInfo() {
+  if (USE_MOCK) {
+    return { tipHeight: 0 };
   }
-  return chronikRequest('chronik blockchain info', () => chronik.blockchainInfo());
+  if (!USE_CHRONIK) {
+    throw new Error('blockchain-info-requires-chronik');
+  }
+  return chronikRequest('blockchain info', () => chronik.blockchainInfo());
 }
 
 /**
