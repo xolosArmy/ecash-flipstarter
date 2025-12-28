@@ -9,15 +9,17 @@ export interface CovenantRef {
 export interface CampaignSummary {
   id: string;
   name: string;
-  description: string;
   goal: string;
   expirationTime: string;
   beneficiaryAddress?: string;
-  covenant?: CovenantRef;
   progress?: number;
 }
 
-export interface CampaignDetail extends CampaignSummary {}
+export interface CampaignDetail extends CampaignSummary {
+  description: string;
+  beneficiaryPubKey?: string;
+  covenant?: CovenantRef;
+}
 
 export interface UnsignedTxIO {
   txid: string;
