@@ -1,5 +1,5 @@
-import { buildFinalizeTx, type BuiltTx } from '../blockchain/txBuilder.js';
-import { covenantIndexInstance } from './CampaignService.js';
+import { buildFinalizeTx, type BuiltTx } from '../blockchain/txBuilder';
+import { covenantIndexInstance } from './CampaignService';
 
 export class FinalizeService {
   /** Build an unsigned finalize transaction paying the beneficiary. */

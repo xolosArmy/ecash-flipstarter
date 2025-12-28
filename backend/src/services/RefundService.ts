@@ -1,5 +1,5 @@
-import { buildRefundTx, type BuiltTx } from '../blockchain/txBuilder.js';
-import { covenantIndexInstance } from './CampaignService.js';
+import { buildRefundTx, type BuiltTx } from '../blockchain/txBuilder';
+import { covenantIndexInstance } from './CampaignService';
 
 export class RefundService {
   /**

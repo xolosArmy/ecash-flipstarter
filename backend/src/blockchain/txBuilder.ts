@@ -1,5 +1,5 @@
-import { rpcCall } from './ecashClient.js';
-import type { Utxo, UnsignedTx } from './types.js';
+import { rpcCall } from './ecashClient';
+import type { Utxo, UnsignedTx } from './types';
 
 // TODO: replace manual serializer and script derivation with @ecash/lib primitives.
 

@@ -1,7 +1,7 @@
-import { getUtxosForAddress } from '../blockchain/ecashClient.js';
-import { buildPledgeTx, type BuiltTx } from '../blockchain/txBuilder.js';
-import type { Utxo } from '../blockchain/types.js';
-import { covenantIndexInstance } from './CampaignService.js';
+import { getUtxosForAddress } from '../blockchain/ecashClient';
+import { buildPledgeTx, type BuiltTx } from '../blockchain/txBuilder';
+import type { Utxo } from '../blockchain/types';
+import { covenantIndexInstance } from './CampaignService';
 
 export class PledgeService {
   /**

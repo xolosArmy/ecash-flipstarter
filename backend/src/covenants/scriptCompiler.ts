@@ -1,5 +1,5 @@
 // Placeholder that would compile or load covenant templates with embedded constants.
-import { CampaignDefinition } from './campaignDefinition.js';
+import { CampaignDefinition } from './campaignDefinition';
 
 export function compileCampaignScript(_campaign: CampaignDefinition): {
   scriptHex: string;
