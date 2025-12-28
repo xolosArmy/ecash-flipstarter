@@ -1,12 +1,10 @@
+import { resolveTonalliBridgeConfig } from './tonalliBridge';
+
 type TonalliExternalSignParams = {
   unsignedTxHex: string;
   returnUrl: string;
   app?: string;
 };
-
-function getEnv() {
-  return (import.meta as any).env || {};
-}
 
 function encodeBase64Url(input: string): string {
   const base64 =
@@ -17,8 +15,7 @@ function encodeBase64Url(input: string): string {
 }
 
 export function buildTonalliExternalSignUrl(params: TonalliExternalSignParams): string {
-  const env = getEnv();
-  const baseUrl = env.VITE_TONALLI_BASE_URL || 'https://cartera.xolosarmy.xyz';
+  const { baseUrl } = resolveTonalliBridgeConfig();
   const payload = {
     unsignedTxHex: params.unsignedTxHex,
     returnUrl: params.returnUrl,

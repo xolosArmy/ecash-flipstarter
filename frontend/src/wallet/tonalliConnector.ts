@@ -1,3 +1,5 @@
+import { resolveTonalliBridgeConfig } from './tonalliBridge';
+
 export type TonalliSignRequest = {
   type: 'TONALLI_SIGN_REQUEST';
   requestId: string;
@@ -43,8 +45,7 @@ export async function signAndBroadcastWithTonalli(
   }
 ): Promise<TonalliSignResult> {
   const env = getEnv();
-  const bridgeUrl = env.VITE_TONALLI_BRIDGE_URL || 'https://cartera.xolosarmy.xyz';
-  const bridgeOrigin = env.VITE_TONALLI_BRIDGE_ORIGIN || bridgeUrl;
+  const { baseUrl: bridgeUrl, origin: bridgeOrigin } = resolveTonalliBridgeConfig({ env });
   const bridgePath = env.VITE_TONALLI_BRIDGE_PATH || '/#/external-sign';
   const timeoutMs = Number(env.VITE_TONALLI_TIMEOUT_MS || 120000);
 
