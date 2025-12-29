@@ -1,7 +1,7 @@
 import { getUtxosForAddress } from '../blockchain/ecashClient';
 import { buildPledgeTx, type BuiltTx } from '../blockchain/txBuilder';
 import type { Utxo } from '../blockchain/types';
-import { covenantIndexInstance } from './CampaignService';
+import { campaignStore, covenantIndexInstance } from './CampaignService';
 
 export class PledgeService {
   /**
@@ -14,6 +14,9 @@ export class PledgeService {
   ): Promise<BuiltTx & { nextCovenantValue: bigint }> {
     const covenant = covenantIndexInstance.getCovenantRef(campaignId);
     if (!covenant) throw new Error('campaign-not-found');
+    const campaign = campaignStore.get(campaignId);
+    if (!campaign) throw new Error('campaign-not-found');
+    if (!campaign.beneficiaryAddress) throw new Error('beneficiary-address-required');
 
     const contributorUtxos = await getUtxosForAddress(contributorAddress);
     const selected = selectUtxos(contributorUtxos, amount);
@@ -29,6 +32,7 @@ export class PledgeService {
       amount,
       covenantScriptHash: covenant.scriptHash,
       contributorAddress,
+      beneficiaryAddress: campaign.beneficiaryAddress,
     });
 
     // Optimistic update; real deployment should update after broadcast/confirmation.

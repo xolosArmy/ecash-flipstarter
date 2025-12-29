@@ -9,6 +9,7 @@ export interface PledgeTxParams {
   amount: bigint;
   covenantScriptHash: string;
   contributorAddress: string;
+  beneficiaryAddress: string;
 }
 
 export interface FinalizeTxParams {
@@ -29,16 +30,23 @@ export interface BuiltTx {
 
 export async function buildPledgeTx(params: PledgeTxParams): Promise<BuiltTx> {
   const totalContributor = params.contributorUtxos.reduce((acc, u) => acc + u.value, 0n);
-  const totalInput = totalContributor + params.covenantUtxo.value;
-  const newCovenantValue = params.covenantUtxo.value + params.amount;
+  const isGenesis =
+    !params.covenantUtxo.txid ||
+    /^0+$/.test(params.covenantUtxo.txid) ||
+    params.covenantUtxo.value === 0n ||
+    params.covenantUtxo.scriptPubKey === '51';
+  const totalInput = totalContributor + (isGenesis ? 0n : params.covenantUtxo.value);
+  const newCovenantValue = (isGenesis ? 0n : params.covenantUtxo.value) + params.amount;
   if (totalInput < newCovenantValue) throw new Error('insufficient-funds-for-pledge');
 
-  const covenantScript = params.covenantUtxo.scriptPubKey;
+  const covenantScript = isGenesis
+    ? await addressToScriptPubKey(params.beneficiaryAddress)
+    : params.covenantUtxo.scriptPubKey;
   const change = totalInput - newCovenantValue;
   const changeScript = change > 0n ? await addressToScriptPubKey(params.contributorAddress) : '';
 
   const unsigned: UnsignedTx = {
-    inputs: [...params.contributorUtxos, params.covenantUtxo],
+    inputs: isGenesis ? [...params.contributorUtxos] : [...params.contributorUtxos, params.covenantUtxo],
     outputs: [
       { value: newCovenantValue, scriptPubKey: covenantScript },
       ...(change > 0n ? [{ value: change, scriptPubKey: changeScript }] : []),
