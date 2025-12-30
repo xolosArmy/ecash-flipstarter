@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import campaignsRouter from './routes/campaigns.routes';
+import campaignsRouter, { loadCampaignsFromDisk } from './routes/campaigns.routes';
 import pledgeRouter from './routes/pledge.routes';
 import finalizeRouter from './routes/finalize.routes';
 import refundRouter from './routes/refund.routes';
@@ -45,6 +45,8 @@ export function createApp() {
   app.options('*', cors(corsOptions));
 
   app.use(express.json());
+
+  loadCampaignsFromDisk();
 
   // Healthchecks
   app.get('/health', (_req, res) => {

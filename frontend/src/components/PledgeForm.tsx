@@ -34,8 +34,17 @@ export const PledgeForm: React.FC<Props> = ({
       setUnsignedHex(hex);
       setSignedHex('');
       onBuiltTx?.(built);
-    } catch (err) {
-      alert((err as Error).message);
+    } catch (err: any) {
+      if (err?.response?.status === 400) {
+        const msg = err.response.data?.error;
+        if (msg === 'invalid-amount') {
+          alert('El monto debe ser un número entero mayor o igual a 1000 satoshis.');
+        } else {
+          alert(`Error: ${msg || 'Algo salió mal'}`);
+        }
+      } else {
+        alert('Error inesperado al contribuir');
+      }
     } finally {
       setLoading(false);
     }

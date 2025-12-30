@@ -1,8 +1,5 @@
-import type {
-  BuiltTxResponse,
-  CampaignDetail,
-  CampaignSummary,
-} from './types';
+import type { BuiltTxResponse, CampaignDetail, CampaignSummary as ApiCampaignSummary } from './types';
+import type { CampaignSummary as CampaignSummaryResponse } from '../types/campaign';
 
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api').replace(
   /\/+$/,
@@ -24,17 +21,26 @@ async function jsonFetch<T>(path: string, options: RequestInit = {}): Promise<T>
   if (!res.ok) {
     const error = await res.json().catch(() => ({}));
     console.warn('Request failed', { url, status: res.status });
-    throw new Error(error.error || `Request failed ${res.status}`);
+    const apiError = new Error(error.error || `Request failed ${res.status}`);
+    (apiError as Error & { response?: { status: number; data: unknown } }).response = {
+      status: res.status,
+      data: error,
+    };
+    throw apiError;
   }
   return res.json();
 }
 
-export async function fetchCampaigns(): Promise<CampaignSummary[]> {
-  return jsonFetch<CampaignSummary[]>(`/campaign`);
+export async function fetchCampaigns(): Promise<ApiCampaignSummary[]> {
+  return jsonFetch<ApiCampaignSummary[]>(`/campaigns`);
 }
 
 export async function fetchCampaign(id: string): Promise<CampaignDetail> {
-  return jsonFetch<CampaignDetail>(`/campaign/${id}`);
+  return jsonFetch<CampaignDetail>(`/campaigns/${id}`);
+}
+
+export async function fetchCampaignSummary(id: string): Promise<CampaignSummaryResponse> {
+  return jsonFetch<CampaignSummaryResponse>(`/campaigns/${id}/summary`);
 }
 
 export async function createPledgeTx(
@@ -42,7 +48,7 @@ export async function createPledgeTx(
   contributorAddress: string,
   amount: bigint,
 ): Promise<BuiltTxResponse> {
-  return jsonFetch<BuiltTxResponse>(`/campaign/${campaignId}/pledge`, {
+  return jsonFetch<BuiltTxResponse>(`/campaigns/${campaignId}/pledge`, {
     method: 'POST',
     body: JSON.stringify({ contributorAddress, amount: amount.toString() }),
   });

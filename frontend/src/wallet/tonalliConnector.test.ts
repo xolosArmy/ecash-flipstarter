@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { decodeBase64Url, signAndBroadcastWithTonalli } from './tonalliConnector';
 
 const ORIGIN = 'https://cartera.xolosarmy.xyz';
+const TXID_ONE = 'a'.repeat(64);
+const TXID_TWO = 'b'.repeat(64);
 
 beforeEach(() => {
   (import.meta as any).env = {
@@ -55,20 +57,20 @@ describe('signAndBroadcastWithTonalli', () => {
     window.dispatchEvent(
       new MessageEvent('message', {
         origin: 'https://evil.example',
-        data: { type: 'TONALLI_SIGN_RESULT', requestId, ok: true, txid: 'txid-1' },
+        data: { type: 'TONALLI_SIGN_RESULT', requestId, ok: true, txid: TXID_ONE },
       })
     );
 
     window.dispatchEvent(
       new MessageEvent('message', {
         origin: ORIGIN,
-        data: { type: 'TONALLI_SIGN_RESULT', requestId, ok: true, txid: 'txid-1' },
+        data: { type: 'TONALLI_SIGN_RESULT', requestId, ok: true, txid: TXID_ONE },
       })
     );
 
     const result = await promise;
     expect(result.ok).toBe(true);
-    expect(result.txid).toBe('txid-1');
+    expect(result.txid).toBe(TXID_ONE);
   });
 
   it('times out when no response arrives', async () => {
@@ -104,12 +106,12 @@ describe('signAndBroadcastWithTonalli', () => {
     window.dispatchEvent(
       new MessageEvent('message', {
         origin: ORIGIN,
-        data: { type: 'TONALLI_SIGN_RESULT', requestId, ok: true, txid: 'txid-2' },
+        data: { type: 'TONALLI_SIGN_RESULT', requestId, ok: true, txid: TXID_TWO },
       })
     );
 
     const result = await promise;
     expect(result.ok).toBe(true);
-    expect(result.txid).toBe('txid-2');
+    expect(result.txid).toBe(TXID_TWO);
   });
 });

@@ -19,6 +19,19 @@ export type TonalliSignResult = {
   popupUrl?: string;
 };
 
+const TXID_PATTERN = /^[0-9a-fA-F]{64}$/;
+
+function isValidTxid(txid: string | undefined): txid is string {
+  return typeof txid === 'string' && TXID_PATTERN.test(txid);
+}
+
+function notifyTonalliError(message: string) {
+  console.error(`[tonalli] ${message}`);
+  if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+    window.alert(message);
+  }
+}
+
 export function encodeBase64Url(input: string): string {
   const base64 =
     typeof btoa === 'function'
@@ -44,13 +57,31 @@ export async function signAndBroadcastWithTonalli(
     unsignedTxHex: string;
   }
 ): Promise<TonalliSignResult> {
+  const requestId = crypto.randomUUID();
+  const tonalli = getTonalliWallet();
+  if (tonalli) {
+    try {
+      const result = await tonalli.signAndBroadcast(req.unsignedTxHex);
+      if (!isValidTxid(result?.txid)) {
+        const message = 'Tonalli returned an invalid txid.';
+        notifyTonalliError(message);
+        return { type: 'TONALLI_SIGN_RESULT', requestId, ok: false, error: message };
+      }
+      return { type: 'TONALLI_SIGN_RESULT', requestId, ok: true, txid: result.txid };
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Tonalli failed to sign and broadcast the tx.';
+      notifyTonalliError(message);
+      return { type: 'TONALLI_SIGN_RESULT', requestId, ok: false, error: message };
+    }
+  }
+
   const env = getEnv();
   const { baseUrl: bridgeUrl, origin: bridgeOrigin } = resolveTonalliBridgeConfig({ env });
   const rawBridgePath = env.VITE_TONALLI_BRIDGE_PATH || '/#/external-sign';
   const bridgePath = rawBridgePath === '/' ? '/#/external-sign' : rawBridgePath;
   const timeoutMs = Number(env.VITE_TONALLI_TIMEOUT_MS || 120000);
 
-  const requestId = crypto.randomUUID();
   const request: TonalliSignRequest = {
     type: 'TONALLI_SIGN_REQUEST',
     requestId,
@@ -113,12 +144,14 @@ export async function signAndBroadcastWithTonalli(
       const data = event.data as TonalliSignResult | undefined;
       if (!data || data.type !== 'TONALLI_SIGN_RESULT') return;
       if (data.requestId !== requestId) return;
+      const validTxid = isValidTxid(data.txid);
+      const ok = Boolean(data.ok) && validTxid;
       finish({
         type: 'TONALLI_SIGN_RESULT',
         requestId,
-        ok: Boolean(data.ok),
-        txid: data.txid,
-        error: data.error,
+        ok,
+        txid: validTxid ? data.txid : undefined,
+        error: ok ? data.error : data.error || 'Invalid txid returned from Tonalli.',
       });
     };
 
@@ -152,6 +185,15 @@ export interface WalletProvider {
 }
 
 export function getTonalliWallet(): WalletProvider | null {
-  console.warn('Tonalli wallet connector not implemented yet.');
-  return null;
+  if (typeof window === 'undefined') return null;
+  const tonalliWallet = (window as any).tonalliWallet;
+  if (!tonalliWallet) return null;
+
+  return {
+    getAddress: async () => await tonalliWallet.getAddress(),
+    signAndBroadcast: async (rawUnsignedHex: string) => {
+      const result = await tonalliWallet.signAndBroadcast(rawUnsignedHex);
+      return { txid: result.txid };
+    },
+  };
 }
