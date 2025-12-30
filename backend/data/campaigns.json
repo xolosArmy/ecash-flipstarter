@@ -1,0 +1,22 @@
+[
+  {
+    "id": "campaign-1767121959939",
+    "name": "Prueba persistencia",
+    "description": "Esta debe sobrevivir reinicios",
+    "recipientAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
+    "goal": 10000,
+    "expiresAt": "2026-12-31T00:00:00.000Z"
+  },
+  {
+    "id": "campaign-1767124661420",
+    "name": "Campaña con ubicación",
+    "description": "Ubicada en Tijuana",
+    "recipientAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
+    "goal": 20000,
+    "expiresAt": "2026-12-31T00:00:00.000Z",
+    "location": {
+      "latitude": 32.5149,
+      "longitude": -117.0382
+    }
+  }
+]

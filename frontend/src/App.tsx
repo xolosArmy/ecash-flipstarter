@@ -18,7 +18,7 @@ const AppRoutes: React.FC = () => {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
-      <Route path="/campaign/:id" element={<CampaignDetail />} />
+      <Route path="/campaigns/:id" element={<CampaignDetail />} />
       <Route path="/tonalli-callback" element={<TonalliCallback />} />
     </Routes>
   );

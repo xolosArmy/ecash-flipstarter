@@ -56,7 +56,7 @@ export const TonalliCallback: React.FC = () => {
         </div>
       )}
       {campaignId ? (
-        <Link to={`/campaign/${campaignId}`}>Back to campaign</Link>
+        <Link to={`/campaigns/${campaignId}`}>Back to campaign</Link>
       ) : (
         <Link to="/">Back home</Link>
       )}
