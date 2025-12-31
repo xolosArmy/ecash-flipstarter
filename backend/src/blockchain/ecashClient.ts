@@ -225,7 +225,39 @@ async function chronikRequest<T>(label: string, action: () => Promise<T>): Promi
   try {
     return await action();
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = formatChronikError(err);
     throw new Error(`chronik ${label} failed: ${message}`);
   }
+}
+
+function formatChronikError(err: unknown): string {
+  if (err && typeof err === 'object') {
+    const anyErr = err as {
+      message?: string;
+      response?: { data?: any; status?: number };
+    };
+    const responseData = anyErr.response?.data;
+    if (responseData) {
+      const parts: string[] = [];
+      if (typeof responseData.msg === 'string') {
+        parts.push(responseData.msg);
+      } else if (typeof responseData.error === 'string') {
+        parts.push(responseData.error);
+      }
+      if (typeof responseData.code === 'number' || typeof responseData.code === 'string') {
+        parts.push(`code ${responseData.code}`);
+      }
+      if (typeof anyErr.response?.status === 'number') {
+        parts.push(`status ${anyErr.response.status}`);
+      }
+      if (parts.length) {
+        return parts.join(' ');
+      }
+      return JSON.stringify(responseData);
+    }
+    if (typeof anyErr.message === 'string') {
+      return anyErr.message;
+    }
+  }
+  return String(err);
 }

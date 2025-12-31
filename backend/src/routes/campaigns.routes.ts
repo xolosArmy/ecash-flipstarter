@@ -20,6 +20,7 @@ type Campaign = {
 const router = Router();
 const service = new CampaignService();
 let campaigns: Campaign[] = [];
+export const simpleCampaigns = new Map<string, Campaign>();
 const campaignsFilePath = path.resolve(__dirname, '../../data/campaigns.json');
 type SimplePledge = {
   pledgeId: string;
@@ -29,7 +30,6 @@ type SimplePledge = {
   timestamp: string;
 };
 const simplePledges = new Map<string, SimplePledge[]>();
-
 export function loadCampaignsFromDisk(): void {
   if (!fs.existsSync(campaignsFilePath)) {
     console.log(`Campañas no cargadas: archivo no encontrado en ${campaignsFilePath}`);
@@ -50,6 +50,10 @@ export function loadCampaignsFromDisk(): void {
     campaigns = parsed.filter(
       (campaign) => campaign && typeof campaign.id === 'string' && campaign.id.trim(),
     );
+    simpleCampaigns.clear();
+    campaigns.forEach((campaign) => {
+      simpleCampaigns.set(campaign.id, campaign);
+    });
     console.log(`Cargadas ${campaigns.length} campañas desde ${campaignsFilePath}`);
   } catch (err) {
     console.error('[campaigns] failed to load campaigns from disk', err);
@@ -173,6 +177,7 @@ const createCampaign: Parameters<typeof router.post>[1] = (req, res) => {
     };
 
     campaigns.push(campaign);
+    simpleCampaigns.set(campaign.id, campaign);
     saveCampaignsToDisk();
     return res.status(201).json({
       id: campaign.id,

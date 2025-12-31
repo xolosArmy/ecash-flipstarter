@@ -48,9 +48,4 @@ function sanitizeChronikBaseUrl(value: string, enforce: boolean): string {
   }
 }
 
-const rawChronikBaseUrl =
-  process.env.CHRONIK_BASE_URL ||
-  process.env.CHRONIK_BASE_URL ||
-  'https://chronik.e.cash';
-
-export const CHRONIK_BASE_URL = sanitizeChronikBaseUrl(rawChronikBaseUrl, USE_CHRONIK);
+export const CHRONIK_BASE_URL = 'https://chronik.xolosarmy.xyz';

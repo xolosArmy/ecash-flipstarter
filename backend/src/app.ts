@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import campaignsRouter, { loadCampaignsFromDisk } from './routes/campaigns.routes';
 import pledgeRouter from './routes/pledge.routes';
+import pledgeBuildRouter from './routes/pledge.build';
 import finalizeRouter from './routes/finalize.routes';
 import refundRouter from './routes/refund.routes';
 import broadcastRouter from './routes/broadcast.routes';
@@ -58,6 +59,7 @@ export function createApp() {
   // Rutas de la API
   app.use('/api', campaignsRouter);
   app.use('/api', pledgeRouter);
+  app.use('/api', pledgeBuildRouter);
   app.use('/api', finalizeRouter);
   app.use('/api', refundRouter);
   app.use('/api', broadcastRouter);
