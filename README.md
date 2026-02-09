@@ -20,6 +20,28 @@ Monorepo for a covenant-driven crowdfunding system on eCash. Contracts, backend 
    npm run dev
    ```
 
+## Dev
+Backend:
+```
+cd backend
+npm install
+npm run dev
+```
+(Escucha en http://127.0.0.1:3001)
+
+Frontend:
+```
+cd frontend
+npm install
+npm run dev
+```
+(Vite en http://localhost:5173 con proxy /api -> 127.0.0.1:3001)
+
+Test:
+```
+curl -i http://127.0.0.1:3001/api/campaigns
+```
+
 ## Backend (Chronik mode)
 ```
 cd backend
@@ -57,6 +79,8 @@ Frontend:
 **VITE_API_BASE_URL** = API base URL para el backend.
 **VITE_TONALLI_BASE_URL** = URL base de Tonalli para el deeplink `/#/external-sign`.
 **VITE_TONALLI_CALLBACK_URL** = URL opcional para sobrescribir el callback de Tonalli. Si no coincide con el origen actual en dev, se usa el origen en runtime.
+**VITE_WALLETCONNECT_PROJECT_ID** = Project ID de WalletConnect Cloud (requerido para WC v2).
+**VITE_APP_URL** = URL pública de la app (metadata de WalletConnect, ej. `http://localhost:5173`).
 
 ## Local test plan
 Backend:
@@ -104,6 +128,12 @@ Tonalli flow:
 Open pledge -> Open Tonalli to Sign & Broadcast -> return to /#/tonalli-callback?campaignId=<id>&txid=<txid>
 ```
 
+WalletConnect flow (nuevo):
+- Configura `VITE_WALLETCONNECT_PROJECT_ID` y `VITE_APP_URL`.
+- Conecta Tonalli con QR en la página de campaña.
+- Al donar, si hay sesión WC activa, se envía `ecash_signAndBroadcastTransaction` con `offerId`.
+- Tonalli deberá resolver `offerId` con `GET /api/walletconnect/offers/:offerId` (pendiente en wallet). Mientras tanto se usa fallback al flujo legacy.
+
 Build pledge tx (unsigned):
 ```
 curl -X POST http://localhost:3001/api/campaign/<id>/pledge \
@@ -112,6 +142,11 @@ curl -X POST http://localhost:3001/api/campaign/<id>/pledge \
     "contributorAddress": "ecash:qqf4h2w8c2u2e2c5aqevwsvy2kyx5kqglc2j8v9u7f",
     "amount": "1000"
   }'
+```
+
+Resolve WalletConnect offer (para Tonalli):
+```
+curl http://localhost:3001/api/walletconnect/offers/<offerId>
 ```
 
 Sign the unsigned hex with Tonalli or another tool, then broadcast:
