@@ -46,7 +46,7 @@ curl -i http://127.0.0.1:3001/api/campaigns
 ```
 cd backend
 export E_CASH_BACKEND=chronik
-export CHRONIK_BASE_URL=https://chronik.e.cash
+export CHRONIK_URL=https://chronik.e.cash
 npm run dev
 ```
 
@@ -68,7 +68,7 @@ npm run dev
 
 **ECASH_RPC_URL**, **ECASH_RPC_USER**, **ECASH_RPC_PASS** = Credenciales RPC del nodo eCash (usadas en modo `rpc`, y para funciones auxiliares en modo `chronik`).
 
-**CHRONIK_BASE_URL** = URL base del API Chronik cuando `E_CASH_BACKEND=chronik` (por defecto `https://chronik.e.cash`). Puede incluir `/xec` si tu reverse proxy lo requiere.
+**CHRONIK_URL** = URL base del API Chronik cuando `E_CASH_BACKEND=chronik` (por defecto `https://chronik.e.cash`). No uses esquema `wss://` aquí.
 
 **CORS_ORIGINS** = Orígenes permitidos para CORS en el backend. En producción, configura tu dominio (ej. `https://cartera.xolosarmy.xyz`), separado por comas.
 **CORS_ALLOW_DEV_LOCALHOST** = Permite orígenes locales (localhost/127.0.0.1) en desarrollo. Default: `true` en dev.
@@ -79,8 +79,9 @@ Frontend:
 **VITE_API_BASE_URL** = API base URL para el backend.
 **VITE_TONALLI_BASE_URL** = URL base de Tonalli para el deeplink `/#/external-sign`.
 **VITE_TONALLI_CALLBACK_URL** = URL opcional para sobrescribir el callback de Tonalli. Si no coincide con el origen actual en dev, se usa el origen en runtime.
-**VITE_WALLETCONNECT_PROJECT_ID** = Project ID de WalletConnect Cloud (requerido para WC v2).
-**VITE_APP_URL** = URL pública de la app (metadata de WalletConnect, ej. `http://localhost:5173`).
+**VITE_WC_PROJECT_ID** = Project ID de WalletConnect Cloud (requerido para WC v2).
+**VITE_WC_APP_NAME** = Nombre mostrado en metadata de WalletConnect.
+**VITE_WC_APP_URL** = URL pública de la app (metadata de WalletConnect, ej. `http://localhost:5174`).
 
 ## Local test plan
 Backend:
@@ -129,10 +130,10 @@ Open pledge -> Open Tonalli to Sign & Broadcast -> return to /#/tonalli-callback
 ```
 
 WalletConnect flow (nuevo):
-- Configura `VITE_WALLETCONNECT_PROJECT_ID` y `VITE_APP_URL`.
+- Configura `VITE_WC_PROJECT_ID`, `VITE_WC_APP_NAME` y `VITE_WC_APP_URL`.
 - Conecta Tonalli con QR en la página de campaña.
-- Al donar, si hay sesión WC activa, se envía `ecash_signAndBroadcastTransaction` con `offerId`.
-- Tonalli deberá resolver `offerId` con `GET /api/walletconnect/offers/:offerId` (pendiente en wallet). Mientras tanto se usa fallback al flujo legacy.
+- Al donar, se crea un offer con `POST /api/campaigns/:id/pledge/build` y se envía `ecash_signAndBroadcastTransaction` con `offerId`.
+- Tonalli debe tratar `offerId` como UUID opaco y resolverlo con `GET /api/walletconnect/offers/:offerId`.
 
 Build pledge tx (unsigned):
 ```

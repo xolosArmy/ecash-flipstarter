@@ -3,6 +3,8 @@ import { buildPledgeTx, type BuiltTx } from '../blockchain/txBuilder';
 import type { Utxo } from '../blockchain/types';
 import { campaignStore, covenantIndexInstance } from './CampaignService';
 
+const MIN_PLEDGE_FEE_SATS = 500n;
+
 export class PledgeService {
   /**
    * Build an unsigned pledge transaction for a contributor.
@@ -16,40 +18,103 @@ export class PledgeService {
     if (!covenant) throw new Error('campaign-not-found');
     const campaign = campaignStore.get(campaignId);
     if (!campaign) throw new Error('campaign-not-found');
-    if (!campaign.beneficiaryAddress) throw new Error('beneficiary-address-required');
+    const campaignStatus = (campaign as unknown as { status?: string }).status;
+    if (campaignStatus && campaignStatus !== 'active') {
+      throw new Error('campaign-not-active');
+    }
+    const campaignScriptPubKey = resolveCampaignScriptPubKey(campaign, covenant.scriptPubKey);
+    const beneficiaryAddress = typeof campaign.beneficiaryAddress === 'string'
+      ? campaign.beneficiaryAddress
+      : undefined;
+    if (!campaignScriptPubKey && !beneficiaryAddress) {
+      throw new Error('beneficiary-address-required');
+    }
 
     const contributorUtxos = await getUtxosForAddress(contributorAddress);
-    const selected = selectUtxos(contributorUtxos, amount);
-
-    const built = await buildPledgeTx({
-      contributorUtxos: selected,
-      covenantUtxo: {
-        txid: covenant.txid,
-        vout: covenant.vout,
-        value: covenant.value,
-        scriptPubKey: covenant.scriptPubKey,
-      },
+    // Only spend pure XEC UTXOs; token-bearing UTXOs must be excluded.
+    const nonTokenUtxos = contributorUtxos.filter((utxo) => !hasToken(utxo));
+    const built = await buildWithSelectedUtxos({
+      utxos: nonTokenUtxos,
       amount,
-      covenantScriptHash: covenant.scriptHash,
       contributorAddress,
-      beneficiaryAddress: campaign.beneficiaryAddress,
+      covenant,
+      beneficiaryAddress,
+      campaignScriptPubKey,
     });
 
     // Optimistic update; real deployment should update after broadcast/confirmation.
-    const nextValue = covenant.value + amount;
+    const nextValue = campaignScriptPubKey ? covenant.value + amount : covenant.value;
     covenantIndexInstance.updateValue(campaignId, nextValue);
     return { ...built, nextCovenantValue: nextValue };
   }
 }
 
-function selectUtxos(utxos: Utxo[], target: bigint): Utxo[] {
+async function buildWithSelectedUtxos(args: {
+  utxos: Utxo[];
+  amount: bigint;
+  contributorAddress: string;
+  covenant: {
+    txid: string;
+    vout: number;
+    value: bigint;
+    scriptPubKey: string;
+    scriptHash: string;
+  };
+  beneficiaryAddress?: string;
+  campaignScriptPubKey?: string;
+}): Promise<BuiltTx> {
+  const feeTarget = args.amount + MIN_PLEDGE_FEE_SATS;
   let total = 0n;
   const selected: Utxo[] = [];
-  for (const utxo of utxos) {
+
+  for (const utxo of args.utxos) {
     selected.push(utxo);
     total += utxo.value;
-    if (total >= target) break;
+    if (total < feeTarget) {
+      continue;
+    }
+    try {
+      return await buildPledgeTx({
+        contributorUtxos: selected,
+        covenantUtxo: {
+          txid: args.covenant.txid,
+          vout: args.covenant.vout,
+          value: args.covenant.value,
+          scriptPubKey: args.covenant.scriptPubKey,
+        },
+        amount: args.amount,
+        covenantScriptHash: args.covenant.scriptHash,
+        contributorAddress: args.contributorAddress,
+        beneficiaryAddress: args.beneficiaryAddress,
+        campaignScriptPubKey: args.campaignScriptPubKey,
+      });
+    } catch (err) {
+      const message = (err as Error).message;
+      if (message === 'insufficient-funds') {
+        continue;
+      }
+      throw err;
+    }
   }
-  if (total < target) throw new Error('insufficient-funds');
-  return selected;
+  throw new Error('insufficient-funds');
+}
+
+function resolveCampaignScriptPubKey(campaign: unknown, covenantScriptPubKey?: string): string | undefined {
+  const maybeRecord = campaign as Record<string, unknown>;
+  const candidates: unknown[] = [
+    maybeRecord.covenantScriptPubKey,
+    maybeRecord.covenantScript,
+    maybeRecord.covenant,
+    covenantScriptPubKey,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return undefined;
+}
+
+function hasToken(utxo: Utxo): boolean {
+  return Boolean(utxo.token || utxo.slpToken || utxo.tokenStatus || utxo.plugins?.token);
 }

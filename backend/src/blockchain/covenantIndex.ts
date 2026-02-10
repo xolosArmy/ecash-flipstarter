@@ -27,4 +27,8 @@ export class CovenantIndex {
       this.byCampaign.set(campaignId, { ...ref, value: newValue });
     }
   }
+
+  deleteCampaign(campaignId: string): void {
+    this.byCampaign.delete(campaignId);
+  }
 }

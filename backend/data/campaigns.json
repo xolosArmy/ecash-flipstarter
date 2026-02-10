@@ -4,19 +4,93 @@
     "name": "Prueba persistencia",
     "description": "Esta debe sobrevivir reinicios",
     "recipientAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
+    "beneficiaryAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
     "goal": 10000,
-    "expiresAt": "2026-12-31T00:00:00.000Z"
+    "expiresAt": "2026-12-31T00:00:00.000Z",
+    "createdAt": "2026-02-10T02:21:36.818Z",
+    "status": "active",
+    "activation": {
+      "feeSats": "80000000",
+      "feeTxid": null,
+      "feePaidAt": null,
+      "payerAddress": null,
+      "wcOfferId": null
+    },
+    "payout": {
+      "wcOfferId": null,
+      "txid": null,
+      "paidAt": null
+    }
   },
   {
     "id": "campaign-1767124661420",
     "name": "Campaña con ubicación",
     "description": "Ubicada en Tijuana",
     "recipientAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
+    "beneficiaryAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
     "goal": 20000,
     "expiresAt": "2026-12-31T00:00:00.000Z",
     "location": {
       "latitude": 32.5149,
       "longitude": -117.0382
+    },
+    "createdAt": "2026-02-10T02:21:36.818Z",
+    "status": "active",
+    "activation": {
+      "feeSats": "80000000",
+      "feeTxid": null,
+      "feePaidAt": null,
+      "payerAddress": null,
+      "wcOfferId": null
+    },
+    "payout": {
+      "wcOfferId": null,
+      "txid": null,
+      "paidAt": null
+    }
+  },
+  {
+    "id": "campaign-1770690317637",
+    "name": "Prueba",
+    "recipientAddress": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk",
+    "beneficiaryAddress": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk",
+    "goal": 10000,
+    "expiresAt": "2026-02-10T18:00:00.000Z",
+    "createdAt": "2026-02-10T02:25:17.637Z",
+    "status": "active",
+    "activation": {
+      "feeSats": "80000000",
+      "feeTxid": "fb58e8f5466ac8405c6c1c1f4c6d37d28b3b1b361fc360fbe223d516e11ac2ce",
+      "feePaidAt": "2026-02-10T02:33:06.603Z",
+      "payerAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
+      "wcOfferId": "c6722526-80c1-4d33-977f-fc5ab6882fdd"
+    },
+    "payout": {
+      "wcOfferId": null,
+      "txid": null,
+      "paidAt": null
+    }
+  },
+  {
+    "id": "campaign-1770741953491",
+    "name": "Prueba campaña guiada",
+    "recipientAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
+    "beneficiaryAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
+    "goal": 10000,
+    "expiresAt": "2026-02-11T00:00:00.000Z",
+    "createdAt": "2026-02-10T16:45:53.491Z",
+    "status": "funded",
+    "activation": {
+      "feeSats": "80000000",
+      "feeTxid": "21b34311f1927ca0ecbe22d4c7d2d771661c47b74a1e46cd60ec26f80b23a8c4",
+      "feePaidAt": "2026-02-10T16:46:51.861Z",
+      "payerAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
+      "wcOfferId": "5cbd6b4a-e5cf-430f-9065-9c47a6512225"
+    },
+    "payout": {
+      "wcOfferId": null,
+      "txid": null,
+      "paidAt": null
     }
   }
 ]

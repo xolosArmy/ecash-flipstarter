@@ -9,10 +9,25 @@ export interface CovenantRef {
 export interface CampaignSummary {
   id: string;
   name: string;
-  goal: string;
-  expirationTime: string;
+  goal: number;
+  expiresAt: string;
+  createdAt?: string;
+  status?: 'draft' | 'pending_fee' | 'expired' | 'funded' | 'active' | 'paid_out';
   beneficiaryAddress?: string;
-  progress?: number;
+  description?: string;
+  location?: string;
+  activation?: {
+    feeSats: string;
+    feeTxid?: string | null;
+    feePaidAt?: string | null;
+    payerAddress?: string | null;
+    wcOfferId?: string | null;
+  };
+  payout?: {
+    wcOfferId?: string | null;
+    txid?: string | null;
+    paidAt?: string | null;
+  };
 }
 
 export interface CampaignDetail extends CampaignSummary {
@@ -40,4 +55,11 @@ export interface BuiltTxResponse {
   unsignedTxHex?: string;
   nextCovenantValue?: string;
   fee?: string;
+  wcOfferId?: string;
+  offerId?: string;
+  pledgeId?: string;
+  amount?: string;
+  contributorAddress?: string;
+  campaignId?: string;
+  expiresAt?: number;
 }

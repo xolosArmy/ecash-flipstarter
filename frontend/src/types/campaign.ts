@@ -16,13 +16,32 @@ export interface CampaignSummary {
   name: string;
   goal: number;
   expiresAt: string;
+  createdAt?: string;
+  beneficiaryAddress?: string;
+  description?: string;
+  activation?: CampaignActivation;
+  payout?: CampaignPayout;
   totalPledged: number;
   pledgeCount: number;
-  status: 'expired' | 'funded' | 'active';
-  location?: CampaignLocation;
+  status: 'draft' | 'pending_fee' | 'expired' | 'funded' | 'active' | 'paid_out';
+  location?: CampaignLocation | string;
 }
 
 export interface CampaignLocation {
   latitude: number;
   longitude: number;
+}
+
+export interface CampaignActivation {
+  feeSats: string;
+  wcOfferId?: string | null;
+  feeTxid?: string | null;
+  feePaidAt?: string | null;
+  payerAddress?: string | null;
+}
+
+export interface CampaignPayout {
+  wcOfferId?: string | null;
+  txid?: string | null;
+  paidAt?: string | null;
 }

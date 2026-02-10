@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { fetchCampaigns, fetchCampaignSummary } from '../api/client';
+import { Link, useNavigate } from 'react-router-dom';
+import { createCampaign, fetchCampaigns, fetchCampaignSummary } from '../api/client';
 import type { CampaignSummary as CampaignSummaryResponse } from '../types/campaign';
 import { CampaignCard } from '../components/CampaignCard';
+import { WalletConnectBar } from '../components/WalletConnectBar';
 
 export const Home: React.FC = () => {
   const [campaigns, setCampaigns] = useState<CampaignSummaryResponse[]>([]);
@@ -14,7 +15,7 @@ export const Home: React.FC = () => {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [recipientAddress, setRecipientAddress] = useState('');
+  const [beneficiaryAddress, setBeneficiaryAddress] = useState('');
   const [goal, setGoal] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
   const [formMessage, setFormMessage] = useState<string | null>(null);
@@ -37,6 +38,14 @@ export const Home: React.FC = () => {
     loadCampaigns();
   }, [loadCampaigns]);
 
+  useEffect(() => {
+    const onCampaignRefresh = () => loadCampaigns();
+    window.addEventListener('campaigns:refresh', onCampaignRefresh);
+    return () => {
+      window.removeEventListener('campaigns:refresh', onCampaignRefresh);
+    };
+  }, [loadCampaigns]);
+
   const openCampaign = () => {
     const trimmed = campaignId.trim();
     if (!trimmed) return;
@@ -46,7 +55,7 @@ export const Home: React.FC = () => {
   const resetForm = () => {
     setName('');
     setDescription('');
-    setRecipientAddress('');
+    setBeneficiaryAddress('');
     setGoal('');
     setExpiresAt('');
   };
@@ -57,11 +66,11 @@ export const Home: React.FC = () => {
 
     const trimmedName = name.trim();
     const trimmedDescription = description.trim();
-    const trimmedRecipientAddress = recipientAddress.trim();
+    const trimmedBeneficiaryAddress = beneficiaryAddress.trim();
     const numericGoal = Number(goal);
     const trimmedExpiresAt = expiresAt.trim();
 
-    if (!trimmedName || !trimmedDescription || !trimmedRecipientAddress || !trimmedExpiresAt) {
+    if (!trimmedName || !trimmedDescription || !trimmedBeneficiaryAddress || !trimmedExpiresAt) {
       setFormMessage('Completa todos los campos.');
       return;
     }
@@ -79,24 +88,13 @@ export const Home: React.FC = () => {
     }
 
     try {
-      const res = await fetch('/api/campaigns', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: trimmedName,
-          description: trimmedDescription,
-          recipientAddress: trimmedRecipientAddress,
-          goal: numericGoal,
-          expiresAt: expiresAtIso,
-        }),
+      await createCampaign({
+        name: trimmedName,
+        description: trimmedDescription,
+        beneficiaryAddress: trimmedBeneficiaryAddress,
+        goal: Math.trunc(numericGoal),
+        expiresAt: expiresAtIso,
       });
-
-      if (!res.ok) {
-        const errorPayload = await res.json().catch(() => ({}));
-        const message = errorPayload.error || `Error ${res.status}`;
-        setFormMessage(message);
-        return;
-      }
 
       setFormMessage('Campaña creada correctamente.');
       resetForm();
@@ -126,6 +124,26 @@ export const Home: React.FC = () => {
   return (
     <div>
       <h2>Flipstarter 2.0 Campaigns</h2>
+      <WalletConnectBar />
+      <div style={{ marginBottom: 16 }}>
+        <Link
+          to="/campaigns/create"
+          style={{
+            display: 'inline-block',
+            padding: '12px 16px',
+            borderRadius: 8,
+            background: '#005bbb',
+            color: '#fff',
+            fontWeight: 600,
+            textDecoration: 'none',
+          }}
+        >
+          Crear campaña (guiado)
+        </Link>
+        <p style={{ marginTop: 8, marginBottom: 0 }}>
+          <small>Solo cobramos 1% si la campaña se fondea completamente.</small>
+        </p>
+      </div>
       <div style={{ marginBottom: 16 }}>
         <button type="button" onClick={loadCampaigns} disabled={loading}>
           {loading ? 'Loading...' : 'Refresh'}
@@ -175,9 +193,9 @@ export const Home: React.FC = () => {
             />
             <input
               type="text"
-              value={recipientAddress}
-              onChange={(event) => setRecipientAddress(event.target.value)}
-              placeholder="Dirección eCash"
+              value={beneficiaryAddress}
+              onChange={(event) => setBeneficiaryAddress(event.target.value)}
+              placeholder="Beneficiary Address (ecash:...)"
             />
             <input
               type="number"

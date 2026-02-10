@@ -15,5 +15,6 @@ export function serializeBuiltTx<T extends BuiltTx>(built: T) {
     ...(typeof (built as any).nextCovenantValue !== 'undefined'
       ? { nextCovenantValue: (built as any).nextCovenantValue.toString() }
       : {}),
+    ...(typeof (built as any).fee !== 'undefined' ? { fee: (built as any).fee.toString() } : {}),
   };
 }

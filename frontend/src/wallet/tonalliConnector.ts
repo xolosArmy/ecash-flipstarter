@@ -52,6 +52,7 @@ function getEnv() {
   return (import.meta as any).env || {};
 }
 
+// Legacy external-sign flow (fallback when WalletConnect is unavailable or fails).
 export async function signAndBroadcastWithTonalli(
   req: Omit<TonalliSignRequest, 'type' | 'requestId' | 'returnOrigin' | 'createdAt'> & {
     unsignedTxHex: string;

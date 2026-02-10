@@ -3,6 +3,8 @@ import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { Home } from './pages/Home';
 import { CampaignDetail } from './pages/CampaignDetail';
 import { TonalliCallback } from './pages/TonalliCallback';
+import { CreateCampaignWizard } from './pages/CreateCampaignWizard';
+import { WalletConnectProvider } from './wallet/useWalletConnect';
 
 const AppRoutes: React.FC = () => {
   const navigate = useNavigate();
@@ -18,6 +20,8 @@ const AppRoutes: React.FC = () => {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
+      <Route path="/campaigns/new" element={<CreateCampaignWizard />} />
+      <Route path="/campaigns/create" element={<CreateCampaignWizard />} />
       <Route path="/campaigns/:id" element={<CampaignDetail />} />
       <Route path="/tonalli-callback" element={<TonalliCallback />} />
     </Routes>
@@ -27,9 +31,11 @@ const AppRoutes: React.FC = () => {
 export const App: React.FC = () => {
   return (
     <BrowserRouter>
-      <div style={{ maxWidth: 800, margin: '0 auto', padding: 16 }}>
-        <AppRoutes />
-      </div>
+      <WalletConnectProvider>
+        <div style={{ maxWidth: 800, margin: '0 auto', padding: 16 }}>
+          <AppRoutes />
+        </div>
+      </WalletConnectProvider>
     </BrowserRouter>
   );
 };

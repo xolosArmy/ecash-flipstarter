@@ -3,6 +3,13 @@ export interface Utxo {
   vout: number;
   value: bigint; // satoshis
   scriptPubKey: string; // hex locking script
+  token?: unknown;
+  slpToken?: unknown;
+  tokenStatus?: unknown;
+  plugins?: {
+    token?: unknown;
+    [key: string]: unknown;
+  };
 }
 
 export interface UnsignedTx {

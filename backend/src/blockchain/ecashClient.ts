@@ -1,5 +1,5 @@
 import {
-  CHRONIK_BASE_URL,
+  CHRONIK_URL,
   USE_CHRONIK,
   USE_MOCK,
   ecashConfig,
@@ -13,7 +13,7 @@ const rpcUrl = ecashConfig.rpcUrl;
 const rpcUser = ecashConfig.rpcUsername;
 const rpcPass = ecashConfig.rpcPassword;
 
-const effectiveChronikBaseUrl = CHRONIK_BASE_URL;
+const effectiveChronikBaseUrl = CHRONIK_URL;
 const chronik = new ChronikClient([effectiveChronikBaseUrl]);
 
 export function getEffectiveChronikBaseUrl(): string {
@@ -102,12 +102,19 @@ async function getUtxosForAddressViaChronik(address: string): Promise<Utxo[]> {
     `address utxos for ${normalizedAddress}`,
     () => chronik.address(normalizedAddress).utxos()
   );
-  return scriptUtxos.utxos.map((u) => ({
-    txid: u.outpoint.txid,
-    vout: u.outpoint.outIdx,
-    value: u.sats,
-    scriptPubKey: scriptUtxos.outputScript,
-  }));
+  return scriptUtxos.utxos.map((u) => {
+    const chronikUtxo = u as unknown as Record<string, unknown>;
+    return {
+      txid: u.outpoint.txid,
+      vout: u.outpoint.outIdx,
+      value: u.sats,
+      scriptPubKey: scriptUtxos.outputScript,
+      token: chronikUtxo.token,
+      slpToken: chronikUtxo.slpToken,
+      tokenStatus: chronikUtxo.tokenStatus,
+      plugins: chronikUtxo.plugins as { token?: unknown; [key: string]: unknown } | undefined,
+    };
+  });
 }
 
 async function getUtxosForScriptViaChronik(
@@ -118,12 +125,19 @@ async function getUtxosForScriptViaChronik(
     `script utxos for ${scriptType}:${scriptHash}`,
     () => chronik.script(scriptType, scriptHash).utxos()
   );
-  return scriptUtxos.utxos.map((u) => ({
-    txid: u.outpoint.txid,
-    vout: u.outpoint.outIdx,
-    value: u.sats,
-    scriptPubKey: scriptUtxos.outputScript,
-  }));
+  return scriptUtxos.utxos.map((u) => {
+    const chronikUtxo = u as unknown as Record<string, unknown>;
+    return {
+      txid: u.outpoint.txid,
+      vout: u.outpoint.outIdx,
+      value: u.sats,
+      scriptPubKey: scriptUtxos.outputScript,
+      token: chronikUtxo.token,
+      slpToken: chronikUtxo.slpToken,
+      tokenStatus: chronikUtxo.tokenStatus,
+      plugins: chronikUtxo.plugins as { token?: unknown; [key: string]: unknown } | undefined,
+    };
+  });
 }
 
 async function broadcastRawTxViaChronik(rawTxHex: string): Promise<BroadcastResult> {

@@ -48,4 +48,11 @@ function sanitizeChronikBaseUrl(value: string, enforce: boolean): string {
   }
 }
 
-export const CHRONIK_BASE_URL = 'https://chronik.xolosarmy.xyz';
+const chronikUrlFromEnv =
+  process.env.CHRONIK_URL ||
+  process.env.CHRONIK_BASE_URL ||
+  'https://chronik.xolosarmy.xyz';
+
+export const CHRONIK_URL = sanitizeChronikBaseUrl(chronikUrlFromEnv, false);
+// Backward-compatible alias for existing references.
+export const CHRONIK_BASE_URL = CHRONIK_URL;

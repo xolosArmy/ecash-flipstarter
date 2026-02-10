@@ -9,7 +9,8 @@ export interface PledgeTxParams {
   amount: bigint;
   covenantScriptHash: string;
   contributorAddress: string;
-  beneficiaryAddress: string;
+  beneficiaryAddress?: string;
+  campaignScriptPubKey?: string;
 }
 
 export interface FinalizeTxParams {
@@ -26,33 +27,183 @@ export interface RefundTxParams {
 export interface BuiltTx {
   unsignedTx: UnsignedTx;
   rawHex: string;
+  fee?: bigint;
 }
 
-export async function buildPledgeTx(params: PledgeTxParams): Promise<BuiltTx> {
-  const totalContributor = params.contributorUtxos.reduce((acc, u) => acc + u.value, 0n);
-  const isGenesis =
-    !params.covenantUtxo.txid ||
-    /^0+$/.test(params.covenantUtxo.txid) ||
-    params.covenantUtxo.value === 0n ||
-    params.covenantUtxo.scriptPubKey === '51';
-  const totalInput = totalContributor + (isGenesis ? 0n : params.covenantUtxo.value);
-  const newCovenantValue = (isGenesis ? 0n : params.covenantUtxo.value) + params.amount;
-  if (totalInput < newCovenantValue) throw new Error('insufficient-funds-for-pledge');
+export interface SimplePaymentTxParams {
+  contributorUtxos: Utxo[];
+  amount: bigint;
+  contributorAddress: string;
+  beneficiaryAddress: string;
+  fixedFee?: bigint;
+  feeRateSatsPerByte?: bigint;
+  dustLimit?: bigint;
+}
 
-  const covenantScript = isGenesis
-    ? await addressToScriptPubKey(params.beneficiaryAddress)
-    : params.covenantUtxo.scriptPubKey;
-  const change = totalInput - newCovenantValue;
-  const changeScript = change > 0n ? await addressToScriptPubKey(params.contributorAddress) : '';
+export interface PayoutTxParams {
+  campaignUtxos: Utxo[];
+  totalRaised: bigint;
+  beneficiaryAddress: string;
+  treasuryAddress: string;
+  fixedFee?: bigint;
+  dustLimit?: bigint;
+}
+
+const MIN_ABSOLUTE_FEE = 500n;
+const MIN_RELAY_FEE_PER_KB = 1000n;
+const DEFAULT_SIMPLE_PAYMENT_FEE_RATE_SATS_PER_BYTE = 2n;
+
+export async function buildPledgeTx(params: PledgeTxParams): Promise<BuiltTx> {
+  // Guard against accidental token/baton inputs for pledge construction.
+  if (params.contributorUtxos.some(hasTokenData)) {
+    throw new Error('token-utxo-not-supported');
+  }
+
+  const totalInput = params.contributorUtxos.reduce((acc, u) => acc + u.value, 0n);
+  const campaignScript = await resolveCampaignScriptPubKey(params);
+  const outputs: UnsignedTx['outputs'] = [{ value: params.amount, scriptPubKey: campaignScript }];
+
+  const feeNoChange = calculateMinRequiredFee(params.contributorUtxos, outputs);
+  if (totalInput < params.amount + feeNoChange) {
+    throw new Error('insufficient-funds');
+  }
+
+  const changeScript = await addressToScriptPubKey(params.contributorAddress);
+  let fee = feeNoChange;
+  let change = totalInput - params.amount - feeNoChange;
+  if (change > 0n) {
+    const feeWithChange = calculateMinRequiredFee(params.contributorUtxos, [
+      ...outputs,
+      { value: 1n, scriptPubKey: changeScript },
+    ]);
+    const changeWithFee = totalInput - params.amount - feeWithChange;
+    if (changeWithFee > 0n) {
+      fee = feeWithChange;
+      change = changeWithFee;
+    } else {
+      fee = totalInput - params.amount;
+      change = 0n;
+    }
+  }
 
   const unsigned: UnsignedTx = {
-    inputs: isGenesis ? [...params.contributorUtxos] : [...params.contributorUtxos, params.covenantUtxo],
+    inputs: [...params.contributorUtxos],
     outputs: [
-      { value: newCovenantValue, scriptPubKey: covenantScript },
+      ...outputs,
       ...(change > 0n ? [{ value: change, scriptPubKey: changeScript }] : []),
     ],
   };
-  return { unsignedTx: unsigned, rawHex: serializeUnsignedTx(unsigned) };
+  return { unsignedTx: unsigned, rawHex: serializeUnsignedTx(unsigned), fee };
+}
+
+export async function buildSimplePaymentTx(
+  params: SimplePaymentTxParams
+): Promise<BuiltTx & { fee: bigint }> {
+  if (params.contributorUtxos.some(hasTokenData)) {
+    throw new Error('token-utxo-not-supported');
+  }
+  const dustLimit = params.dustLimit ?? 546n;
+  const totalInput = params.contributorUtxos.reduce((acc, utxo) => acc + utxo.value, 0n);
+  const useDynamicFee = params.feeRateSatsPerByte !== undefined;
+
+  let feePaid: bigint;
+  let change: bigint;
+  if (useDynamicFee) {
+    const feeRate = params.feeRateSatsPerByte ?? DEFAULT_SIMPLE_PAYMENT_FEE_RATE_SATS_PER_BYTE;
+    if (feeRate <= 0n) {
+      throw new Error('invalid-fee-rate');
+    }
+    const inputCount = params.contributorUtxos.length;
+    feePaid = estimateSimplePaymentFee(inputCount, 2, feeRate);
+    change = totalInput - params.amount - feePaid;
+
+    // If 2 outputs are not affordable, fall back to 1 output and consume remainder as additional fee.
+    if (change < 0n) {
+      const oneOutputFee = estimateSimplePaymentFee(inputCount, 1, feeRate);
+      const remainder = totalInput - params.amount - oneOutputFee;
+      if (remainder < 0n) {
+        throw new Error(
+          `insufficient-funds-for-fee: need ${params.amount + oneOutputFee} sats, have ${totalInput} sats`
+        );
+      }
+      feePaid = oneOutputFee + remainder;
+      change = 0n;
+    }
+  } else {
+    const fixedFee = params.fixedFee ?? 500n;
+    const required = params.amount + fixedFee;
+    if (totalInput < required) throw new Error('insufficient-funds');
+
+    change = totalInput - required;
+    feePaid = fixedFee;
+  }
+
+  if (change > 0n && change < dustLimit) {
+    feePaid += change;
+    change = 0n;
+  }
+
+  const beneficiaryScript = await addressToScriptPubKey(params.beneficiaryAddress);
+  const changeScript = change > 0n ? await addressToScriptPubKey(params.contributorAddress) : '';
+  const unsigned: UnsignedTx = {
+    inputs: [...params.contributorUtxos],
+    outputs: [
+      { value: params.amount, scriptPubKey: beneficiaryScript },
+      ...(change > 0n ? [{ value: change, scriptPubKey: changeScript }] : []),
+    ],
+  };
+  return { unsignedTx: unsigned, rawHex: serializeUnsignedTx(unsigned), fee: feePaid };
+}
+
+export async function buildPayoutTx(
+  params: PayoutTxParams
+): Promise<BuiltTx & { fee: bigint; treasuryCut: bigint; beneficiaryAmount: bigint }> {
+  if (params.campaignUtxos.some(hasTokenData)) {
+    throw new Error('token-utxo-not-supported');
+  }
+  if (params.totalRaised <= 0n) {
+    throw new Error('campaign-funds-empty');
+  }
+
+  const fixedFee = params.fixedFee ?? 500n;
+  const dustLimit = params.dustLimit ?? 546n;
+  const totalInput = params.campaignUtxos.reduce((acc, utxo) => acc + utxo.value, 0n);
+  const required = params.totalRaised + fixedFee;
+  if (totalInput < required) {
+    throw new Error('insufficient-funds');
+  }
+
+  let change = totalInput - required;
+  let feePaid = fixedFee;
+  if (change > 0n && change < dustLimit) {
+    feePaid += change;
+    change = 0n;
+  }
+
+  const treasuryCut = params.totalRaised / 100n;
+  const beneficiaryAmount = params.totalRaised - treasuryCut;
+  const beneficiaryScript = await addressToScriptPubKey(params.beneficiaryAddress);
+  const treasuryScript = await addressToScriptPubKey(params.treasuryAddress);
+  const changeScriptPubKey =
+    change > 0n ? params.campaignUtxos[0]?.scriptPubKey || '' : '';
+
+  const unsigned: UnsignedTx = {
+    inputs: [...params.campaignUtxos],
+    outputs: [
+      { value: beneficiaryAmount, scriptPubKey: beneficiaryScript },
+      ...(treasuryCut > 0n ? [{ value: treasuryCut, scriptPubKey: treasuryScript }] : []),
+      ...(change > 0n && changeScriptPubKey
+        ? [{ value: change, scriptPubKey: changeScriptPubKey }]
+        : []),
+    ],
+  };
+  return {
+    unsignedTx: unsigned,
+    rawHex: serializeUnsignedTx(unsigned),
+    fee: feePaid,
+    treasuryCut,
+    beneficiaryAmount,
+  };
 }
 
 export async function buildFinalizeTx(params: FinalizeTxParams): Promise<BuiltTx> {
@@ -145,4 +296,74 @@ function hexToBytes(hex: string): number[] {
     bytes.push(parseInt(clean.slice(i, i + 2), 16));
   }
   return bytes;
+}
+
+function hasTokenData(utxo: Utxo): boolean {
+  return Boolean(utxo.token || utxo.slpToken || utxo.tokenStatus || utxo.plugins?.token);
+}
+
+async function resolveCampaignScriptPubKey(params: PledgeTxParams): Promise<string> {
+  const scriptCandidate = params.campaignScriptPubKey?.trim();
+  if (scriptCandidate) {
+    return scriptCandidate;
+  }
+  const beneficiaryAddress = params.beneficiaryAddress?.trim();
+  if (!beneficiaryAddress) {
+    throw new Error('beneficiary-address-required');
+  }
+  return addressToScriptPubKey(beneficiaryAddress);
+}
+
+function calculateMinRequiredFee(inputs: Utxo[], outputs: UnsignedTx['outputs']): bigint {
+  const estimatedSize = estimateSignedTxSize(inputs, outputs);
+  const relayMinFee = (estimatedSize * MIN_RELAY_FEE_PER_KB + 999n) / 1000n;
+  return relayMinFee > MIN_ABSOLUTE_FEE ? relayMinFee : MIN_ABSOLUTE_FEE;
+}
+
+function estimateSignedTxSize(inputs: Utxo[], outputs: UnsignedTx['outputs']): bigint {
+  let size = 4n + 4n;
+  size += BigInt(varIntSize(inputs.length));
+  for (const input of inputs) {
+    const scriptSigSize = estimateScriptSigSize(input.scriptPubKey);
+    size += 36n;
+    size += BigInt(varIntSize(scriptSigSize));
+    size += BigInt(scriptSigSize);
+    size += 4n;
+  }
+  size += BigInt(varIntSize(outputs.length));
+  for (const output of outputs) {
+    const scriptSize = output.scriptPubKey.length / 2;
+    size += 8n;
+    size += BigInt(varIntSize(scriptSize));
+    size += BigInt(scriptSize);
+  }
+  return size;
+}
+
+function estimateScriptSigSize(scriptPubKey: string): number {
+  if (/^76a914[0-9a-f]{40}88ac$/i.test(scriptPubKey)) {
+    return 107;
+  }
+  return 140;
+}
+
+function varIntSize(value: number): number {
+  if (value < 0xfd) return 1;
+  if (value <= 0xffff) return 3;
+  if (value <= 0xffffffff) return 5;
+  return 9;
+}
+
+function estimateSimplePaymentFee(
+  inputCount: number,
+  outputCount: number,
+  feeRateSatsPerByte: bigint
+): bigint {
+  const estimatedSize = BigInt(inputCount * 148 + outputCount * 34 + 10);
+  const relayMinFee = (estimatedSize * MIN_RELAY_FEE_PER_KB + 999n) / 1000n;
+  const sizeBasedFee = estimatedSize * feeRateSatsPerByte;
+  if (sizeBasedFee < MIN_ABSOLUTE_FEE) {
+    return MIN_ABSOLUTE_FEE > relayMinFee ? MIN_ABSOLUTE_FEE : relayMinFee;
+  }
+  return sizeBasedFee > relayMinFee ? sizeBasedFee : relayMinFee;
 }

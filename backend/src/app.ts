@@ -6,6 +6,7 @@ import pledgeBuildRouter from './routes/pledge.build';
 import finalizeRouter from './routes/finalize.routes';
 import refundRouter from './routes/refund.routes';
 import broadcastRouter from './routes/broadcast.routes';
+import walletConnectRouter from './routes/walletconnect.routes';
 import { ECASH_BACKEND, USE_CHRONIK } from './config/ecash';
 import {
   getBlockchainInfo,
@@ -63,11 +64,12 @@ export function createApp() {
   app.use('/api', finalizeRouter);
   app.use('/api', refundRouter);
   app.use('/api', broadcastRouter);
+  app.use('/api', walletConnectRouter);
 
   return app;
 }
 
-export async function healthHandler(_req: express.Request, res: express.Response) {
+export async function healthHandler(_req: any, res: any) {
   const timestamp = new Date().toISOString();
   try {
     if (USE_CHRONIK) {
