@@ -11,7 +11,13 @@ import type { CampaignSummary } from '../types/campaign';
 import { CopyToClipboardButton } from '../components/CopyToClipboardButton';
 import { WalletConnectBar } from '../components/WalletConnectBar';
 import { WalletConnectModal } from '../components/WalletConnectModal';
+import { SecurityBanner } from '../components/SecurityBanner';
+import { ExplorerLink } from '../components/ExplorerLink';
+import { AmountDisplay } from '../components/AmountDisplay';
+import { StatusBadge } from '../components/StatusBadge';
 import { useWalletConnect } from '../wallet/useWalletConnect';
+import { useToast } from '../components/ToastProvider';
+import { satsFromXecInput } from '../utils/amount';
 
 type WizardStep = 1 | 2 | 3;
 
@@ -77,6 +83,7 @@ export const CreateCampaignWizard: React.FC = () => {
   const [message, setMessage] = useState<string | null>(null);
 
   const { signClient, topic, connected, connect, requestSignAndBroadcast, addresses } = useWalletConnect();
+  const { showToast } = useToast();
 
   const shareUrl = useMemo(() => {
     if (!campaignId) return '';
@@ -147,7 +154,8 @@ export const CreateCampaignWizard: React.FC = () => {
     setMessage(null);
 
     const trimmedName = name.trim();
-    const numericGoal = Number(goal);
+    const goalSats = satsFromXecInput(goal);
+    const numericGoal = Number(goalSats);
     const trimmedBeneficiary = beneficiaryAddress.trim();
     const trimmedExpiresAt = expiresAt.trim();
     if (trimmedName.length < 3) {
@@ -155,7 +163,7 @@ export const CreateCampaignWizard: React.FC = () => {
       return;
     }
     if (!Number.isInteger(numericGoal) || numericGoal <= 0) {
-      setError('La meta debe ser un entero positivo en sats.');
+      setError('La meta debe ser mayor que cero.');
       return;
     }
     if (!trimmedExpiresAt) {
@@ -196,6 +204,9 @@ export const CreateCampaignWizard: React.FC = () => {
       setTxidInput(txid);
       setWizardStep(summary.status === 'active' ? 3 : 2);
       setMessage(summary.status === 'active' ? 'Campaña activada ✅' : 'Activación confirmada.');
+      if (summary.status === 'active') {
+        showToast('Campaña activada');
+      }
       window.dispatchEvent(
         new CustomEvent('campaign:summary:refresh', {
           detail: { campaignId, summary },
@@ -240,6 +251,7 @@ export const CreateCampaignWizard: React.FC = () => {
 
       setMessage('Construyendo transacción de activación...');
       const built = await buildCampaignActivationTx(campaignId, activeAddress);
+      localStorage.setItem(`tonalli:activationOfferId:${campaignId}`, built.wcOfferId);
       const chainId = getChainIdFromSession(activeSession);
 
       setMessage('Activar campaña: revisa y firma en Tonalli.');
@@ -267,29 +279,34 @@ export const CreateCampaignWizard: React.FC = () => {
     await confirmActivation(txid, payerAddress.trim() || undefined);
   };
 
-  const statusLabel = campaign?.status === 'active'
-    ? 'Activo'
-    : campaign?.status === 'pending_fee'
-      ? 'Pendiente de activación'
-      : campaign?.status === 'draft'
-        ? 'Borrador'
-        : campaign?.status === 'funded'
-          ? 'Fondeada'
-          : campaign?.status === 'paid_out'
-            ? 'Pagada'
-            : 'Expirada';
   const activationFeeSats = campaign?.activation?.feeSats ?? '80000000';
 
   return (
     <div>
       <Link to="/">Volver al inicio</Link>
       <h1>Crear campaña (guiado)</h1>
+      <SecurityBanner />
       <p>Crea tu campaña en 3 pasos para publicarla y empezar a recibir donaciones.</p>
       <p>
-        <small>Solo cobramos 1% si la campaña se fondea completamente.</small>
-      </p>
-      <p>
-        <small>Nunca escribas tu seed.</small>
+        <small>
+          Solo cobramos 1%
+          {' '}
+          <button
+            type="button"
+            title="El 1% solo se cobra si se fondea completamente."
+            aria-label="Info sobre fee del 1%"
+            style={{
+              border: 'none',
+              background: 'transparent',
+              cursor: 'help',
+              fontWeight: 700,
+              padding: 0,
+              margin: 0,
+            }}
+          >
+            i
+          </button>
+        </small>
       </p>
       <p>
         Paso {step} de 3
@@ -304,11 +321,11 @@ export const CreateCampaignWizard: React.FC = () => {
               <input value={name} onChange={(event) => setName(event.target.value)} />
             </label>
             <label style={{ display: 'grid', gap: 4 }}>
-              Meta (sats)
+              Meta (XEC)
               <input
                 type="number"
                 min={1}
-                step={1}
+                step={0.01}
                 value={goal}
                 onChange={(event) => setGoal(event.target.value)}
               />
@@ -330,11 +347,12 @@ export const CreateCampaignWizard: React.FC = () => {
               />
             </label>
             <label style={{ display: 'grid', gap: 4 }}>
-              Descripción (opcional)
+              Descripción (opcional, soporta links y Markdown básico)
               <textarea
                 rows={4}
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
+                placeholder="Cuenta tu campaña. Ejemplo: [Video](https://youtu.be/...)"
               />
             </label>
             <label style={{ display: 'grid', gap: 4 }}>
@@ -351,10 +369,11 @@ export const CreateCampaignWizard: React.FC = () => {
       {step >= 2 && campaignId && (
         <section style={{ border: '1px solid #eee', borderRadius: 8, padding: 12, marginTop: 12 }}>
           <h3>Paso 2: Activar campaña</h3>
-          <p>Estado actual: {statusLabel}</p>
           <p>
-            Para activar tu campaña, paga la tarifa de activación: <strong>800,000 XEC</strong> (
-            {Number(activationFeeSats).toLocaleString()} sats).
+            Estado actual: <StatusBadge status={campaign?.status || 'draft'} />
+          </p>
+          <p>
+            Para activar tu campaña, paga la tarifa de activación: <strong><AmountDisplay sats={activationFeeSats} /></strong>.
           </p>
           <WalletConnectBar />
           <label style={{ display: 'grid', gap: 4, marginBottom: 10 }}>
@@ -390,6 +409,11 @@ export const CreateCampaignWizard: React.FC = () => {
               {confirmingActivation ? 'Confirmando...' : 'Confirmar activación'}
             </button>
           </form>
+          {campaign?.activation?.feeTxid && (
+            <p style={{ marginTop: 10 }}>
+              Tx de activación: <ExplorerLink txid={campaign.activation.feeTxid} />
+            </p>
+          )}
         </section>
       )}
 
@@ -397,6 +421,13 @@ export const CreateCampaignWizard: React.FC = () => {
         <section style={{ border: '1px solid #eee', borderRadius: 8, padding: 12, marginTop: 12 }}>
           <h3>Paso 3: Campaña activa</h3>
           <p>Campaña activada ✅</p>
+          {campaign?.activation?.feeTxid && (
+            <p>
+              Tx de activación:
+              {' '}
+              <ExplorerLink txid={campaign.activation.feeTxid} />
+            </p>
+          )}
           <p>Comparte tu campaña:</p>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <code>{shareUrl}</code>

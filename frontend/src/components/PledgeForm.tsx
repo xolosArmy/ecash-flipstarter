@@ -3,6 +3,9 @@ import { broadcastTx, createPledgeTx } from '../api/client';
 import type { BuiltTxResponse } from '../api/types';
 import { buildTonalliExternalSignUrl } from '../wallet/tonalliDeeplink';
 import { useWalletConnect } from '../wallet/useWalletConnect';
+import { useToast } from './ToastProvider';
+import { satsFromXecInput } from '../utils/amount';
+import { ExplorerLink } from './ExplorerLink';
 
 interface Props {
   campaignId: string;
@@ -25,6 +28,7 @@ export const PledgeForm: React.FC<Props> = ({
   const [contributorAddressFull, setContributorAddressFull] = useState('');
   const [contributorAddressDisplay, setContributorAddressDisplay] = useState('');
   const [amount, setAmount] = useState('');
+  const [message, setMessage] = useState('');
   const [unsignedHex, setUnsignedHex] = useState('');
   const [signedHex, setSignedHex] = useState('');
   const [broadcastResult, setBroadcastResult] = useState('');
@@ -45,6 +49,7 @@ export const PledgeForm: React.FC<Props> = ({
     requestSignAndBroadcast,
     setLastTxid,
   } = useWalletConnect();
+  const { showToast } = useToast();
 
   const toAddressPreview = (address: string): string => {
     if (!address) return '';
@@ -82,9 +87,14 @@ export const PledgeForm: React.FC<Props> = ({
         return;
       }
     }
-    const amountNum = Number(amount);
-    if (!Number.isFinite(amountNum) || !Number.isInteger(amountNum) || amountNum <= 0) {
-      setUiError('Amount inválido.');
+    const amountSats = satsFromXecInput(amount);
+    if (amountSats <= 0n) {
+      setUiError('Monto inválido en XEC.');
+      return;
+    }
+    const trimmedMessage = message.trim();
+    if (trimmedMessage.length > 200) {
+      setUiError('El mensaje debe tener máximo 200 caracteres.');
       return;
     }
 
@@ -140,10 +150,17 @@ export const PledgeForm: React.FC<Props> = ({
 
       console.log('[PLEDGE] POST /api/campaigns/:id/pledge', {
         campaignId,
-        amount,
+        amountXec: amount,
+        amountSats: amountSats.toString(),
         contributorAddress: activeAddress,
+        messageLength: trimmedMessage.length,
       });
-      const resp = await createPledgeTx(campaignId, activeAddress, BigInt(amountNum));
+      const resp = await createPledgeTx(
+        campaignId,
+        activeAddress,
+        amountSats,
+        trimmedMessage || undefined,
+      );
       const built = resp;
       const hex = built.unsignedTxHex || built.rawHex || '';
       console.log('[PLEDGE] backend response', {
@@ -190,6 +207,7 @@ export const PledgeForm: React.FC<Props> = ({
         setLastTxid(txid);
         onBroadcastSuccess?.();
         setTonalliMessage('');
+        showToast('Pledge enviado on-chain', 'success');
         return;
       } catch (err) {
         console.error('[PLEDGE] WalletConnect request failed', err);
@@ -241,6 +259,7 @@ export const PledgeForm: React.FC<Props> = ({
       setBroadcastResult(`Transacción enviada: ${result.txid}`);
       setStatusMessage(`Transacción enviada: ${result.txid}`);
       onBroadcastSuccess?.();
+      showToast('Pledge enviado on-chain', 'success');
     } catch (err) {
       setUiError(formatPledgeError(err));
     } finally {
@@ -292,6 +311,8 @@ export const PledgeForm: React.FC<Props> = ({
     return null;
   }
 
+  const broadcastTxid = extractTxidFromText(broadcastResult);
+
   return (
     <div style={{ border: '1px solid #eee', padding: 12, borderRadius: 8 }}>
       <h4>Pledge</h4>
@@ -315,11 +336,23 @@ export const PledgeForm: React.FC<Props> = ({
           </button>
         </div>
         <div>
-          <label>Amount (satoshis)</label>
+          <label>Mensaje (opcional, max 200)</label>
+          <textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            maxLength={200}
+            rows={3}
+            style={{ width: '100%' }}
+          />
+        </div>
+        <div>
+          <label>Monto (XEC)</label>
           <input
             type="number"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
+            min="0.01"
+            step="0.01"
             required
           />
         </div>
@@ -377,6 +410,11 @@ export const PledgeForm: React.FC<Props> = ({
             </button>
           </div>
           {broadcastResult && <p>{broadcastResult}</p>}
+          {broadcastTxid && (
+            <p>
+              Ver en explorer: <ExplorerLink txid={broadcastTxid} />
+            </p>
+          )}
           <p>
             <em>Si Tonalli no abre, usa el flujo de pegar hex firmado y hacer broadcast.</em>
           </p>
@@ -385,3 +423,8 @@ export const PledgeForm: React.FC<Props> = ({
     </div>
   );
 };
+
+function extractTxidFromText(message: string): string | null {
+  const match = message.match(/[0-9a-f]{64}/i);
+  return match ? match[0] : null;
+}

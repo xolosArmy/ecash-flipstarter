@@ -4,6 +4,7 @@ import { createCampaign, fetchCampaigns, fetchCampaignSummary } from '../api/cli
 import type { CampaignSummary as CampaignSummaryResponse } from '../types/campaign';
 import { CampaignCard } from '../components/CampaignCard';
 import { WalletConnectBar } from '../components/WalletConnectBar';
+import { SecurityBanner } from '../components/SecurityBanner';
 
 export const Home: React.FC = () => {
   const [campaigns, setCampaigns] = useState<CampaignSummaryResponse[]>([]);
@@ -123,7 +124,10 @@ export const Home: React.FC = () => {
 
   return (
     <div>
-      <h2>Flipstarter 2.0 Campaigns</h2>
+      <h2 style={{ marginBottom: 2 }}>Teyolia</h2>
+      <small style={{ display: 'block', marginBottom: 6 }}>Flipstarter 2.0</small>
+      <p style={{ marginTop: 0, opacity: 0.9 }}>🐾 guardian xolo</p>
+      <SecurityBanner />
       <WalletConnectBar />
       <div style={{ marginBottom: 16 }}>
         <Link
@@ -140,8 +144,41 @@ export const Home: React.FC = () => {
         >
           Crear campaña (guiado)
         </Link>
+        <Link
+          to="/mis-campanas"
+          style={{
+            display: 'inline-block',
+            marginLeft: 8,
+            padding: '12px 16px',
+            borderRadius: 8,
+            background: '#0f7f72',
+            color: '#fff',
+            fontWeight: 600,
+            textDecoration: 'none',
+          }}
+        >
+          Mis campañas
+        </Link>
         <p style={{ marginTop: 8, marginBottom: 0 }}>
-          <small>Solo cobramos 1% si la campaña se fondea completamente.</small>
+          <small>
+            Solo cobramos 1%
+            {' '}
+            <button
+              type="button"
+              title="El 1% solo se cobra si se fondea completamente."
+              aria-label="Info sobre fee del 1%"
+              style={{
+                border: 'none',
+                background: 'transparent',
+                cursor: 'help',
+                fontWeight: 700,
+                padding: 0,
+                margin: 0,
+              }}
+            >
+              i
+            </button>
+          </small>
         </p>
       </div>
       <div style={{ marginBottom: 16 }}>
