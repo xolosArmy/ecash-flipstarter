@@ -5,6 +5,7 @@ import type { CampaignSummary as CampaignSummaryResponse } from '../types/campai
 import { CampaignCard } from '../components/CampaignCard';
 import { WalletConnectBar } from '../components/WalletConnectBar';
 import { SecurityBanner } from '../components/SecurityBanner';
+import { parseXecInputToSats } from '../utils/amount';
 
 export const Home: React.FC = () => {
   const [campaigns, setCampaigns] = useState<CampaignSummaryResponse[]>([]);
@@ -68,14 +69,18 @@ export const Home: React.FC = () => {
     const trimmedName = name.trim();
     const trimmedDescription = description.trim();
     const trimmedBeneficiaryAddress = beneficiaryAddress.trim();
-    const numericGoal = Number(goal);
+    const parsedGoal = parseXecInputToSats(goal);
     const trimmedExpiresAt = expiresAt.trim();
 
     if (!trimmedName || !trimmedDescription || !trimmedBeneficiaryAddress || !trimmedExpiresAt) {
       setFormMessage('Completa todos los campos.');
       return;
     }
-    if (!Number.isFinite(numericGoal) || numericGoal <= 0) {
+    if (parsedGoal.error) {
+      setFormMessage(parsedGoal.error);
+      return;
+    }
+    if (parsedGoal.sats === null || parsedGoal.sats <= 0) {
       setFormMessage('La meta debe ser mayor que cero.');
       return;
     }
@@ -93,7 +98,7 @@ export const Home: React.FC = () => {
         name: trimmedName,
         description: trimmedDescription,
         beneficiaryAddress: trimmedBeneficiaryAddress,
-        goal: Math.trunc(numericGoal),
+        goal: parsedGoal.sats,
         expiresAt: expiresAtIso,
       });
 
@@ -235,11 +240,11 @@ export const Home: React.FC = () => {
               placeholder="Beneficiary Address (ecash:...)"
             />
             <input
-              type="number"
+              type="text"
+              inputMode="decimal"
               value={goal}
               onChange={(event) => setGoal(event.target.value)}
-              placeholder="Meta (sats)"
-              min={1}
+              placeholder="Meta (XEC)"
             />
             <input
               type="datetime-local"

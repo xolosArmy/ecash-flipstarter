@@ -5,6 +5,7 @@ import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 import type { CampaignSummary } from '../types/campaign';
+import { formatXecFromSats } from '../utils/amount';
 
 const defaultIcon = L.icon({
   iconRetinaUrl: markerIcon2x,
@@ -27,7 +28,7 @@ function createPopupContent(campaign: CampaignSummary): HTMLElement {
   container.appendChild(title);
 
   const goal = document.createElement('div');
-  goal.textContent = `Meta: ${campaign.goal.toLocaleString()} sats`;
+  goal.textContent = `Meta: ${formatXecFromSats(campaign.goal)} XEC`;
   container.appendChild(goal);
 
   const link = document.createElement('a');

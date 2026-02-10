@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { createCampaign } from '../api/client';
+import { parseXecInputToSats } from '../utils/amount';
 
 // Smoke steps:
 // 1) Start backend and frontend.
@@ -22,7 +23,7 @@ export const CreateCampaign: React.FC = () => {
     setError(null);
 
     const trimmedName = name.trim();
-    const goalValue = Number(goal);
+    const parsedGoal = parseXecInputToSats(goal);
     const expiresAtValue = expiresAt.trim();
     const beneficiaryAddressValue = beneficiaryAddress.trim();
     const descriptionValue = description.trim();
@@ -32,8 +33,12 @@ export const CreateCampaign: React.FC = () => {
       setError('El nombre debe tener al menos 3 caracteres.');
       return;
     }
-    if (!Number.isInteger(goalValue) || goalValue <= 0) {
-      setError('La meta debe ser un entero positivo.');
+    if (parsedGoal.error) {
+      setError(parsedGoal.error);
+      return;
+    }
+    if (parsedGoal.sats === null || parsedGoal.sats <= 0) {
+      setError('La meta debe ser mayor que cero.');
       return;
     }
     if (!expiresAtValue) {
@@ -49,7 +54,7 @@ export const CreateCampaign: React.FC = () => {
     try {
       const campaign = await createCampaign({
         name: trimmedName,
-        goal: goalValue,
+        goal: parsedGoal.sats,
         expiresAt: new Date(expiresAtValue).toISOString(),
         beneficiaryAddress: beneficiaryAddressValue,
         description: descriptionValue || undefined,
@@ -74,11 +79,10 @@ export const CreateCampaign: React.FC = () => {
           <input value={name} onChange={(event) => setName(event.target.value)} />
         </label>
         <label style={{ display: 'grid', gap: 4 }}>
-          Meta (sats)
+          Meta (XEC)
           <input
-            type="number"
-            min={1}
-            step={1}
+            type="text"
+            inputMode="decimal"
             value={goal}
             onChange={(event) => setGoal(event.target.value)}
           />

@@ -4,7 +4,7 @@ import type { BuiltTxResponse } from '../api/types';
 import { buildTonalliExternalSignUrl } from '../wallet/tonalliDeeplink';
 import { useWalletConnect } from '../wallet/useWalletConnect';
 import { useToast } from './ToastProvider';
-import { satsFromXecInput } from '../utils/amount';
+import { parseXecInputToSats } from '../utils/amount';
 import { ExplorerLink } from './ExplorerLink';
 
 interface Props {
@@ -36,6 +36,7 @@ export const PledgeForm: React.FC<Props> = ({
   const [broadcasting, setBroadcasting] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [uiError, setUiError] = useState('');
+  const [amountError, setAmountError] = useState('');
   const [tonalliMessage, setTonalliMessage] = useState('');
   const [tonalliUrl, setTonalliUrl] = useState('');
   const [wcSigning, setWcSigning] = useState(false);
@@ -87,11 +88,18 @@ export const PledgeForm: React.FC<Props> = ({
         return;
       }
     }
-    const amountSats = satsFromXecInput(amount);
-    if (amountSats <= 0n) {
+    const parsedAmount = parseXecInputToSats(amount);
+    if (parsedAmount.error) {
+      setAmountError(parsedAmount.error);
+      setUiError(parsedAmount.error);
+      return;
+    }
+    if (parsedAmount.sats === null || parsedAmount.sats <= 0) {
+      setAmountError('Monto inválido en XEC.');
       setUiError('Monto inválido en XEC.');
       return;
     }
+    setAmountError('');
     const trimmedMessage = message.trim();
     if (trimmedMessage.length > 200) {
       setUiError('El mensaje debe tener máximo 200 caracteres.');
@@ -151,14 +159,14 @@ export const PledgeForm: React.FC<Props> = ({
       console.log('[PLEDGE] POST /api/campaigns/:id/pledge', {
         campaignId,
         amountXec: amount,
-        amountSats: amountSats.toString(),
+        amountSats: String(parsedAmount.sats),
         contributorAddress: activeAddress,
         messageLength: trimmedMessage.length,
       });
       const resp = await createPledgeTx(
         campaignId,
         activeAddress,
-        amountSats,
+        BigInt(parsedAmount.sats),
         trimmedMessage || undefined,
       );
       const built = resp;
@@ -348,13 +356,18 @@ export const PledgeForm: React.FC<Props> = ({
         <div>
           <label>Monto (XEC)</label>
           <input
-            type="number"
+            type="text"
+            inputMode="decimal"
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            min="0.01"
-            step="0.01"
+            onChange={(e) => {
+              const next = e.target.value;
+              setAmount(next);
+              const parsed = parseXecInputToSats(next);
+              setAmountError(parsed.error || '');
+            }}
             required
           />
+          {amountError && <p style={{ color: '#b00020', margin: '6px 0 0' }}>{amountError}</p>}
         </div>
         <button type="submit" disabled={loading || wcSigning}>
           {loading ? 'Procesando...' : wcSigning ? 'Esperando confirmación...' : 'Donar'}

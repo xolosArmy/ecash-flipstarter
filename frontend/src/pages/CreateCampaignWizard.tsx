@@ -17,7 +17,7 @@ import { AmountDisplay } from '../components/AmountDisplay';
 import { StatusBadge } from '../components/StatusBadge';
 import { useWalletConnect } from '../wallet/useWalletConnect';
 import { useToast } from '../components/ToastProvider';
-import { satsFromXecInput } from '../utils/amount';
+import { parseXecInputToSats } from '../utils/amount';
 
 type WizardStep = 1 | 2 | 3;
 
@@ -154,15 +154,18 @@ export const CreateCampaignWizard: React.FC = () => {
     setMessage(null);
 
     const trimmedName = name.trim();
-    const goalSats = satsFromXecInput(goal);
-    const numericGoal = Number(goalSats);
+    const parsedGoal = parseXecInputToSats(goal);
     const trimmedBeneficiary = beneficiaryAddress.trim();
     const trimmedExpiresAt = expiresAt.trim();
     if (trimmedName.length < 3) {
       setError('El nombre debe tener al menos 3 caracteres.');
       return;
     }
-    if (!Number.isInteger(numericGoal) || numericGoal <= 0) {
+    if (parsedGoal.error) {
+      setError(parsedGoal.error);
+      return;
+    }
+    if (parsedGoal.sats === null || parsedGoal.sats <= 0) {
       setError('La meta debe ser mayor que cero.');
       return;
     }
@@ -179,7 +182,7 @@ export const CreateCampaignWizard: React.FC = () => {
     try {
       const created = await createCampaign({
         name: trimmedName,
-        goal: numericGoal,
+        goal: parsedGoal.sats,
         expiresAt: new Date(trimmedExpiresAt).toISOString(),
         beneficiaryAddress: trimmedBeneficiary,
         description: description.trim() || undefined,
@@ -323,9 +326,8 @@ export const CreateCampaignWizard: React.FC = () => {
             <label style={{ display: 'grid', gap: 4 }}>
               Meta (XEC)
               <input
-                type="number"
-                min={1}
-                step={0.01}
+                type="text"
+                inputMode="decimal"
                 value={goal}
                 onChange={(event) => setGoal(event.target.value)}
               />
