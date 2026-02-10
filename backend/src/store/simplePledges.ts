@@ -4,6 +4,7 @@ export type SimplePledge = {
   amount: number;
   contributorAddress: string;
   timestamp: string;
+  message?: string;
 };
 
 export const simplePledges = new Map<string, SimplePledge[]>();

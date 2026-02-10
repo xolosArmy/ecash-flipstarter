@@ -1,6 +1,7 @@
 import { getUtxosForAddress } from '../blockchain/ecashClient';
 import { buildPledgeTx, type BuiltTx } from '../blockchain/txBuilder';
 import type { Utxo } from '../blockchain/types';
+import { validateAddress } from '../utils/validation';
 import { campaignStore, covenantIndexInstance } from './CampaignService';
 
 const MIN_PLEDGE_FEE_SATS = 500n;
@@ -22,13 +23,7 @@ export class PledgeService {
     if (campaignStatus && campaignStatus !== 'active') {
       throw new Error('campaign-not-active');
     }
-    const campaignScriptPubKey = resolveCampaignScriptPubKey(campaign, covenant.scriptPubKey);
-    const beneficiaryAddress = typeof campaign.beneficiaryAddress === 'string'
-      ? campaign.beneficiaryAddress
-      : undefined;
-    if (!campaignScriptPubKey && !beneficiaryAddress) {
-      throw new Error('beneficiary-address-required');
-    }
+    const escrowAddress = resolveCampaignEscrowAddress(campaign);
 
     const contributorUtxos = await getUtxosForAddress(contributorAddress);
     // Only spend pure XEC UTXOs; token-bearing UTXOs must be excluded.
@@ -38,12 +33,11 @@ export class PledgeService {
       amount,
       contributorAddress,
       covenant,
-      beneficiaryAddress,
-      campaignScriptPubKey,
+      beneficiaryAddress: escrowAddress,
     });
 
     // Optimistic update; real deployment should update after broadcast/confirmation.
-    const nextValue = campaignScriptPubKey ? covenant.value + amount : covenant.value;
+    const nextValue = covenant.value + amount;
     covenantIndexInstance.updateValue(campaignId, nextValue);
     return { ...built, nextCovenantValue: nextValue };
   }
@@ -61,7 +55,6 @@ async function buildWithSelectedUtxos(args: {
     scriptHash: string;
   };
   beneficiaryAddress?: string;
-  campaignScriptPubKey?: string;
 }): Promise<BuiltTx> {
   const feeTarget = args.amount + MIN_PLEDGE_FEE_SATS;
   let total = 0n;
@@ -86,7 +79,6 @@ async function buildWithSelectedUtxos(args: {
         covenantScriptHash: args.covenant.scriptHash,
         contributorAddress: args.contributorAddress,
         beneficiaryAddress: args.beneficiaryAddress,
-        campaignScriptPubKey: args.campaignScriptPubKey,
       });
     } catch (err) {
       const message = (err as Error).message;
@@ -99,20 +91,21 @@ async function buildWithSelectedUtxos(args: {
   throw new Error('insufficient-funds');
 }
 
-function resolveCampaignScriptPubKey(campaign: unknown, covenantScriptPubKey?: string): string | undefined {
+function resolveCampaignEscrowAddress(campaign: unknown): string {
   const maybeRecord = campaign as Record<string, unknown>;
   const candidates: unknown[] = [
-    maybeRecord.covenantScriptPubKey,
-    maybeRecord.covenantScript,
-    maybeRecord.covenant,
-    covenantScriptPubKey,
+    maybeRecord.campaignAddress,
+    maybeRecord.covenantAddress,
+    maybeRecord.address,
+    maybeRecord.recipient,
+    maybeRecord.recipientAddress,
   ];
   for (const candidate of candidates) {
     if (typeof candidate === 'string' && candidate.trim()) {
-      return candidate.trim();
+      return validateAddress(candidate.trim(), 'campaignAddress');
     }
   }
-  return undefined;
+  throw new Error('campaign-address-required');
 }
 
 function hasToken(utxo: Utxo): boolean {

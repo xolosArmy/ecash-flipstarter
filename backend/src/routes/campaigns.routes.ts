@@ -3,14 +3,13 @@ import path from 'path';
 import { Router } from 'express';
 import { CampaignService, syncCampaignStoreFromDiskCampaigns } from '../services/CampaignService';
 import { validateAddress } from '../utils/validation';
-import { getUtxosForAddress, getUtxosForScript } from '../blockchain/ecashClient';
+import { getUtxosForAddress } from '../blockchain/ecashClient';
 import type { Utxo } from '../blockchain/types';
 import { buildPayoutTx, buildSimplePaymentTx } from '../blockchain/txBuilder';
 import { serializeBuiltTx } from './serialize';
 import { walletConnectOfferStore } from '../services/WalletConnectOfferStore';
 import { simplePledges, type SimplePledge } from '../store/simplePledges';
 import { ACTIVATION_FEE_SATS, TREASURY_ADDRESS } from '../config/constants';
-import { covenantIndexInstance } from '../services/CampaignService';
 
 type CampaignStatus = 'draft' | 'pending_fee' | 'active' | 'expired' | 'funded' | 'paid_out';
 
@@ -34,6 +33,8 @@ type Campaign = {
   description?: string;
   recipientAddress: string;
   beneficiaryAddress: string;
+  campaignAddress?: string;
+  covenantAddress?: string;
   address?: string;
   recipient?: string;
   goal: number;
@@ -173,7 +174,16 @@ router.post('/campaign', async (req, res) => {
 
 const createCampaign: Parameters<typeof router.post>[1] = (req, res) => {
   try {
-    const { name, goal, expiresAt, beneficiaryAddress, description, location } = req.body ?? {};
+    const {
+      name,
+      goal,
+      expiresAt,
+      beneficiaryAddress,
+      campaignAddress,
+      covenantAddress,
+      description,
+      location,
+    } = req.body ?? {};
 
     if (typeof name !== 'string' || name.trim().length < 3) {
       return res.status(400).json({ error: 'Name must be at least 3 characters long.' });
@@ -205,6 +215,12 @@ const createCampaign: Parameters<typeof router.post>[1] = (req, res) => {
     }
 
     const normalizedAddress = validateAddress(beneficiaryAddress, 'beneficiaryAddress');
+    const normalizedCampaignAddress =
+      typeof campaignAddress === 'string' && campaignAddress.trim()
+        ? validateAddress(campaignAddress, 'campaignAddress')
+        : typeof covenantAddress === 'string' && covenantAddress.trim()
+          ? validateAddress(covenantAddress, 'covenantAddress')
+          : normalizedAddress;
     const id = `campaign-${Date.now()}`;
     const campaign: Campaign = {
       id,
@@ -212,6 +228,8 @@ const createCampaign: Parameters<typeof router.post>[1] = (req, res) => {
       description: typeof description === 'string' && description.trim() ? description.trim() : undefined,
       recipientAddress: normalizedAddress,
       beneficiaryAddress: normalizedAddress,
+      campaignAddress: normalizedCampaignAddress,
+      covenantAddress: normalizedCampaignAddress,
       goal,
       expiresAt: expiresAt.trim(),
       createdAt: new Date().toISOString(),
@@ -252,6 +270,7 @@ const createPledgeHandler: Parameters<typeof router.post>[1] = async (req, res) 
     }
 
     const { contributorAddress, amount } = req.body ?? {};
+    const message = normalizePledgeMessage(req.body?.message);
     const amountNum = Number(amount);
     if (
       !Number.isFinite(amountNum)
@@ -264,7 +283,7 @@ const createPledgeHandler: Parameters<typeof router.post>[1] = async (req, res) 
     }
 
     const normalizedAddress = normalizeContributorAddress(contributorAddress);
-    const beneficiaryAddress = resolveCampaignBeneficiaryAddress(campaign);
+    const escrowAddress = resolveCampaignEscrowAddress(campaign);
     const contributionAmount = BigInt(amountNum);
     const contributorUtxos = await selectUtxosForAmount(
       normalizedAddress,
@@ -275,7 +294,7 @@ const createPledgeHandler: Parameters<typeof router.post>[1] = async (req, res) 
       contributorUtxos,
       amount: contributionAmount,
       contributorAddress: normalizedAddress,
-      beneficiaryAddress,
+      beneficiaryAddress: escrowAddress,
       fixedFee: PLEDGE_FEE_SATS,
       dustLimit: 546n,
     });
@@ -288,6 +307,7 @@ const createPledgeHandler: Parameters<typeof router.post>[1] = async (req, res) 
       amount: amountNum,
       contributorAddress: normalizedAddress,
       timestamp: new Date().toISOString(),
+      message,
     };
 
     const pledges = simplePledges.get(campaign.id) ?? [];
@@ -317,6 +337,7 @@ const createPledgeHandler: Parameters<typeof router.post>[1] = async (req, res) 
       amount: pledge.amount,
       contributorAddress: pledge.contributorAddress,
       timestamp: pledge.timestamp,
+      message: pledge.message,
       wcOfferId: String(offer.offerId),
     });
 
@@ -356,6 +377,19 @@ function normalizeContributorAddress(raw: unknown): string {
   return validateAddress(prefixed, 'contributorAddress');
 }
 
+function normalizePledgeMessage(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== 'string') {
+    throw new Error('message-must-be-string');
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.length > 200) {
+    throw new Error('message-too-long');
+  }
+  return trimmed;
+}
+
 function resolveCampaignBeneficiaryAddress(campaign: Campaign): string {
   const candidate =
     campaign.beneficiaryAddress ||
@@ -366,6 +400,19 @@ function resolveCampaignBeneficiaryAddress(campaign: Campaign): string {
     throw new Error('beneficiaryAddress-required');
   }
   return validateAddress(candidate, 'beneficiaryAddress');
+}
+
+function resolveCampaignEscrowAddress(campaign: Campaign): string {
+  const candidate =
+    campaign.campaignAddress
+    || campaign.covenantAddress
+    || campaign.address
+    || campaign.recipient
+    || campaign.recipientAddress;
+  if (typeof candidate !== 'string' || !candidate.trim()) {
+    throw new Error('campaign-address-required');
+  }
+  return validateAddress(candidate, 'campaignAddress');
 }
 
 async function selectUtxosForAmount(
@@ -390,36 +437,46 @@ async function selectUtxosForAmount(
   return selected;
 }
 
+async function getCampaignEscrowUtxoSnapshot(campaign: Campaign): Promise<{
+  campaignId: string;
+  escrowAddress: string;
+  utxos: Utxo[];
+}> {
+  const escrowAddress = resolveCampaignEscrowAddress(campaign);
+  const utxos = await getUtxosForAddress(escrowAddress);
+  const spendable = utxos.filter((utxo) => !hasTokenData(utxo));
+  return {
+    campaignId: campaign.id,
+    escrowAddress,
+    utxos: spendable,
+  };
+}
+
 async function selectCampaignFundingUtxos(
-  campaignId: string,
+  campaign: Campaign,
   amount: bigint,
   fee: bigint,
-): Promise<Utxo[]> {
-  const covenant = covenantIndexInstance.getCovenantRef(campaignId);
-  const candidates: Utxo[] = [];
-
-  if (covenant && covenant.scriptHash) {
-    try {
-      const utxos = await getUtxosForScript('p2sh', covenant.scriptHash);
-      candidates.push(...utxos);
-    } catch {
-      // fallback to in-memory covenant ref below
+): Promise<{
+  escrowAddress: string;
+  utxos: Utxo[];
+}> {
+  const snapshot = await getCampaignEscrowUtxoSnapshot(campaign);
+  if (snapshot.utxos.length === 0) {
+    throw new Error(`campaign-utxos-unavailable:${snapshot.escrowAddress}:0`);
+  }
+  let selected: Utxo[];
+  try {
+    selected = pickUtxosForAmount(snapshot.utxos, amount, fee);
+  } catch (err) {
+    if ((err as Error).message === 'insufficient-funds') {
+      throw new Error(`campaign-utxos-unavailable:${snapshot.escrowAddress}:${snapshot.utxos.length}`);
     }
+    throw err;
   }
-  if (covenant && covenant.value > 0n) {
-    candidates.push({
-      txid: covenant.txid || '00'.repeat(32),
-      vout: covenant.vout,
-      value: covenant.value,
-      scriptPubKey: covenant.scriptPubKey,
-    });
-  }
-
-  const nonTokenUtxos = candidates.filter((utxo) => !hasTokenData(utxo));
-  if (nonTokenUtxos.length === 0) {
-    throw new Error('campaign-utxos-unavailable');
-  }
-  return pickUtxosForAmount(nonTokenUtxos, amount, fee);
+  return {
+    escrowAddress: snapshot.escrowAddress,
+    utxos: selected,
+  };
 }
 
 function pickUtxosForAmount(utxos: Utxo[], amount: bigint, fee: bigint): Utxo[] {
@@ -562,7 +619,11 @@ const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req
       return res.status(400).json({ error: 'campaign-funds-empty' });
     }
 
-    const campaignUtxos = await selectCampaignFundingUtxos(campaignId, totalRaised, PLEDGE_FEE_SATS);
+    const { escrowAddress, utxos: campaignUtxos } = await selectCampaignFundingUtxos(
+      campaign,
+      totalRaised,
+      PLEDGE_FEE_SATS,
+    );
     const builtTx = await buildPayoutTx({
       campaignUtxos,
       totalRaised,
@@ -586,7 +647,39 @@ const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req
       unsignedTxHex: built.unsignedTxHex || built.rawHex,
       beneficiaryAmount: builtTx.beneficiaryAmount.toString(),
       treasuryCut: builtTx.treasuryCut.toString(),
+      escrowAddress,
       wcOfferId: offer.offerId,
+    });
+  } catch (err) {
+    const message = (err as Error).message;
+    if (message.startsWith('campaign-utxos-unavailable:')) {
+      const [, escrowAddress, count] = message.split(':');
+      return res.status(400).json({
+        error: 'campaign-utxos-unavailable',
+        escrowAddress,
+        utxosCount: Number(count ?? '0'),
+      });
+    }
+    return res.status(400).json({ error: (err as Error).message });
+  }
+};
+
+const getCampaignEscrowUtxosHandler: Parameters<typeof router.get>[1] = async (req, res) => {
+  try {
+    const campaign = campaigns.find((item) => item.id === req.params.id);
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+    const snapshot = await getCampaignEscrowUtxoSnapshot(campaign);
+    return res.json({
+      campaignId: snapshot.campaignId,
+      escrowAddress: snapshot.escrowAddress,
+      utxosCount: snapshot.utxos.length,
+      utxos: snapshot.utxos.map((utxo) => ({
+        txid: utxo.txid,
+        vout: utxo.vout,
+        value: utxo.value.toString(),
+      })),
     });
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
@@ -655,6 +748,7 @@ const getCampaignPledgesHandler: Parameters<typeof router.get>[1] = (req, res) =
         contributorAddress: pledge.contributorAddress,
         amount: pledge.amount,
         timestamp: pledge.timestamp,
+        message: pledge.message,
       })),
     });
   } catch (err) {
@@ -693,6 +787,36 @@ const getCampaignSummaryHandler: Parameters<typeof router.get>[1] = (req, res) =
       totalPledged,
       pledgeCount,
       status,
+    });
+  } catch (err) {
+    return res.status(400).json({ error: (err as Error).message });
+  }
+};
+
+const getCampaignActivationStatusHandler: Parameters<typeof router.get>[1] = (req, res) => {
+  try {
+    const campaignId = req.params.id;
+    const campaign = campaigns.find((item) => item.id === campaignId);
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+    const wcOfferIdRaw = req.query.wcOfferId;
+    const wcOfferId = typeof wcOfferIdRaw === 'string' ? wcOfferIdRaw.trim() : '';
+    if (
+      wcOfferId
+      && campaign.activation?.wcOfferId
+      && wcOfferId !== campaign.activation.wcOfferId
+    ) {
+      return res.status(404).json({ error: 'activation-offer-not-found' });
+    }
+    const status = deriveCampaignStatus(campaign);
+    if (!campaign.activation?.feeTxid) {
+      return res.json({ status: status === 'draft' ? 'pending_fee' : status });
+    }
+    return res.json({
+      status,
+      feeTxid: campaign.activation.feeTxid,
+      feePaidAt: campaign.activation.feePaidAt,
     });
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
@@ -773,6 +897,7 @@ const confirmLatestPendingCampaignPledgeHandler: Parameters<typeof router.post>[
         contributorAddress: pendingPledge.contributorAddress,
         amount: pendingPledge.amount,
         timestamp: pendingPledge.timestamp,
+        message: pendingPledge.message,
       }),
     );
   } catch (err) {
@@ -781,6 +906,20 @@ const confirmLatestPendingCampaignPledgeHandler: Parameters<typeof router.post>[
 };
 
 function normalizeCampaignRecord(campaign: Campaign): Campaign {
+  let normalizedEscrowAddress: string | undefined;
+  try {
+    const escrowCandidate =
+      campaign.campaignAddress
+      || campaign.covenantAddress
+      || campaign.address
+      || campaign.recipient
+      || campaign.recipientAddress;
+    if (typeof escrowCandidate === 'string' && escrowCandidate.trim()) {
+      normalizedEscrowAddress = validateAddress(escrowCandidate, 'campaignAddress');
+    }
+  } catch {
+    normalizedEscrowAddress = undefined;
+  }
   return {
     ...campaign,
     createdAt:
@@ -803,6 +942,8 @@ function normalizeCampaignRecord(campaign: Campaign): Campaign {
       txid: campaign.payout?.txid ?? null,
       paidAt: campaign.payout?.paidAt ?? null,
     },
+    campaignAddress: normalizedEscrowAddress,
+    covenantAddress: normalizedEscrowAddress,
   };
 }
 
@@ -842,6 +983,8 @@ router.get('/campaigns', listCampaigns);
 router.get('/campaigns/:id', getCampaignById);
 router.get('/campaigns/:id/pledges', getCampaignPledgesHandler);
 router.get('/campaigns/:id/summary', getCampaignSummaryHandler);
+router.get('/campaigns/:id/activation/status', getCampaignActivationStatusHandler);
+router.get('/campaigns/:id/utxos', getCampaignEscrowUtxosHandler);
 router.post('/campaigns', createCampaign);
 router.post('/campaigns/:id/activate/build', buildCampaignActivationHandler);
 router.post('/campaigns/:id/activate/confirm', confirmCampaignActivationHandler);

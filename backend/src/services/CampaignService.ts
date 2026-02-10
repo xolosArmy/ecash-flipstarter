@@ -13,6 +13,8 @@ export type DiskCampaignRecord = {
   description?: string;
   recipientAddress?: string;
   beneficiaryAddress?: string;
+  campaignAddress?: string;
+  covenantAddress?: string;
   address?: string;
   recipient?: string;
   goal: number;
@@ -34,6 +36,8 @@ export class CampaignService {
       expirationTime: payload.expirationTime !== undefined ? BigInt(payload.expirationTime) : 0n,
       beneficiaryPubKey: payload.beneficiaryPubKey || '',
       beneficiaryAddress: payload.beneficiaryAddress,
+      campaignAddress: payload.campaignAddress,
+      covenantAddress: payload.covenantAddress,
       status: payload.status,
     };
     campaigns.set(id, campaign);
@@ -147,6 +151,14 @@ export function syncCampaignStoreFromDiskCampaigns(records: DiskCampaignRecord[]
       expirationTime: parseExpirationTime(record.expiresAt),
       beneficiaryPubKey: '',
       beneficiaryAddress,
+      campaignAddress:
+        typeof record.campaignAddress === 'string' && record.campaignAddress.trim()
+          ? record.campaignAddress.trim()
+          : undefined,
+      covenantAddress:
+        typeof record.covenantAddress === 'string' && record.covenantAddress.trim()
+          ? record.covenantAddress.trim()
+          : undefined,
       status: record.status,
     };
 

@@ -120,6 +120,20 @@ export async function confirmCampaignActivationTx(
   return confirmActivationTx(campaignId, txid, payerAddress);
 }
 
+export interface CampaignActivationStatusResponse {
+  status: 'draft' | 'pending_fee' | 'active' | 'expired' | 'funded' | 'paid_out';
+  feeTxid?: string;
+  feePaidAt?: string;
+}
+
+export async function fetchCampaignActivationStatus(
+  campaignId: string,
+  wcOfferId?: string,
+): Promise<CampaignActivationStatusResponse> {
+  const query = wcOfferId ? `?wcOfferId=${encodeURIComponent(wcOfferId)}` : '';
+  return jsonFetch<CampaignActivationStatusResponse>(`/campaigns/${campaignId}/activation/status${query}`);
+}
+
 export interface CampaignPayoutBuildResponse {
   unsignedTxHex: string;
   beneficiaryAmount: string;
@@ -148,10 +162,11 @@ export async function createPledgeTx(
   campaignId: string,
   contributorAddress: string,
   amount: bigint,
+  message?: string,
 ): Promise<BuiltTxResponse> {
   return jsonFetch<BuiltTxResponse>(`/campaigns/${campaignId}/pledge`, {
     method: 'POST',
-    body: JSON.stringify({ contributorAddress, amount: amount.toString() }),
+    body: JSON.stringify({ contributorAddress, amount: amount.toString(), message }),
   });
 }
 
@@ -198,6 +213,7 @@ export async function confirmLatestPendingPledgeTx(
   contributorAddress: string;
   amount: number;
   timestamp: string;
+  message?: string;
 }> {
   return jsonFetch<{
     pledgeId: string;
@@ -205,8 +221,25 @@ export async function confirmLatestPendingPledgeTx(
     contributorAddress: string;
     amount: number;
     timestamp: string;
+    message?: string;
   }>(`/campaigns/${campaignId}/pledge/confirm`, {
     method: 'POST',
     body: JSON.stringify({ txid }),
   });
+}
+
+export interface CampaignPledgesResponse {
+  totalPledged: number;
+  pledgeCount: number;
+  pledges: Array<{
+    txid: string | null;
+    contributorAddress: string;
+    amount: number;
+    timestamp: string;
+    message?: string;
+  }>;
+}
+
+export async function fetchCampaignPledges(campaignId: string): Promise<CampaignPledgesResponse> {
+  return jsonFetch<CampaignPledgesResponse>(`/campaigns/${campaignId}/pledges`);
 }

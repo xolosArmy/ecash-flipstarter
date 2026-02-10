@@ -3,6 +3,7 @@ export interface Pledge {
   contributorAddress: string;
   amount: number;
   timestamp: string;
+  message?: string;
 }
 
 export interface CampaignPledgeSummary {

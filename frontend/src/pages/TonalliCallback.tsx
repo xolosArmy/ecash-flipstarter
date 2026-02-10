@@ -4,8 +4,10 @@ import {
   confirmActivationTx,
   confirmLatestPendingPledgeTx,
   confirmPayoutTx,
+  fetchCampaignActivationStatus,
   fetchCampaignSummary,
 } from '../api/client';
+import { useToast } from '../components/ToastProvider';
 
 function getQueryParam(search: string, key: string): string | null {
   const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
@@ -18,6 +20,10 @@ function parseHashQuery(hash: string): URLSearchParams | null {
   return new URLSearchParams(hash.slice(queryIndex + 1));
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 // Legacy flow (fallback)
 export const TonalliCallback: React.FC = () => {
   const location = useLocation();
@@ -27,6 +33,7 @@ export const TonalliCallback: React.FC = () => {
   const [confirming, setConfirming] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { showToast } = useToast();
 
   useEffect(() => {
     let cancelled = false;
@@ -37,11 +44,15 @@ export const TonalliCallback: React.FC = () => {
     const hashTxid = hashParams?.get('txid') || null;
     const hashCampaignId = hashParams?.get('campaignId') || null;
     const hashMode = hashParams?.get('mode') || null;
+    const hashOfferId = hashParams?.get('wcOfferId') || null;
 
     const nextTxid = searchTxid || hashTxid;
     const nextCampaignId = searchCampaignId || hashCampaignId;
     const rawMode = getQueryParam(location.search, 'mode') || hashMode || 'pledge';
     const nextMode = rawMode === 'activate' || rawMode === 'payout' ? rawMode : 'pledge';
+    const nextOfferId = getQueryParam(location.search, 'wcOfferId')
+      || hashOfferId
+      || (nextCampaignId ? localStorage.getItem(`tonalli:activationOfferId:${nextCampaignId}`) : null);
 
     setTxid(nextTxid);
     setCampaignId(nextCampaignId);
@@ -70,8 +81,52 @@ export const TonalliCallback: React.FC = () => {
         if (!cancelled) {
           setError(null);
           setConfirmed(true);
+          if (nextMode === 'activate') {
+            showToast('Campaña activada');
+          }
         }
         return;
+      }
+
+      if (!nextTxid && nextCampaignId && nextMode === 'activate' && nextOfferId) {
+        setConfirming(true);
+        for (let elapsed = 0; elapsed <= 60_000; elapsed += 3_000) {
+          const statusResponse = await fetchCampaignActivationStatus(nextCampaignId, nextOfferId);
+          if (statusResponse.feeTxid) {
+            localStorage.setItem(`tonalli:txid:${nextCampaignId}`, statusResponse.feeTxid);
+            const summary = await confirmActivationTx(nextCampaignId, statusResponse.feeTxid);
+            window.dispatchEvent(
+              new CustomEvent('campaign:summary:refresh', {
+                detail: { campaignId: nextCampaignId, summary },
+              }),
+            );
+            window.dispatchEvent(new Event('campaigns:refresh'));
+            if (!cancelled) {
+              setTxid(statusResponse.feeTxid);
+              setError(null);
+              setConfirmed(true);
+              showToast('Campaña activada');
+            }
+            return;
+          }
+          if (statusResponse.status === 'active' || statusResponse.status === 'funded' || statusResponse.status === 'paid_out') {
+            const summary = await fetchCampaignSummary(nextCampaignId);
+            window.dispatchEvent(
+              new CustomEvent('campaign:summary:refresh', {
+                detail: { campaignId: nextCampaignId, summary },
+              }),
+            );
+            window.dispatchEvent(new Event('campaigns:refresh'));
+            if (!cancelled) {
+              setError(null);
+              setConfirmed(true);
+              showToast('Campaña activada');
+            }
+            return;
+          }
+          await wait(3_000);
+          if (cancelled) return;
+        }
       }
 
       if (!cancelled) {
@@ -95,7 +150,7 @@ export const TonalliCallback: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [location.hash, location.search]);
+  }, [location.hash, location.search, showToast]);
 
   return (
     <div>

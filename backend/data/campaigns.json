@@ -20,7 +20,9 @@
       "wcOfferId": null,
       "txid": null,
       "paidAt": null
-    }
+    },
+    "campaignAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
+    "covenantAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a"
   },
   {
     "id": "campaign-1767124661420",
@@ -47,7 +49,9 @@
       "wcOfferId": null,
       "txid": null,
       "paidAt": null
-    }
+    },
+    "campaignAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
+    "covenantAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a"
   },
   {
     "id": "campaign-1770690317637",
@@ -69,7 +73,9 @@
       "wcOfferId": null,
       "txid": null,
       "paidAt": null
-    }
+    },
+    "campaignAddress": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk",
+    "covenantAddress": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk"
   },
   {
     "id": "campaign-1770741953491",
@@ -88,9 +94,36 @@
       "wcOfferId": "5cbd6b4a-e5cf-430f-9065-9c47a6512225"
     },
     "payout": {
-      "wcOfferId": null,
+      "wcOfferId": "fad08dec-8987-4276-aa6a-6ad767e7a304",
       "txid": null,
       "paidAt": null
+    },
+    "campaignAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
+    "covenantAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a"
+  },
+  {
+    "id": "campaign-1770750810247",
+    "name": "Prueba payout Teyolia",
+    "description": "Ver si llega pago a direcciones",
+    "recipientAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
+    "beneficiaryAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
+    "campaignAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
+    "covenantAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
+    "goal": 1000000,
+    "expiresAt": "2026-02-11T18:00:00.000Z",
+    "createdAt": "2026-02-10T19:13:30.247Z",
+    "status": "paid_out",
+    "activation": {
+      "feeSats": "80000000",
+      "feeTxid": "eceaf82bfb768d346a4735ffd872cfb5b957175e757131711537c81e1624832f",
+      "feePaidAt": "2026-02-10T21:09:59.175Z",
+      "payerAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
+      "wcOfferId": "7229a288-677d-4d01-80bc-6ebbfbe2d30d"
+    },
+    "payout": {
+      "wcOfferId": "27d69282-2244-49a7-99e1-0c032cfd967a",
+      "txid": "e9eca5c8a68299f483fa0dc95df86a8f755e783c65e8d03d65a34f400425c63e",
+      "paidAt": "2026-02-10T21:30:20.964Z"
     }
   }
 ]

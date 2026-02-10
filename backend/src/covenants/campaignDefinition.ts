@@ -6,5 +6,7 @@ export interface CampaignDefinition {
   expirationTime: bigint;
   beneficiaryPubKey: string;
   beneficiaryAddress?: string;
+  campaignAddress?: string;
+  covenantAddress?: string;
   status?: 'draft' | 'pending_fee' | 'active' | 'expired' | 'funded' | 'paid_out';
 }
