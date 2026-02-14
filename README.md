@@ -25,11 +25,52 @@ npm run dev
 2. Frontend:
 ```bash
 cd frontend
+cp .env.local.example .env.local
 npm install
-export VITE_API_BASE_URL=http://127.0.0.1:3001/api
-export VITE_TONALLI_BASE_URL=http://127.0.0.1:5174
 npm run dev
 ```
+
+## Persistencia de campañas (JSON + SQLite)
+- Fuente principal de persistencia: `backend/data/campaigns.db` (SQLite).
+- Compatibilidad legacy: se mantiene `backend/data/campaigns.json` con dual-write.
+- En arranque, backend intenta cargar primero desde SQLite. Si está vacía, hace fallback a JSON y migra automáticamente.
+- Para forzar migración manual:
+```bash
+cd backend
+npm run migrate:campaigns
+```
+
+## WalletConnect v2 + Tonalli (RMZWallet)
+### Variables de entorno requeridas
+En frontend define:
+- `VITE_WC_PROJECT_ID` (Project ID de Reown/WalletConnect Cloud).
+- `VITE_TONALLI_BASE_URL` (base URL de Tonalli).
+
+> No comitees `.env.local` ni IDs reales de producción.
+
+### Dónde obtener `VITE_WC_PROJECT_ID`
+1. Crea cuenta en Reown/WalletConnect Cloud.
+2. Crea un proyecto para la dApp.
+3. Copia el **Project ID** y configúralo como `VITE_WC_PROJECT_ID`.
+
+Si falta `VITE_WC_PROJECT_ID`, el frontend deshabilita “Conectar Tonalli” y muestra error claro.
+
+### Smoke test manual: WalletConnect con Tonalli
+1. Levanta backend y frontend.
+2. Abre la dApp y pulsa **Conectar Tonalli (WalletConnect)**.
+3. Escanea el QR/deeplink con Tonalli.
+4. Verifica que la sesión solicite:
+   - chain `ecash:1`
+   - method `ecash_signAndBroadcastTransaction`
+5. Ejecuta una acción de firma (activar campaña o payout).
+6. Confirma que llega `txid` y cambia el estado de campaña.
+
+### Sanity check de configuración WalletConnect
+```bash
+cd frontend
+npm run test:wc-sanity
+```
+Valida estáticamente que el namespace solicitado contiene `ecash:1` y `ecash_signAndBroadcastTransaction`.
 
 ## Build frontend
 ```bash
