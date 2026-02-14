@@ -2,8 +2,8 @@ import { Router } from 'express';
 import { CampaignService } from '../services/CampaignService';
 import { validateAddress } from '../utils/validation';
 import { getPledgesByCampaign } from '../store/simplePledges';
-import { getUtxosForAddress } from '../blockchain/ecashClient';
-import { buildPayoutTx, buildSimplePaymentTx } from '../blockchain/txBuilder';
+import { addressToScriptPubKey, getTransactionOutputs, getUtxosForAddress } from '../blockchain/ecashClient';
+import { buildPayoutTx } from '../blockchain/txBuilder';
 import { serializeBuiltTx } from './serialize';
 import { walletConnectOfferStore } from '../services/WalletConnectOfferStore';
 import { ACTIVATION_FEE_SATS, ACTIVATION_FEE_XEC, TREASURY_ADDRESS } from '../config/constants';
@@ -33,6 +33,9 @@ type CampaignApiRecord = {
   activationFeePaid?: boolean;
   activationFeeTxid?: string | null;
   activationFeePaidAt?: string | null;
+  activationOfferMode?: 'tx' | 'intent' | null;
+  activationOfferOutputs?: Array<{ address: string; valueSats: number }> | null;
+  activationTreasuryAddressUsed?: string | null;
   payout?: {
     wcOfferId?: string | null;
     txid?: string | null;
@@ -125,6 +128,9 @@ function toSummary(campaign: CampaignApiRecord, totalPledged: number) {
       payerAddress: campaign.activation?.payerAddress ?? null,
       wcOfferId: campaign.activation?.wcOfferId ?? null,
     },
+    activationOfferMode: campaign.activationOfferMode ?? null,
+    activationOfferOutputs: campaign.activationOfferOutputs ?? null,
+    activationTreasuryAddressUsed: campaign.activationTreasuryAddressUsed ?? null,
   };
 }
 
@@ -134,6 +140,39 @@ function sanitizeTxid(raw: unknown): string {
     throw new Error('txid-invalid');
   }
   return txid;
+}
+
+type VerificationResult =
+  | { status: 'verified' }
+  | { status: 'pending_verification'; warning: string }
+  | { status: 'invalid'; error: string };
+
+async function verifyActivationTxBestEffort(
+  txid: string,
+  treasuryAddress: string,
+  activationFeeRequiredSats: bigint,
+): Promise<VerificationResult> {
+  try {
+    const treasuryScript = (await addressToScriptPubKey(treasuryAddress)).toLowerCase();
+    const outputs = await getTransactionOutputs(txid);
+    const found = outputs.some(
+      (output) =>
+        output.scriptPubKey.toLowerCase() === treasuryScript && output.valueSats >= activationFeeRequiredSats,
+    );
+    if (!found) {
+      return {
+        status: 'invalid',
+        error: 'activation-fee-output-mismatch',
+      };
+    }
+    return { status: 'verified' };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      status: 'pending_verification',
+      warning: `chronik-unavailable:${message}`,
+    };
+  }
 }
 
 function resolveCampaignEscrowAddress(campaign: CampaignApiRecord): string {
@@ -287,7 +326,7 @@ router.post('/campaign/:id/payout', processCampaignPayout);
 router.post('/campaigns/:id/payout', processCampaignPayout);
 
 // Dedicated implementation shared by activation aliases.
-const buildActivationHandler: Parameters<typeof router.post>[1] = async (req, res) => {
+export const buildActivationHandler: Parameters<typeof router.post>[1] = async (req, res) => {
   try {
     const campaign = await getCampaignOr404(req, res);
     if (!campaign) return;
@@ -297,37 +336,39 @@ const buildActivationHandler: Parameters<typeof router.post>[1] = async (req, re
     }
 
     const payerAddress = validateAddress(req.body?.payerAddress as string, 'payerAddress');
-    const payerUtxos = (await getUtxosForAddress(payerAddress)).filter(
-      (utxo) => !utxo.token && !utxo.slpToken && !utxo.tokenStatus && !utxo.plugins?.token,
-    );
-
-    const amount = BigInt(toCampaignActivationFeeRequired(campaign) * 100);
-    const built = await buildSimplePaymentTx({
-      contributorUtxos: payerUtxos,
-      amount,
-      contributorAddress: payerAddress,
-      beneficiaryAddress: TREASURY_ADDRESS,
-      fixedFee: 500n,
-    });
-
-    const serialized = serializeBuiltTx(built);
-    const unsignedTxHex = serialized.unsignedTxHex || serialized.rawHex;
+    const activationFeeRequired = toCampaignActivationFeeRequired(campaign);
+    const amount = BigInt(activationFeeRequired * 100);
+    const outputs = [{ address: TREASURY_ADDRESS, valueSats: Number(amount) }];
+    const userPrompt = 'Pagar fee de activación';
     const offer = walletConnectOfferStore.createOffer({
       campaignId: campaign.id,
-      unsignedTxHex,
+      mode: 'intent',
+      outputs,
+      userPrompt,
       amount: amount.toString(),
       contributorAddress: payerAddress,
     });
 
-    await service.setActivationOffer(campaign.id, offer.offerId, payerAddress);
+    await service.setActivationOffer(campaign.id, offer.offerId, payerAddress, {
+      mode: 'intent',
+      outputs,
+      treasuryAddressUsed: TREASURY_ADDRESS,
+    });
 
     return res.json({
-      ...serialized,
+      offerId: offer.offerId,
+      wcOfferId: offer.offerId,
+      mode: 'intent',
+      activationFeeRequired,
       feeSats: amount.toString(),
       payerAddress,
       campaignId: campaign.id,
-      wcOfferId: offer.offerId,
       treasuryAddress: TREASURY_ADDRESS,
+      outputs,
+      userPrompt,
+      // Deprecated compatibility fields from tx-build mode.
+      inputsUsed: [],
+      outpoints: [],
     });
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
@@ -349,6 +390,16 @@ const confirmActivationHandler: Parameters<typeof router.post>[1] = async (req, 
       typeof req.body?.payerAddress === 'string' && req.body.payerAddress.trim()
         ? validateAddress(req.body.payerAddress, 'payerAddress')
         : null;
+    const activationFeeRequiredSats = BigInt(toCampaignActivationFeeRequired(campaign) * 100);
+    const treasuryAddress =
+      campaign.activationTreasuryAddressUsed
+      || campaign.treasuryAddressUsed
+      || TREASURY_ADDRESS;
+
+    const verification = await verifyActivationTxBestEffort(txid, treasuryAddress, activationFeeRequiredSats);
+    if (verification.status === 'invalid') {
+      return res.status(400).json({ error: verification.error });
+    }
 
     await service.markActivationFeePaid(campaign.id, txid, {
       payerAddress,
@@ -361,10 +412,17 @@ const confirmActivationHandler: Parameters<typeof router.post>[1] = async (req, 
 
     const totalPledged = await getTotalPledged(campaign.id);
     const summary = toSummary(updated, totalPledged);
-    return res.json({
+    const response: Record<string, unknown> = {
       ...summary,
       pledgeCount: (await getPledgesByCampaign(campaign.id)).length,
-    });
+    };
+    if (verification.status === 'pending_verification') {
+      response.verificationStatus = 'pending_verification';
+      response.warning = verification.warning;
+    } else {
+      response.verificationStatus = 'verified';
+    }
+    return res.json(response);
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
   }

@@ -3,7 +3,10 @@ import { randomBytes, randomUUID } from 'crypto';
 export type WalletConnectOffer = {
   offerId: string;
   campaignId: string;
-  unsignedTxHex: string;
+  unsignedTxHex?: string;
+  mode?: 'tx' | 'intent';
+  outputs?: Array<{ address: string; valueSats: number }>;
+  userPrompt?: string;
   amount: string;
   contributorAddress: string;
   createdAt: number;

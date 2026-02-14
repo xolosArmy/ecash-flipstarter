@@ -86,12 +86,26 @@ export async function createCampaign(payload: CreateCampaignPayload): Promise<Cr
 }
 
 export interface CampaignActivationBuildResponse {
-  unsignedTxHex: string;
-  rawHex?: string;
+  offerId: string;
+  wcOfferId: string;
+  mode: 'intent' | 'tx';
+  activationFeeRequired: number;
+  treasuryAddress: string;
+  outputs: Array<{ address: string; valueSats: number }>;
+  userPrompt: string;
   feeSats: string;
   payerAddress: string;
   campaignId: string;
-  wcOfferId: string;
+  // Deprecated compatibility fields for tx-build mode.
+  unsignedTxHex?: string;
+  rawHex?: string;
+  unsignedTx?: {
+    inputs: Array<{ txid: string; vout: number; value: string; scriptPubKey: string }>;
+    outputs: Array<{ value: string; scriptPubKey: string }>;
+    locktime?: number;
+  };
+  inputsUsed?: Array<{ txid: string; vout: number }>;
+  outpoints?: string[];
 }
 
 export async function buildActivationTx(
@@ -115,8 +129,8 @@ export async function confirmActivationTx(
   campaignId: string,
   txid: string,
   payerAddress?: string,
-): Promise<CampaignSummaryResponse> {
-  return jsonFetch<CampaignSummaryResponse>(`/campaigns/${campaignId}/activation/confirm`, {
+): Promise<CampaignSummaryResponse & { verificationStatus?: 'verified' | 'pending_verification'; warning?: string }> {
+  return jsonFetch<CampaignSummaryResponse & { verificationStatus?: 'verified' | 'pending_verification'; warning?: string }>(`/campaigns/${campaignId}/activation/confirm`, {
     method: 'POST',
     body: JSON.stringify({ txid, payerAddress }),
   });
@@ -126,7 +140,7 @@ export async function confirmCampaignActivationTx(
   campaignId: string,
   txid: string,
   payerAddress?: string,
-): Promise<CampaignSummaryResponse> {
+): Promise<CampaignSummaryResponse & { verificationStatus?: 'verified' | 'pending_verification'; warning?: string }> {
   return confirmActivationTx(campaignId, txid, payerAddress);
 }
 

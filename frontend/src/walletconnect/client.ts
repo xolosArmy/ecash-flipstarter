@@ -3,11 +3,25 @@ import type { SessionTypes } from '@walletconnect/types';
 import { CHAIN_ID, OPTIONAL_NAMESPACES, REQUIRED_METHOD } from './config';
 
 const PROJECT_ID = import.meta.env.VITE_WC_PROJECT_ID as string | undefined;
+console.log('WC projectId:', import.meta.env.VITE_WC_PROJECT_ID);
 const APP_NAME = (import.meta.env.VITE_WC_APP_NAME as string | undefined) || 'Flipstarter 2.0';
 const APP_URL =
   (import.meta.env.VITE_WC_APP_URL as string | undefined) ||
   (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173');
+
+export const WC_NAMESPACE = 'ecash' as const;
+export const CHAIN_ID = 'ecash:1' as const;
+export const WC_METHOD = 'ecash_signAndBroadcastTransaction' as const;
 const STORAGE_TOPIC = 'wc_topic';
+
+export const REQUIRED_NAMESPACES = {
+  [WC_NAMESPACE]: {
+    chains: [CHAIN_ID],
+    methods: [WC_METHOD],
+    events: [] as string[],
+  },
+} as const;
+
 let clientPromise: Promise<SignClient> | null = null;
 let subscribed = false;
 const sessionDeleteHandlers = new Set<(topic?: string) => void>();
@@ -16,12 +30,15 @@ export function isWalletConnectConfigured(): boolean {
   return Boolean(PROJECT_ID);
 }
 
-export function getWalletConnectProjectId(): string | undefined {
-  return PROJECT_ID;
+export function getWalletConnectProjectId(): string | null {
+  return PROJECT_ID ?? null;
 }
 
-export function getOptionalNamespaces() {
-  return OPTIONAL_NAMESPACES;
+export function getRequestedNamespaces() {
+  return {
+    requiredNamespaces: REQUIRED_NAMESPACES,
+    optionalNamespaces: REQUIRED_NAMESPACES,
+  };
 }
 
 export function getStoredTopic(): string | null {
@@ -56,18 +73,38 @@ function notifySessionDelete(topic?: string) {
   });
 }
 
-export function sessionSupportsEcashSigning(session: SessionTypes.Struct): boolean {
-  const namespace = session.namespaces?.ecash;
-  if (!namespace) return false;
-  const hasChain = (namespace.chains ?? []).includes(CHAIN_ID)
-    || (namespace.accounts ?? []).some((account) => account.startsWith(`${CHAIN_ID}:`));
-  const hasMethod = namespace.methods?.includes(REQUIRED_METHOD);
-  return Boolean(hasChain && hasMethod);
+export function getEcashAccounts(session?: SessionTypes.Struct): string[] {
+  if (!session?.namespaces?.[WC_NAMESPACE]?.accounts) return [];
+  return session.namespaces[WC_NAMESPACE].accounts
+    .map((account) => account.split(':').slice(2).join(':'))
+    .filter((address): address is string => Boolean(address));
+}
+
+function sessionSupportsRequiredCapabilities(session: SessionTypes.Struct, chainId: string): boolean {
+  const ecashNamespace = session.namespaces?.[WC_NAMESPACE];
+  if (!ecashNamespace) return false;
+
+  const hasMethod = ecashNamespace.methods.includes(WC_METHOD);
+  if (!hasMethod) return false;
+
+  if (ecashNamespace.chains && ecashNamespace.chains.length > 0) {
+    return ecashNamespace.chains.includes(chainId);
+  }
+
+  return ecashNamespace.accounts.some((account) => account.startsWith(`${chainId}:`));
+}
+
+export function assertSessionSupportsEcashSign(session: SessionTypes.Struct, chainId: string): void {
+  if (!sessionSupportsRequiredCapabilities(session, chainId)) {
+    throw new Error(
+      `WalletConnect session is missing required chain/method (${chainId}, ${WC_METHOD}). Reconecta la wallet.`
+    );
+  }
 }
 
 export async function getSignClient(): Promise<SignClient> {
   if (!PROJECT_ID) {
-    throw new Error('No projectId found. Configura VITE_WC_PROJECT_ID.');
+    throw new Error('No projectId found for WalletConnect (VITE_WC_PROJECT_ID).');
   }
   if (!clientPromise) {
     const iconUrl = APP_URL ? `${APP_URL}/favicon.ico` : undefined;
@@ -92,26 +129,21 @@ export async function getSignClient(): Promise<SignClient> {
   return client;
 }
 
-export function getEcashAccounts(session?: SessionTypes.Struct): string[] {
-  if (!session?.namespaces?.ecash?.accounts) return [];
-  return session.namespaces.ecash.accounts
-    .map((account) => account.split(':').slice(2).join(':'))
-    .filter((address): address is string => Boolean(address));
-}
-
 export async function connect(opts?: { onUri?: (uri: string) => void }): Promise<{
   session: SessionTypes.Struct;
   accounts: string[];
 }> {
   const client = await getSignClient();
-  if (import.meta.env.DEV) {
-    console.info('[wc] optionalNamespaces', OPTIONAL_NAMESPACES);
-  }
+  const { requiredNamespaces, optionalNamespaces } = getRequestedNamespaces();
   const { uri, approval } = await client.connect({
-    optionalNamespaces: OPTIONAL_NAMESPACES,
+    requiredNamespaces,
+    optionalNamespaces,
   });
   if (uri) opts?.onUri?.(uri);
   const session = await approval();
+
+  assertSessionSupportsEcashSign(session, CHAIN_ID);
+
   storeTopic(session.topic);
   return { session, accounts: getEcashAccounts(session) };
 }
@@ -132,20 +164,26 @@ export async function requestSignAndBroadcastTransaction(
   topic: string,
   offerId: string,
   chainId: string,
+  options?: {
+    outputs?: Array<{ address: string; valueSats: number }>;
+    userPrompt?: string;
+  },
 ): Promise<unknown> {
   const client = await getSignClient();
+  const session = client.session.get(topic);
+  assertSessionSupportsEcashSign(session, chainId);
+
+  // Activation intent mode sends business outputs only and lets the wallet build the final tx.
   return client.request({
     topic,
     chainId,
     request: {
-      method: REQUIRED_METHOD,
+      method: WC_METHOD,
       params: {
         offerId,
-        userPrompt: 'Donate to campaign',
-        keys: [],
+        userPrompt: options?.userPrompt || 'Donate to campaign',
+        ...(options?.outputs && options.outputs.length > 0 ? { outputs: options.outputs } : {}),
       },
     },
   });
 }
-
-export { CHAIN_ID, REQUIRED_METHOD, OPTIONAL_NAMESPACES };

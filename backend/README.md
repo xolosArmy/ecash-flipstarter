@@ -30,7 +30,8 @@ curl https://chronik.xolosarmy.xyz/chronik-info
 - Build pledge offer: `POST /api/campaigns/:id/pledge/build` with `{ "contributorAddress": "ecash:...", "amount": 3000 }`.
 - Build activation offer: `POST /api/campaigns/:id/activation/build` with `{ "payerAddress": "ecash:..." }`.
 - Build payout offer: `POST /api/campaigns/:id/payout/build`.
-- Backend creates an opaque UUID `wcOfferId` and stores the exact `unsignedTxHex`.
+- Activation build now returns `mode: "intent"` with `outputs` only (no `rawHex`, no inputs/change).
+- Backend creates an opaque UUID `wcOfferId`; pledge/payout offers still include `unsignedTxHex` while activation uses intent payload.
 - Wallet side resolves offer data via `GET /api/walletconnect/offers/:offerId`.
 - Wallet request method: `ecash_signAndBroadcastTransaction`.
 

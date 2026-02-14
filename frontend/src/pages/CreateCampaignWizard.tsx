@@ -18,6 +18,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import { useWalletConnect } from '../wallet/useWalletConnect';
 import { useToast } from '../components/ToastProvider';
 import { parseXecInputToSats } from '../utils/amount';
+import { WC_METHOD } from '../walletconnect/client';
 
 type WizardStep = 1 | 2 | 3;
 
@@ -207,6 +208,9 @@ export const CreateCampaignWizard: React.FC = () => {
       setTxidInput(txid);
       setWizardStep(summary.status === 'active' ? 3 : 2);
       setMessage(summary.status === 'active' ? 'Campaña activada ✅' : 'Activación confirmada.');
+      if (summary.verificationStatus === 'pending_verification') {
+        setMessage(`No se pudo verificar en Chronik, pero guardamos tu txid: ${txid}`);
+      }
       if (summary.status === 'active') {
         showToast('Campaña activada');
       }
@@ -255,16 +259,38 @@ export const CreateCampaignWizard: React.FC = () => {
       setMessage('Construyendo transacción de activación...');
       const built = await buildCampaignActivationTx(campaignId, activeAddress);
       localStorage.setItem(`tonalli:activationOfferId:${campaignId}`, built.wcOfferId);
+      if (built.mode !== 'intent') {
+        throw new Error('activation-mode-unsupported');
+      }
       const chainId = getChainIdFromSession(activeSession);
+      console.debug('[ActivationFee][WC] payload', {
+        method: WC_METHOD,
+        chainId,
+        outputsCount: built.outputs.length,
+        firstOutput: built.outputs[0] ?? null,
+      });
 
       setMessage('Activar campaña: revisa y firma en Tonalli.');
-      const result = await requestSignAndBroadcast(built.wcOfferId, chainId);
+      const result = await requestSignAndBroadcast(built.wcOfferId, chainId, {
+        outputs: built.outputs,
+        userPrompt: built.userPrompt,
+      });
       const txid = extractTxid(result);
       if (!txid) throw new Error('Tonalli no devolvió un txid válido.');
 
       await confirmActivation(txid, activeAddress);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo pagar la activación.');
+      const message = err instanceof Error ? err.message : 'No se pudo pagar la activación.';
+      const lower = message.toLowerCase();
+      if (lower.includes('insufficient') || lower.includes('funds')) {
+        setError('Fondos insuficientes para pagar fee + comisión');
+      } else if (lower.includes('fee too low') || lower.includes('mempool')) {
+        setError('Transacción rechazada por mempool (fee demasiado baja)');
+      } else if (message.includes('activation-mode-unsupported')) {
+        setError('El backend devolvió un modo de activación no soportado.');
+      } else {
+        setError(message);
+      }
       setMessage(null);
     } finally {
       setPayingActivation(false);

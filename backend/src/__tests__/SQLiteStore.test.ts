@@ -82,6 +82,9 @@ describe('SQLiteStore', () => {
     expect(columnNames).toContain('activation_feeSats');
     expect(columnNames).toContain('activationFeeRequired');
     expect(columnNames).toContain('activationFeePaid');
+    expect(columnNames).toContain('activationOfferMode');
+    expect(columnNames).toContain('activationOfferOutputs');
+    expect(columnNames).toContain('activationTreasuryAddressUsed');
     expect(columnNames).toContain('treasuryAddressUsed');
     expect(columnNames).toContain('payout_txid');
   });

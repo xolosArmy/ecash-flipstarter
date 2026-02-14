@@ -34,6 +34,9 @@ export type StoredCampaign = {
   activationFeePaid?: boolean;
   activationFeeTxid?: string | null;
   activationFeePaidAt?: string | null;
+  activationOfferMode?: 'tx' | 'intent' | null;
+  activationOfferOutputs?: Array<{ address: string; valueSats: number }> | null;
+  activationTreasuryAddressUsed?: string | null;
   payout?: {
     wcOfferId?: string | null;
     txid?: string | null;
@@ -94,6 +97,9 @@ export async function initializeDatabase(database?: Database): Promise<void> {
       activationFeePaid INTEGER,
       activationFeeTxid TEXT,
       activationFeePaidAt TEXT,
+      activationOfferMode TEXT,
+      activationOfferOutputs TEXT,
+      activationTreasuryAddressUsed TEXT,
       payout_wcOfferId TEXT,
       payout_txid TEXT,
       payout_paidAt TEXT,
@@ -145,6 +151,9 @@ async function ensureCampaignColumns(db: Database): Promise<void> {
     { name: 'activationFeePaid', sqlType: 'INTEGER', defaultSql: '0' },
     { name: 'activationFeeTxid', sqlType: 'TEXT' },
     { name: 'activationFeePaidAt', sqlType: 'TEXT' },
+    { name: 'activationOfferMode', sqlType: 'TEXT' },
+    { name: 'activationOfferOutputs', sqlType: 'TEXT' },
+    { name: 'activationTreasuryAddressUsed', sqlType: 'TEXT' },
     { name: 'payout_wcOfferId', sqlType: 'TEXT' },
     { name: 'payout_txid', sqlType: 'TEXT' },
     { name: 'payout_paidAt', sqlType: 'TEXT' },
@@ -185,6 +194,9 @@ type CampaignRow = {
   activationFeePaid: number | null;
   activationFeeTxid: string | null;
   activationFeePaidAt: string | null;
+  activationOfferMode: string | null;
+  activationOfferOutputs: string | null;
+  activationTreasuryAddressUsed: string | null;
   payout_wcOfferId: string | null;
   payout_txid: string | null;
   payout_paidAt: string | null;
@@ -240,6 +252,11 @@ function mapRowToCampaign(row: CampaignRow): StoredCampaign {
     activationFeePaid: row.activationFeePaid === 1,
     activationFeeTxid: row.activationFeeTxid ?? row.activation_feeTxid,
     activationFeePaidAt: row.activationFeePaidAt ?? row.activation_feePaidAt,
+    activationOfferMode: row.activationOfferMode === 'intent' || row.activationOfferMode === 'tx'
+      ? row.activationOfferMode
+      : null,
+    activationOfferOutputs: parseActivationOfferOutputs(row.activationOfferOutputs),
+    activationTreasuryAddressUsed: row.activationTreasuryAddressUsed,
     payout: {
       wcOfferId: row.payout_wcOfferId,
       txid: row.payout_txid,
@@ -272,6 +289,11 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
   const activationFeePaid = campaign.activationFeePaid ? 1 : 0;
   const activationFeeTxid = campaign.activationFeeTxid ?? campaign.activation?.feeTxid ?? null;
   const activationFeePaidAt = campaign.activationFeePaidAt ?? campaign.activation?.feePaidAt ?? null;
+  const activationOfferMode =
+    campaign.activationOfferMode === 'intent' || campaign.activationOfferMode === 'tx'
+      ? campaign.activationOfferMode
+      : null;
+  const activationOfferOutputs = serializeActivationOfferOutputs(campaign.activationOfferOutputs);
 
   try {
     await db.run(
@@ -300,12 +322,15 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
         activationFeePaid,
         activationFeeTxid,
         activationFeePaidAt,
+        activationOfferMode,
+        activationOfferOutputs,
+        activationTreasuryAddressUsed,
         payout_wcOfferId,
         payout_txid,
         payout_paidAt,
         treasuryAddressUsed,
         expirationTime
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         campaign.id,
@@ -331,6 +356,9 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
         activationFeePaid,
         activationFeeTxid,
         activationFeePaidAt,
+        activationOfferMode,
+        activationOfferOutputs,
+        campaign.activationTreasuryAddressUsed ?? null,
         campaign.payout?.wcOfferId ?? null,
         campaign.payout?.txid ?? null,
         campaign.payout?.paidAt ?? null,
@@ -342,6 +370,35 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`sqlite-upsert-campaign-failed:${campaign.id}:${message}`);
   }
+}
+
+function parseActivationOfferOutputs(raw: string | null): Array<{ address: string; valueSats: number }> | null {
+  if (!raw || !raw.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    const outputs = parsed
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') return null;
+        const address = (entry as { address?: unknown }).address;
+        const valueSats = (entry as { valueSats?: unknown }).valueSats;
+        if (typeof address !== 'string') return null;
+        const valueNumber = Number(valueSats);
+        if (!Number.isFinite(valueNumber) || valueNumber <= 0) return null;
+        return { address, valueSats: Math.floor(valueNumber) };
+      })
+      .filter((entry): entry is { address: string; valueSats: number } => entry !== null);
+    return outputs.length > 0 ? outputs : null;
+  } catch {
+    return null;
+  }
+}
+
+function serializeActivationOfferOutputs(
+  outputs: StoredCampaign['activationOfferOutputs'],
+): string | null {
+  if (!Array.isArray(outputs) || outputs.length === 0) return null;
+  return JSON.stringify(outputs);
 }
 
 export async function getCampaignById(id: string, database?: Database): Promise<StoredCampaign | null> {

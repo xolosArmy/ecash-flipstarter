@@ -21,6 +21,8 @@ type AuditLogRow = {
   timestamp: string;
 };
 
+type ActivationOfferOutput = { address: string; valueSats: number };
+
 function toBigIntGoal(value: unknown): bigint {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.floor(value));
@@ -107,6 +109,9 @@ function normalizeSnapshot(snapshot: StoredCampaign): StoredCampaign {
     activationFeePaid,
     activationFeeTxid,
     activationFeePaidAt,
+    activationOfferMode: snapshot.activationOfferMode ?? null,
+    activationOfferOutputs: snapshot.activationOfferOutputs ?? null,
+    activationTreasuryAddressUsed: snapshot.activationTreasuryAddressUsed ?? null,
     treasuryAddressUsed: snapshot.treasuryAddressUsed ?? null,
   };
 }
@@ -140,6 +145,9 @@ function toStoredCampaign(definition: CampaignDefinition, prior?: StoredCampaign
     activationFeePaid: priorNormalized?.activationFeePaid ?? false,
     activationFeeTxid: priorNormalized?.activationFeeTxid ?? null,
     activationFeePaidAt: priorNormalized?.activationFeePaidAt ?? null,
+    activationOfferMode: priorNormalized?.activationOfferMode ?? null,
+    activationOfferOutputs: priorNormalized?.activationOfferOutputs ?? null,
+    activationTreasuryAddressUsed: priorNormalized?.activationTreasuryAddressUsed ?? null,
     payout: priorNormalized?.payout ?? {
       wcOfferId: null,
       txid: null,
@@ -274,6 +282,9 @@ export class CampaignService {
       activationFeePaid,
       activationFeeTxid: null,
       activationFeePaidAt: null,
+      activationOfferMode: null,
+      activationOfferOutputs: null,
+      activationTreasuryAddressUsed: null,
       payout: {
         wcOfferId:
           typeof payload.payout === 'object' && payload.payout && 'wcOfferId' in payload.payout
@@ -429,7 +440,16 @@ export class CampaignService {
     }));
   }
 
-  async setActivationOffer(id: string, wcOfferId: string, payerAddress: string) {
+  async setActivationOffer(
+    id: string,
+    wcOfferId: string,
+    payerAddress: string,
+    options?: {
+      mode?: 'tx' | 'intent';
+      outputs?: ActivationOfferOutput[];
+      treasuryAddressUsed?: string | null;
+    },
+  ) {
     const campaign = campaigns.get(id);
     if (!campaign) {
       throw new Error('campaign-not-found');
@@ -444,6 +464,9 @@ export class CampaignService {
       payerAddress,
       wcOfferId,
     };
+    nextSnapshot.activationOfferMode = options?.mode ?? 'tx';
+    nextSnapshot.activationOfferOutputs = options?.outputs ?? null;
+    nextSnapshot.activationTreasuryAddressUsed = options?.treasuryAddressUsed ?? null;
 
     await saveCampaignToDisk(nextSnapshot);
     campaignSnapshots.set(id, nextSnapshot);
@@ -451,6 +474,9 @@ export class CampaignService {
     await this.logEvent(id, 'ACTIVATION_FEE_OFFER_CREATED', {
       wcOfferId,
       payerAddress,
+      mode: nextSnapshot.activationOfferMode,
+      outputs: nextSnapshot.activationOfferOutputs,
+      treasuryAddressUsed: nextSnapshot.activationTreasuryAddressUsed,
       createdAt: new Date().toISOString(),
     });
   }
@@ -492,6 +518,7 @@ export class CampaignService {
       paidAt,
       payerAddress: nextSnapshot.activation?.payerAddress ?? null,
       activationFeeRequired: nextSnapshot.activationFeeRequired,
+      activationTreasuryAddressUsed: nextSnapshot.activationTreasuryAddressUsed ?? null,
     });
   }
 
@@ -610,6 +637,9 @@ export class CampaignService {
       activationFeePaid: snapshot?.activationFeePaid ?? false,
       activationFeeTxid: snapshot?.activationFeeTxid ?? null,
       activationFeePaidAt: snapshot?.activationFeePaidAt ?? null,
+      activationOfferMode: snapshot?.activationOfferMode ?? null,
+      activationOfferOutputs: snapshot?.activationOfferOutputs ?? null,
+      activationTreasuryAddressUsed: snapshot?.activationTreasuryAddressUsed ?? null,
       payout: snapshot?.payout,
       treasuryAddressUsed: snapshot?.treasuryAddressUsed ?? null,
       covenant: covenant ? { ...covenant, value: covenant.value.toString() } : undefined,

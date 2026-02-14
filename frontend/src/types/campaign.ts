@@ -25,6 +25,9 @@ export interface CampaignSummary {
   activationFeePaid?: boolean;
   activationFeeTxid?: string | null;
   activationFeePaidAt?: string | null;
+  activationOfferMode?: 'tx' | 'intent' | null;
+  activationOfferOutputs?: Array<{ address: string; valueSats: number }> | null;
+  activationTreasuryAddressUsed?: string | null;
   payout?: CampaignPayout;
   treasuryAddressUsed?: string | null;
   totalPledged: number;

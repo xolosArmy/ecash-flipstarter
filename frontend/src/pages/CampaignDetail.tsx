@@ -21,6 +21,7 @@ import { ExplorerLink } from '../components/ExplorerLink';
 import { StatusBadge } from '../components/StatusBadge';
 import { SecurityBanner } from '../components/SecurityBanner';
 import { Countdown } from '../components/Countdown';
+import { WC_METHOD } from '../walletconnect/client';
 
 function normalizeEcashAddress(address: string): string {
   const trimmed = address.trim();
@@ -184,6 +185,9 @@ export const CampaignDetail: React.FC = () => {
       setActivationMessage('Construyendo pago de activación...');
       const built = await buildActivationTx(id, activeAddress);
       localStorage.setItem(`tonalli:activationOfferId:${id}`, built.wcOfferId);
+      if (built.mode !== 'intent') {
+        throw new Error('activation-mode-unsupported');
+      }
       const ecashNs = activeSession?.namespaces?.ecash;
       if (!ecashNs) throw new Error('wc-no-ecash-namespace');
       const chainId =
@@ -193,9 +197,18 @@ export const CampaignDetail: React.FC = () => {
           if (parts.length < 2) throw new Error('wc-no-chainid');
           return `${parts[0]}:${parts[1]}`;
         })();
+      console.debug('[ActivationFee][WC] payload', {
+        method: WC_METHOD,
+        chainId,
+        outputsCount: built.outputs.length,
+        firstOutput: built.outputs[0] ?? null,
+      });
 
       setActivationMessage('Esperando confirmación en Tonalli...');
-      const result = await requestSignAndBroadcast(built.wcOfferId, chainId);
+      const result = await requestSignAndBroadcast(built.wcOfferId, chainId, {
+        outputs: built.outputs,
+        userPrompt: built.userPrompt,
+      });
       const txid = extractTxid(result);
       if (!txid) {
         throw new Error('Tonalli returned an invalid txid.');
@@ -209,11 +222,24 @@ export const CampaignDetail: React.FC = () => {
         }),
       );
       window.dispatchEvent(new Event('campaigns:refresh'));
-      setActivationMessage('Campaña activada.');
+      if (summary.verificationStatus === 'pending_verification') {
+        setActivationMessage(`No se pudo verificar en Chronik, pero guardamos tu txid: ${txid}`);
+      } else {
+        setActivationMessage('Campaña activada.');
+      }
       showToast('Campaña activada on-chain', 'success');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'No se pudo activar la campaña.';
-      setActivationError(message);
+      const lower = message.toLowerCase();
+      if (lower.includes('insufficient') || lower.includes('funds')) {
+        setActivationError('Fondos insuficientes para pagar fee + comisión');
+      } else if (lower.includes('fee too low') || lower.includes('mempool')) {
+        setActivationError('Transacción rechazada por mempool (fee demasiado baja)');
+      } else if (message.includes('activation-mode-unsupported')) {
+        setActivationError('El backend devolvió un modo de activación no soportado.');
+      } else {
+        setActivationError(message);
+      }
       showToast('No se pudo activar la campaña', 'error');
     } finally {
       setActivating(false);

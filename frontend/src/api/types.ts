@@ -27,6 +27,9 @@ export interface CampaignSummary {
   activationFeePaid?: boolean;
   activationFeeTxid?: string | null;
   activationFeePaidAt?: string | null;
+  activationOfferMode?: 'tx' | 'intent' | null;
+  activationOfferOutputs?: Array<{ address: string; valueSats: number }> | null;
+  activationTreasuryAddressUsed?: string | null;
   payout?: {
     wcOfferId?: string | null;
     txid?: string | null;

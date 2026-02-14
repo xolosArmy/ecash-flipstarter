@@ -16,6 +16,11 @@ const rpcPass = ecashConfig.rpcPassword;
 const effectiveChronikBaseUrl = CHRONIK_URL;
 const chronik = new ChronikClient([effectiveChronikBaseUrl]);
 
+export type TransactionOutput = {
+  valueSats: bigint;
+  scriptPubKey: string;
+};
+
 export function getEffectiveChronikBaseUrl(): string {
   return effectiveChronikBaseUrl;
 }
@@ -96,6 +101,16 @@ export async function broadcastRawTx(rawTxHex: string): Promise<BroadcastResult>
   return broadcastTx(rawTxHex);
 }
 
+export async function getTransactionOutputs(txid: string): Promise<TransactionOutput[]> {
+  if (USE_MOCK) {
+    return [];
+  }
+  if (USE_CHRONIK) {
+    return getTransactionOutputsViaChronik(txid);
+  }
+  return getTransactionOutputsViaRpc(txid);
+}
+
 async function getUtxosForAddressViaChronik(address: string): Promise<Utxo[]> {
   const normalizedAddress = normalizeChronikAddress(address);
   const scriptUtxos = await chronikRequest(
@@ -143,6 +158,15 @@ async function getUtxosForScriptViaChronik(
 async function broadcastRawTxViaChronik(rawTxHex: string): Promise<BroadcastResult> {
   const data = await chronikRequest('broadcast tx', () => chronik.broadcastTx(rawTxHex));
   return { txid: data.txid };
+}
+
+async function getTransactionOutputsViaChronik(txid: string): Promise<TransactionOutput[]> {
+  const tx = await chronikRequest(`tx ${txid}`, () => chronik.tx(txid));
+  const outputs = (tx as { outputs?: Array<{ sats?: unknown; outputScript?: unknown }> }).outputs ?? [];
+  return outputs.map((output) => ({
+    valueSats: toBigIntSats(output.sats),
+    scriptPubKey: typeof output.outputScript === 'string' ? output.outputScript.toLowerCase() : '',
+  }));
 }
 
 export async function getChronikBlockchainInfo() {
@@ -235,6 +259,25 @@ async function broadcastRawTxViaRpc(rawTxHex: string): Promise<BroadcastResult> 
   return { txid };
 }
 
+async function getTransactionOutputsViaRpc(txid: string): Promise<TransactionOutput[]> {
+  const tx = await rpcCall<{ vout?: Array<{ value?: unknown; scriptPubKey?: { hex?: unknown } }> }>(
+    'getrawtransaction',
+    [txid, true],
+  );
+  const outputs = tx.vout ?? [];
+  return outputs.map((output) => {
+    const scriptPubKey =
+      output.scriptPubKey && typeof output.scriptPubKey.hex === 'string'
+        ? output.scriptPubKey.hex.toLowerCase()
+        : '';
+    const valueSats =
+      typeof output.value === 'number'
+        ? BigInt(Math.round(output.value * 100_000_000))
+        : toBigIntSats(output.value);
+    return { valueSats, scriptPubKey };
+  });
+}
+
 async function chronikRequest<T>(label: string, action: () => Promise<T>): Promise<T> {
   try {
     return await action();
@@ -274,4 +317,19 @@ function formatChronikError(err: unknown): string {
     }
   }
   return String(err);
+}
+
+function toBigIntSats(value: unknown): bigint {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return BigInt(Math.floor(value));
+  }
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      return BigInt(value);
+    } catch {
+      return 0n;
+    }
+  }
+  return 0n;
 }

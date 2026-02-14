@@ -18,6 +18,9 @@ router.get('/walletconnect/offers/:offerId', (req, res) => {
   return res.json({
     offerId: offer.offerId,
     unsignedTxHex: offer.unsignedTxHex,
+    mode: offer.mode ?? (offer.unsignedTxHex ? 'tx' : 'intent'),
+    outputs: offer.outputs ?? [],
+    userPrompt: offer.userPrompt,
     campaignId: offer.campaignId,
     amount: offer.amount,
     contributorAddress: offer.contributorAddress,

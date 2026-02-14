@@ -2,10 +2,13 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState 
 import type SignClient from '@walletconnect/sign-client';
 import type { SessionTypes } from '@walletconnect/types';
 import {
+  assertSessionSupportsEcashSign,
+  CHAIN_ID,
   clearStoredTopic,
   connect as wcConnect,
   disconnect as wcDisconnect,
   getEcashAccounts,
+  getRequestedNamespaces,
   getSignClient,
   getStoredTopic,
   getWalletConnectProjectId,
@@ -28,7 +31,14 @@ type WalletConnectState = {
   connect: () => Promise<SessionTypes.Struct | null>;
   disconnect: () => Promise<void>;
   requestAddresses: () => Promise<string[]>;
-  requestSignAndBroadcast: (offerId: string, chainId: string) => Promise<unknown>;
+  requestSignAndBroadcast: (
+    offerId: string,
+    chainId: string,
+    options?: {
+      outputs?: Array<{ address: string; valueSats: number }>;
+      userPrompt?: string;
+    }
+  ) => Promise<unknown>;
   setLastTxid: (txid: string | null) => void;
 };
 
@@ -85,11 +95,18 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   useEffect(() => {
+    if (import.meta.env.DEV) {
+      const namespaces = getRequestedNamespaces();
+      console.debug('[walletconnect] proposed namespaces', namespaces);
+    }
+  }, []);
+
+  useEffect(() => {
     let active = true;
     const setup = async () => {
       if (!isWalletConnectConfigured()) {
         setProjectIdMissing(true);
-        setError('No projectId found. Configura VITE_WC_PROJECT_ID.');
+        setError('No projectId found for WalletConnect (VITE_WC_PROJECT_ID).');
         return;
       }
       setProjectIdMissing(false);
@@ -108,6 +125,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
         if (storedTopic) {
           const session = safelyGetSession(client, storedTopic);
           if (session) {
+            assertSessionSupportsEcashSign(session, CHAIN_ID);
             setTopic(session.topic);
             setConnected(true);
             setStatus('connected');
@@ -185,16 +203,27 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
     return next;
   };
 
-  const requestSignAndBroadcast = async (offerId: string, chainId: string) => {
-    if (!topic) throw new Error('No WalletConnect session.');
-    const client = clientRef.current;
-    const session = client ? safelyGetSession(client, topic) : null;
-    if (!session || !sessionSupportsEcashSigning(session)) {
-      throw new Error('Sesión WalletConnect inválida para ecash:1. Reconecta Tonalli.');
+  const requestSignAndBroadcast = async (
+    offerId: string,
+    chainId: string,
+    options?: {
+      outputs?: Array<{ address: string; valueSats: number }>;
+      userPrompt?: string;
     }
+  ) => {
+    if (!topic) throw new Error('No WalletConnect session.');
+
+    const client = clientRef.current;
+    if (!client) throw new Error('WalletConnect client not initialized.');
+    const session = safelyGetSession(client, topic);
+    if (!session) {
+      throw new Error('WalletConnect session expired. Reconecta la wallet.');
+    }
+    assertSessionSupportsEcashSign(session, chainId || CHAIN_ID);
+
     setStatus('signing');
     try {
-      const result = await requestSignAndBroadcastTransaction(topic, offerId, chainId);
+      const result = await requestSignAndBroadcastTransaction(topic, offerId, chainId || CHAIN_ID, options);
       setStatus('connected');
       return result;
     } catch (err) {
