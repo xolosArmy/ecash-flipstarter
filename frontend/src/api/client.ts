@@ -1,4 +1,10 @@
-import type { BuiltTxResponse, CampaignDetail, CampaignSummary as ApiCampaignSummary } from './types';
+import type {
+  AuditLog,
+  BuiltTxResponse,
+  CampaignDetail,
+  CampaignSummary as ApiCampaignSummary,
+  GlobalStats,
+} from './types';
 import type { CampaignSummary as CampaignSummaryResponse } from '../types/campaign';
 
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '');
@@ -66,6 +72,10 @@ export interface CreatedCampaign {
     payerAddress?: string | null;
     wcOfferId?: string | null;
   };
+  activationFeeRequired?: number;
+  activationFeePaid?: boolean;
+  activationFeeTxid?: string | null;
+  activationFeePaidAt?: string | null;
 }
 
 export async function createCampaign(payload: CreateCampaignPayload): Promise<CreatedCampaign> {
@@ -122,6 +132,8 @@ export async function confirmCampaignActivationTx(
 
 export interface CampaignActivationStatusResponse {
   status: 'draft' | 'pending_fee' | 'active' | 'expired' | 'funded' | 'paid_out';
+  activationFeeRequired?: number;
+  activationFeePaid?: boolean;
   feeTxid?: string;
   feePaidAt?: string;
 }
@@ -242,4 +254,12 @@ export interface CampaignPledgesResponse {
 
 export async function fetchCampaignPledges(campaignId: string): Promise<CampaignPledgesResponse> {
   return jsonFetch<CampaignPledgesResponse>(`/campaigns/${campaignId}/pledges`);
+}
+
+export async function fetchGlobalStats(): Promise<GlobalStats> {
+  return jsonFetch<GlobalStats>(`/stats`);
+}
+
+export async function fetchCampaignHistory(id: string): Promise<AuditLog[]> {
+  return jsonFetch<AuditLog[]>(`/campaigns/${id}/history`);
 }

@@ -5,9 +5,11 @@ import {
   buildPayoutTx,
   confirmActivationTx,
   confirmPayoutTx,
+  fetchCampaignHistory,
   fetchCampaignPledges,
   fetchCampaignSummary,
 } from '../api/client';
+import type { AuditLog } from '../api/types';
 import type { CampaignSummary } from '../types/campaign';
 import { PledgeForm } from '../components/PledgeForm';
 import { WalletConnectModal } from '../components/WalletConnectModal';
@@ -50,19 +52,12 @@ export const CampaignDetail: React.FC = () => {
   const [activating, setActivating] = useState(false);
   const [payingOut, setPayingOut] = useState(false);
   const [messages, setMessages] = useState<Array<{ amount: number; timestamp: string; message: string }>>([]);
+  const [history, setHistory] = useState<AuditLog[]>([]);
   const { signClient, topic, connected, connect, requestSignAndBroadcast, addresses } = useWalletConnect();
   const { showToast } = useToast();
 
-  const refreshCampaign = useCallback(() => {
-    if (!id) return;
-    setCampaignError('');
-    fetchCampaignSummary(id)
-      .then((summary) => setCampaign(summary))
-      .catch(() => {
-        setCampaign(null);
-        setCampaignError('No se pudo cargar la campaña.');
-      });
-    fetchCampaignPledges(id)
+  const loadMessages = useCallback((campaignId: string) => {
+    fetchCampaignPledges(campaignId)
       .then((response) => {
         const nextMessages = response.pledges
           .filter((pledge) => typeof pledge.message === 'string' && pledge.message.trim())
@@ -76,7 +71,29 @@ export const CampaignDetail: React.FC = () => {
         setMessages(nextMessages);
       })
       .catch(() => setMessages([]));
-  }, [id]);
+  }, []);
+
+  const loadHistory = useCallback((campaignId: string) => {
+    fetchCampaignHistory(campaignId)
+      .then((logs) => {
+        const sorted = [...logs].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+        setHistory(sorted);
+      })
+      .catch(() => setHistory([]));
+  }, []);
+
+  const refreshCampaign = useCallback(() => {
+    if (!id) return;
+    setCampaignError('');
+    fetchCampaignSummary(id)
+      .then((summary) => setCampaign(summary))
+      .catch(() => {
+        setCampaign(null);
+        setCampaignError('No se pudo cargar la campaña.');
+      });
+    loadMessages(id);
+    loadHistory(id);
+  }, [id, loadHistory, loadMessages]);
 
   useEffect(() => {
     if (!id) {
@@ -97,21 +114,9 @@ export const CampaignDetail: React.FC = () => {
         setCampaignError('No se pudo cargar la campaña.');
         setLoadingCampaign(false);
       });
-    fetchCampaignPledges(id)
-      .then((response) => {
-        const nextMessages = response.pledges
-          .filter((pledge) => typeof pledge.message === 'string' && pledge.message.trim())
-          .map((pledge) => ({
-            amount: pledge.amount,
-            timestamp: pledge.timestamp,
-            message: pledge.message!.trim(),
-          }))
-          .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
-          .slice(0, 20);
-        setMessages(nextMessages);
-      })
-      .catch(() => setMessages([]));
-  }, [id]);
+    loadMessages(id);
+    loadHistory(id);
+  }, [id, loadHistory, loadMessages]);
 
   useEffect(() => {
     if (!id) return undefined;
@@ -280,10 +285,21 @@ export const CampaignDetail: React.FC = () => {
       ? Math.min(100, Math.round((campaign.totalPledged / campaign.goal) * 100))
       : 0;
   const activationFeeSats = campaign.activation?.feeSats || '80000000';
-  const activationFeeTxid = campaign.activation?.feeTxid || null;
+  const activationFeeTxid = campaign.activationFeeTxid || campaign.activation?.feeTxid || null;
+  const activationFeePaid = campaign.activationFeePaid ?? Boolean(activationFeeTxid);
+  const activationFeeRequiredXec = (() => {
+    if (typeof campaign.activationFeeRequired === 'number' && Number.isFinite(campaign.activationFeeRequired)) {
+      return campaign.activationFeeRequired;
+    }
+    const parsedSats = Number(activationFeeSats);
+    if (Number.isFinite(parsedSats) && parsedSats > 0) {
+      return Math.floor(parsedSats / 100);
+    }
+    return 800000;
+  })();
   const payoutTxid = campaign.payout?.txid || null;
   const hasConfirmedActivation = Boolean(
-    activationFeeTxid
+    activationFeePaid
       && (campaign.status === 'active'
         || campaign.status === 'funded'
         || campaign.status === 'expired'
@@ -306,6 +322,11 @@ export const CampaignDetail: React.FC = () => {
           Activación confirmada
         </p>
       )}
+      <p>
+        Fee de activación: {new Intl.NumberFormat('es-MX').format(activationFeeRequiredXec)} XEC
+        {' · '}
+        Estado: {activationFeePaid ? 'Pagada' : 'Pendiente'}
+      </p>
       <p>
         Progreso: <AmountDisplay sats={campaign.totalPledged} /> / <AmountDisplay sats={campaign.goal} /> ({percent}%)
       </p>
@@ -352,7 +373,8 @@ export const CampaignDetail: React.FC = () => {
         <section style={{ border: '1px solid #eee', borderRadius: 8, padding: 12, marginTop: 12 }}>
           <h3>Activar campaña</h3>
           <p>
-            Para activar la campaña debes pagar una tarifa de servicio de <AmountDisplay sats={activationFeeSats} />.
+            Para activar la campaña debes pagar la fee de activación de{' '}
+            {new Intl.NumberFormat('es-MX').format(activationFeeRequiredXec)} XEC.
           </p>
           <label style={{ display: 'grid', gap: 4 }}>
             Payer Address
@@ -363,7 +385,7 @@ export const CampaignDetail: React.FC = () => {
             />
           </label>
           <button type="button" onClick={activateCampaign} disabled={activating}>
-            {activating ? 'Procesando...' : 'Construir pago de activación'}
+            {activating ? 'Procesando...' : 'Pagar fee de activación'}
           </button>
           {activationMessage && <p>{activationMessage}</p>}
           {activationError && <p style={{ color: '#b00020' }}>{activationError}</p>}
@@ -406,6 +428,30 @@ export const CampaignDetail: React.FC = () => {
             </small>
           </article>
         ))}
+      </section>
+      <section className="teyolia-audit-section">
+        <h3>Historial de Auditoría</h3>
+        <div className="audit-timeline">
+          {history.length === 0 && <p>No hay eventos de auditoría todavía.</p>}
+          {history.map((log, index) => (
+            <div key={`${log.timestamp}-${index}`} className="audit-event">
+              <div className="audit-dot" />
+              <div className="audit-content">
+                <header>
+                  <span className={`audit-badge badge-${log.event.toLowerCase()}`}>
+                    {log.event}
+                  </span>
+                  <time>{new Date(log.timestamp).toLocaleString()}</time>
+                </header>
+                <pre className="audit-details">
+                  {log.event === 'PLEDGE_RECEIVED'
+                    ? `Donación de ${String(log.details?.amount ?? '')} sats`
+                    : `Estado cambiado a ${log.event}`}
+                </pre>
+              </div>
+            </div>
+          ))}
+        </div>
       </section>
     </div>
   );

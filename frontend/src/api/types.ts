@@ -23,11 +23,16 @@ export interface CampaignSummary {
     payerAddress?: string | null;
     wcOfferId?: string | null;
   };
+  activationFeeRequired?: number;
+  activationFeePaid?: boolean;
+  activationFeeTxid?: string | null;
+  activationFeePaidAt?: string | null;
   payout?: {
     wcOfferId?: string | null;
     txid?: string | null;
     paidAt?: string | null;
   };
+  treasuryAddressUsed?: string | null;
 }
 
 export interface CampaignDetail extends CampaignSummary {
@@ -62,4 +67,17 @@ export interface BuiltTxResponse {
   contributorAddress?: string;
   campaignId?: string;
   expiresAt?: number;
+}
+
+export interface GlobalStats {
+  totalCampaigns: number;
+  totalGoalSats: string;
+  totalRaisedSats: number;
+  totalPledges: number;
+}
+
+export interface AuditLog {
+  event: string;
+  details: any;
+  timestamp: string;
 }

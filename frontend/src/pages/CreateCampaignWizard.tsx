@@ -375,7 +375,7 @@ export const CreateCampaignWizard: React.FC = () => {
             Estado actual: <StatusBadge status={campaign?.status || 'draft'} />
           </p>
           <p>
-            Para activar tu campaña, paga la tarifa de activación: <strong><AmountDisplay sats={activationFeeSats} /></strong>.
+            Fee de activación: <strong><AmountDisplay sats={activationFeeSats} /></strong> (estado: {campaign?.activationFeePaid ? 'Pagada' : 'Pendiente'}).
           </p>
           <WalletConnectBar />
           <label style={{ display: 'grid', gap: 4, marginBottom: 10 }}>
@@ -388,7 +388,7 @@ export const CreateCampaignWizard: React.FC = () => {
           </label>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" onClick={handlePayActivation} disabled={payingActivation || confirmingActivation}>
-              {payingActivation ? 'Procesando...' : 'Pagar tarifa de activación'}
+              {payingActivation ? 'Procesando...' : 'Pagar fee de activación'}
             </button>
             <button
               type="button"

@@ -1,83 +1,169 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { SQLiteStore, type CampaignRecord } from '../db/SQLiteStore';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  ACTIVATION_FEE_XEC,
+} from '../config/constants';
+import {
+  countCampaigns,
+  deleteCampaign,
+  getCampaignById,
+  initializeDatabase,
+  listCampaigns,
+  openDatabase,
+  upsertCampaign,
+  type StoredCampaign,
+} from '../db/SQLiteStore';
 
-const stores: SQLiteStore[] = [];
-const tempFiles: string[] = [];
+let tmpDir = '';
+let dbPath = '';
 
-function buildCampaign(id: string): CampaignRecord {
-  return {
-    id,
-    name: 'Campaña de prueba',
-    description: 'Persistencia sqlite',
-    recipientAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
-    beneficiaryAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
-    campaignAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
-    covenantAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
-    goal: 10000,
-    expiresAt: '2027-01-01T00:00:00.000Z',
-    createdAt: '2026-01-01T00:00:00.000Z',
-    status: 'active',
-    activation: {
-      feeSats: '80000000',
-      feeTxid: null,
-      feePaidAt: null,
-      payerAddress: null,
-      wcOfferId: null,
-    },
-    payout: {
-      wcOfferId: null,
-      txid: null,
-      paidAt: null,
-    },
-    location: {
-      latitude: 32.5149,
-      longitude: -117.0382,
-    },
-  };
-}
+const SAMPLE_CAMPAIGN: StoredCampaign = {
+  id: 'campaign-test-1',
+  name: 'SQLite test campaign',
+  description: 'Campaign persisted in sqlite',
+  goal: '12345',
+  expiresAt: '2026-12-31T00:00:00.000Z',
+  createdAt: '2026-02-14T00:00:00.000Z',
+  status: 'pending_fee',
+  recipientAddress: 'ecash:qptestrecipientaddress0000000000000000000',
+  beneficiaryAddress: 'ecash:qpbeneficiaryaddress000000000000000000',
+  campaignAddress: 'ecash:qpcampaignaddress0000000000000000000000',
+  covenantAddress: 'ecash:qpcovenantaddress000000000000000000000',
+  location: {
+    latitude: 32.5149,
+    longitude: -117.0382,
+  },
+  activation: {
+    feeSats: '80000000',
+    feeTxid: null,
+    feePaidAt: null,
+    payerAddress: null,
+    wcOfferId: null,
+  },
+  activationFeeRequired: 800000,
+  activationFeePaid: false,
+  activationFeeTxid: null,
+  activationFeePaidAt: null,
+  payout: {
+    wcOfferId: null,
+    txid: null,
+    paidAt: null,
+  },
+  treasuryAddressUsed: null,
+};
 
-function createStore() {
-  const dbPath = path.join(os.tmpdir(), `campaigns-test-${Date.now()}-${Math.random()}.db`);
-  tempFiles.push(dbPath);
-  const store = new SQLiteStore(dbPath);
-  stores.push(store);
-  return store;
-}
+beforeEach(() => {
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sqlite-store-test-'));
+  dbPath = path.join(tmpDir, 'test-campaigns.db');
+});
 
-afterEach(() => {
-  stores.splice(0).forEach((store) => store.close());
-  tempFiles.splice(0).forEach((filePath) => {
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
-  });
+afterEach(async () => {
+  try {
+    const db = await openDatabase(dbPath);
+    await db.close();
+  } catch {
+    // no-op
+  }
+  fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 describe('SQLiteStore', () => {
-  it('crea tabla y permite upsert/list/get', async () => {
-    const store = createStore();
-    await store.initializeDatabase();
+  it('creates campaigns table on initializeDatabase', async () => {
+    const db = await openDatabase(dbPath);
+    await initializeDatabase(db);
 
-    const campaignA = buildCampaign('campaign-a');
-    const campaignB = buildCampaign('campaign-b');
-    campaignB.name = 'Otra campaña';
+    const tableInfo = await db.all<Array<{ name: string }>>('PRAGMA table_info(campaigns)');
+    const columnNames = tableInfo.map((entry) => entry.name);
 
-    await store.upsertCampaign(campaignA);
-    await store.upsertCampaign(campaignB);
+    expect(columnNames).toContain('id');
+    expect(columnNames).toContain('expiresAt');
+    expect(columnNames).toContain('activation_feeSats');
+    expect(columnNames).toContain('activationFeeRequired');
+    expect(columnNames).toContain('activationFeePaid');
+    expect(columnNames).toContain('treasuryAddressUsed');
+    expect(columnNames).toContain('payout_txid');
+  });
 
-    const list = await store.listCampaigns();
-    expect(list).toHaveLength(2);
-    expect(list[0].id).toBe('campaign-a');
+  it('upserts and lists campaigns with activation defaults', async () => {
+    const db = await openDatabase(dbPath);
+    await initializeDatabase(db);
 
-    const found = await store.getCampaignById('campaign-b');
-    expect(found?.name).toBe('Otra campaña');
+    await upsertCampaign(SAMPLE_CAMPAIGN, db);
 
-    campaignB.status = 'funded';
-    await store.upsertCampaign(campaignB);
-    const updated = await store.getCampaignById('campaign-b');
-    expect(updated?.status).toBe('funded');
+    const list = await listCampaigns(db);
+    expect(list).toHaveLength(1);
+    expect(list[0].id).toBe(SAMPLE_CAMPAIGN.id);
+    expect(list[0].goal).toBe('12345');
+    expect(list[0].activation?.feeSats).toBe('80000000');
+    expect(list[0].activationFeeRequired).toBe(800000);
+    expect(list[0].activationFeePaid).toBe(false);
+  });
+
+  it('gets campaign by id and updates existing records via upsert', async () => {
+    const db = await openDatabase(dbPath);
+    await initializeDatabase(db);
+
+    await upsertCampaign(SAMPLE_CAMPAIGN, db);
+    await upsertCampaign(
+      {
+        ...SAMPLE_CAMPAIGN,
+        name: 'Updated name',
+        status: 'active',
+        activation: {
+          feeSats: SAMPLE_CAMPAIGN.activation?.feeSats ?? '80000000',
+          feeTxid: 'a'.repeat(64),
+          feePaidAt: '2026-02-14T01:00:00.000Z',
+        },
+        activationFeePaid: true,
+        activationFeeTxid: 'a'.repeat(64),
+        activationFeePaidAt: '2026-02-14T01:00:00.000Z',
+      },
+      db,
+    );
+
+    const campaign = await getCampaignById(SAMPLE_CAMPAIGN.id, db);
+    expect(campaign).not.toBeNull();
+    expect(campaign?.name).toBe('Updated name');
+    expect(campaign?.activation?.feeTxid).toBe('a'.repeat(64));
+    expect(campaign?.activationFeePaid).toBe(true);
+    expect(await countCampaigns(db)).toBe(1);
+  });
+
+  it('fills activation defaults for legacy rows during initializeDatabase', async () => {
+    const db = await openDatabase(dbPath);
+    await db.exec(`
+      CREATE TABLE campaigns (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        description TEXT,
+        goal TEXT,
+        expiresAt TEXT,
+        createdAt TEXT,
+        status TEXT
+      )
+    `);
+    await db.run(
+      'INSERT INTO campaigns (id, name, description, goal, expiresAt, createdAt, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      ['legacy-1', 'Legacy', '', '100', '2026-12-31T00:00:00.000Z', '2026-02-14T00:00:00.000Z', 'active'],
+    );
+
+    await initializeDatabase(db);
+
+    const migrated = await getCampaignById('legacy-1', db);
+    expect(migrated?.activationFeeRequired).toBe(ACTIVATION_FEE_XEC);
+    expect(migrated?.activationFeePaid).toBe(false);
+  });
+
+  it('deletes campaign by id', async () => {
+    const db = await openDatabase(dbPath);
+    await initializeDatabase(db);
+
+    await upsertCampaign(SAMPLE_CAMPAIGN, db);
+    const deleted = await deleteCampaign(SAMPLE_CAMPAIGN.id, db);
+
+    expect(deleted).toBe(true);
+    expect(await getCampaignById(SAMPLE_CAMPAIGN.id, db)).toBeNull();
   });
 });

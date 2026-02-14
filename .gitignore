@@ -15,3 +15,6 @@ backend/.env
 *.log
 npm-debug.log*
 .DS_Store
+
+# local sqlite dbs
+backend/data/*.db
