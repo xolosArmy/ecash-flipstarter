@@ -41,10 +41,23 @@ npm run migrate:campaigns
 ```
 
 ## WalletConnect v2 + Tonalli (RMZWallet)
-### Variables de entorno requeridas
+### Variables de entorno
 En frontend define:
+
+**Requeridas**
 - `VITE_WC_PROJECT_ID` (Project ID de Reown/WalletConnect Cloud).
-- `VITE_TONALLI_BASE_URL` (base URL de Tonalli).
+- `VITE_TONALLI_BASE_URL` (base URL de Tonalli; Tonalli es una app separada de Teyolia).
+
+**Recomendadas**
+- `VITE_WC_APP_NAME`
+- `VITE_WC_APP_URL`
+
+**Opcionales (solo si usas external-sign/deep link)**
+- `VITE_TONALLI_BRIDGE_URL`
+- `VITE_TONALLI_BRIDGE_ORIGIN`
+- `VITE_TONALLI_BRIDGE_PATH`
+- `VITE_TONALLI_CALLBACK_URL`
+- `VITE_TONALLI_TIMEOUT_MS`
 
 > No comitees `.env.local` ni IDs reales de producción.
 
