@@ -48,7 +48,9 @@ export function createApp() {
 
   app.use(express.json());
 
-  loadCampaignsFromDisk();
+  loadCampaignsFromDisk().catch((err) => {
+    console.error('[campaigns] startup load failed', err);
+  });
 
   // Healthchecks
   app.get('/health', (_req, res) => {

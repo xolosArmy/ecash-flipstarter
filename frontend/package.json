@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:wc-sanity": "node scripts/wc-sanity-check.mjs"
   },
   "dependencies": {
     "@walletconnect/sign-client": "^2.18.0",
@@ -18,10 +19,10 @@
     "react-router-dom": "^6.22.3"
   },
   "devDependencies": {
+    "@types/leaflet": "^1.9.12",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@types/react-router-dom": "^5.3.3",
-    "@types/leaflet": "^1.9.12",
     "@vitejs/plugin-react": "^5.0.0",
     "jsdom": "^24.0.0",
     "typescript": "^5.4.0",

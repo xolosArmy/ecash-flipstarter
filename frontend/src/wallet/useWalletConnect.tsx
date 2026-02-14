@@ -8,9 +8,11 @@ import {
   getEcashAccounts,
   getSignClient,
   getStoredTopic,
+  getWalletConnectProjectId,
   isWalletConnectConfigured,
   onSessionDelete,
   requestSignAndBroadcastTransaction,
+  sessionSupportsEcashSigning,
 } from '../walletconnect/client';
 
 type WalletConnectState = {
@@ -67,6 +69,12 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
   const [error, setError] = useState<string | null>(null);
   const [projectIdMissing, setProjectIdMissing] = useState(!isWalletConnectConfigured());
 
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.info('[wc] projectId present?', Boolean(getWalletConnectProjectId()));
+    }
+  }, []);
+
   const resetState = () => {
     setConnected(false);
     setTopic(null);
@@ -81,7 +89,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
     const setup = async () => {
       if (!isWalletConnectConfigured()) {
         setProjectIdMissing(true);
-        setError('Falta Project ID de WalletConnect. Configura VITE_WC_PROJECT_ID.');
+        setError('No projectId found. Configura VITE_WC_PROJECT_ID.');
         return;
       }
       setProjectIdMissing(false);
@@ -137,6 +145,12 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
           setStatus('awaiting');
         },
       });
+
+      if (!sessionSupportsEcashSigning(session)) {
+        setStatus('idle');
+        setError('La sesión no incluye ecash:1 + ecash_signAndBroadcastTransaction. Reconecta Tonalli.');
+        return null;
+      }
       setTopic(session.topic);
       setConnected(true);
       setStatus('connected');
@@ -173,6 +187,11 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const requestSignAndBroadcast = async (offerId: string, chainId: string) => {
     if (!topic) throw new Error('No WalletConnect session.');
+    const client = clientRef.current;
+    const session = client ? safelyGetSession(client, topic) : null;
+    if (!session || !sessionSupportsEcashSigning(session)) {
+      throw new Error('Sesión WalletConnect inválida para ecash:1. Reconecta Tonalli.');
+    }
     setStatus('signing');
     try {
       const result = await requestSignAndBroadcastTransaction(topic, offerId, chainId);

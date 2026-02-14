@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { Router } from 'express';
 import { CampaignService, syncCampaignStoreFromDiskCampaigns } from '../services/CampaignService';
+import { sqliteStore } from '../db/SQLiteStore';
+import { migrateJsonCampaignsToSqlite } from '../db/migrateCampaigns';
 import { validateAddress } from '../utils/validation';
 import { getUtxosForAddress } from '../blockchain/ecashClient';
 import type { Utxo } from '../blockchain/types';
@@ -58,7 +60,24 @@ const service = new CampaignService();
 let campaigns: Campaign[] = [];
 export const simpleCampaigns = new Map<string, Campaign>();
 const campaignsFilePath = path.resolve(__dirname, '../../data/campaigns.json');
-export function loadCampaignsFromDisk(): void {
+export async function loadCampaignsFromDisk(): Promise<void> {
+  try {
+    await sqliteStore.initializeDatabase();
+    const sqliteCampaigns = await sqliteStore.listCampaigns();
+    if (sqliteCampaigns.length > 0) {
+      campaigns = sqliteCampaigns.map((campaign) => normalizeCampaignRecord(campaign as Campaign));
+      simpleCampaigns.clear();
+      campaigns.forEach((campaign) => {
+        simpleCampaigns.set(campaign.id, campaign);
+      });
+      syncCampaignStoreFromDiskCampaigns(campaigns);
+      console.log(`Cargadas ${campaigns.length} campañas desde SQLite`);
+      return;
+    }
+  } catch (err) {
+    console.error('[campaigns] failed to initialize sqlite store', err);
+  }
+
   if (!fs.existsSync(campaignsFilePath)) {
     campaigns = [];
     simpleCampaigns.clear();
@@ -89,13 +108,40 @@ export function loadCampaignsFromDisk(): void {
       simpleCampaigns.set(campaign.id, campaign);
     });
     syncCampaignStoreFromDiskCampaigns(campaigns);
+
+    try {
+      await sqliteStore.initializeDatabase();
+      const sqliteCount = await sqliteStore.countCampaigns();
+      if (sqliteCount === 0 || process.env.MIGRATE_ON_START === 'true') {
+        const result = await migrateJsonCampaignsToSqlite(sqliteStore, campaignsFilePath);
+        console.log(
+          `[campaigns] migración JSON→SQLite: json=${result.jsonCount} sqlite=${result.sqliteCount}`,
+        );
+      }
+    } catch (migrationErr) {
+      console.error('[campaigns] failed to migrate campaigns to sqlite', migrationErr);
+    }
+
     console.log(`Cargadas ${campaigns.length} campañas desde ${campaignsFilePath}`);
   } catch (err) {
     console.error('[campaigns] failed to load campaigns from disk', err);
   }
 }
 
-export function saveCampaignsToDisk(): void {
+export async function saveCampaignsToDisk(updatedCampaign?: Campaign): Promise<void> {
+  try {
+    await sqliteStore.initializeDatabase();
+    if (updatedCampaign) {
+      await sqliteStore.upsertCampaign(updatedCampaign);
+    } else {
+      for (const campaign of campaigns) {
+        await sqliteStore.upsertCampaign(campaign);
+      }
+    }
+  } catch (err) {
+    console.error('[campaigns] failed to persist campaigns in sqlite', err);
+  }
+
   const dirPath = path.dirname(campaignsFilePath);
   fs.mkdirSync(dirPath, { recursive: true });
   fs.writeFileSync(campaignsFilePath, JSON.stringify(campaigns, null, 2), 'utf8');
@@ -172,7 +218,7 @@ router.post('/campaign', async (req, res) => {
   }
 });
 
-const createCampaign: Parameters<typeof router.post>[1] = (req, res) => {
+const createCampaign: Parameters<typeof router.post>[1] = async (req, res) => {
   try {
     const {
       name,
@@ -252,7 +298,7 @@ const createCampaign: Parameters<typeof router.post>[1] = (req, res) => {
     campaigns.push(campaign);
     simpleCampaigns.set(campaign.id, campaign);
     syncCampaignStoreFromDiskCampaigns(campaigns);
-    saveCampaignsToDisk();
+    await saveCampaignsToDisk(campaign);
     return res.status(201).json(campaign);
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
@@ -317,7 +363,7 @@ const createPledgeHandler: Parameters<typeof router.post>[1] = async (req, res) 
     if (deriveCampaignStatus(campaign, newTotalPledged) === 'funded') {
       campaign.status = 'funded';
       syncCampaignStoreFromDiskCampaigns(campaigns);
-      saveCampaignsToDisk();
+      await saveCampaignsToDisk(campaign);
     }
 
     const offer = walletConnectOfferStore.createOffer({
@@ -535,7 +581,7 @@ const buildCampaignActivationHandler: Parameters<typeof router.post>[1] = async 
     campaign.activation.wcOfferId = offer.offerId;
     campaign.activation.payerAddress = payerAddress;
     syncCampaignStoreFromDiskCampaigns(campaigns);
-    saveCampaignsToDisk();
+    await saveCampaignsToDisk(campaign);
 
     return res.json({
       unsignedTxHex: built.unsignedTxHex || built.rawHex,
@@ -550,7 +596,7 @@ const buildCampaignActivationHandler: Parameters<typeof router.post>[1] = async 
   }
 };
 
-const confirmCampaignActivationHandler: Parameters<typeof router.post>[1] = (req, res) => {
+const confirmCampaignActivationHandler: Parameters<typeof router.post>[1] = async (req, res) => {
   try {
     const campaignId = req.params.id;
     const campaign = campaigns.find((item) => item.id === campaignId);
@@ -572,7 +618,7 @@ const confirmCampaignActivationHandler: Parameters<typeof router.post>[1] = (req
     campaign.activation.payerAddress = payerAddress ?? campaign.activation.payerAddress;
     campaign.status = 'active';
     syncCampaignStoreFromDiskCampaigns(campaigns);
-    saveCampaignsToDisk();
+    await saveCampaignsToDisk(campaign);
 
     const pledges = simplePledges.get(campaignId) ?? [];
     const totalPledged = pledges.reduce((total, pledge) => total + pledge.amount, 0);
@@ -641,7 +687,7 @@ const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req
     });
     campaign.payout.wcOfferId = offer.offerId;
     syncCampaignStoreFromDiskCampaigns(campaigns);
-    saveCampaignsToDisk();
+    await saveCampaignsToDisk(campaign);
 
     return res.json({
       unsignedTxHex: built.unsignedTxHex || built.rawHex,
@@ -686,7 +732,7 @@ const getCampaignEscrowUtxosHandler: Parameters<typeof router.get>[1] = async (r
   }
 };
 
-const confirmCampaignPayoutHandler: Parameters<typeof router.post>[1] = (req, res) => {
+const confirmCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req, res) => {
   try {
     const campaignId = req.params.id;
     const campaign = campaigns.find((item) => item.id === campaignId);
@@ -706,7 +752,7 @@ const confirmCampaignPayoutHandler: Parameters<typeof router.post>[1] = (req, re
     campaign.payout.paidAt = new Date().toISOString();
     campaign.status = 'paid_out';
     syncCampaignStoreFromDiskCampaigns(campaigns);
-    saveCampaignsToDisk();
+    await saveCampaignsToDisk(campaign);
 
     const pledges = simplePledges.get(campaignId) ?? [];
     const totalPledged = pledges.reduce((total, pledge) => total + pledge.amount, 0);
