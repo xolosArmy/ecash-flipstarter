@@ -4,6 +4,7 @@ import type { SessionTypes } from '@walletconnect/types';
 import {
   assertSessionSupportsEcashSign,
   CHAIN_ID,
+  clearWalletConnectStorage,
   clearStoredTopic,
   connect as wcConnect,
   disconnect as wcDisconnect,
@@ -43,6 +44,7 @@ type WalletConnectState = {
 };
 
 const WalletConnectContext = createContext<WalletConnectState | null>(null);
+const INVALID_SESSION_MESSAGE = 'Sesión WalletConnect inválida. Desconecta y vuelve a conectar.';
 
 function formatWalletConnectError(err: unknown, fallback: string) {
   if (err && typeof err === 'object') {
@@ -54,9 +56,18 @@ function formatWalletConnectError(err: unknown, fallback: string) {
     const lower = message.toLowerCase();
     if (lower.includes('rejected')) return 'Solicitud rechazada por el usuario.';
     if (lower.includes('timeout')) return 'Tiempo de espera agotado en WalletConnect.';
+    if (lower.includes('no matching key') || lower.includes("session topic doesn't exist")) {
+      return INVALID_SESSION_MESSAGE;
+    }
     return message;
   }
   return fallback;
+}
+
+function isStaleSessionError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const lower = err.message.toLowerCase();
+  return lower.includes('no matching key') || lower.includes("session topic doesn't exist");
 }
 
 function safelyGetSession(client: SignClient, topic: string): SessionTypes.Struct | null {
@@ -94,6 +105,20 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
     setLastTxid(null);
   };
 
+  const purgeWalletConnect = async () => {
+    clearStoredTopic();
+    await clearWalletConnectStorage().catch(() => {
+      // Best effort cleanup for stale walletconnect storage.
+    });
+    resetState();
+    setTopic(null);
+    setStatus('idle');
+    setError(INVALID_SESSION_MESSAGE);
+    if (import.meta.env.DEV) {
+      console.debug('[WC] purge complete');
+    }
+  };
+
   useEffect(() => {
     if (import.meta.env.DEV) {
       const namespaces = getRequestedNamespaces();
@@ -123,7 +148,13 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
 
         const storedTopic = getStoredTopic();
         if (storedTopic) {
-          const session = safelyGetSession(client, storedTopic);
+          if (import.meta.env.DEV) {
+            console.debug('[WC] restore topic', storedTopic);
+          }
+          const session =
+            safelyGetSession(client, storedTopic) ??
+            client.session.getAll().find((existingSession) => existingSession.topic === storedTopic) ??
+            null;
           if (session) {
             assertSessionSupportsEcashSign(session, CHAIN_ID);
             setTopic(session.topic);
@@ -131,14 +162,22 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
             setStatus('connected');
             setAddresses(getEcashAccounts(session));
           } else {
-            clearStoredTopic();
+            if (import.meta.env.DEV) {
+              console.debug('[WC] stale topic detected -> purge');
+            }
+            await purgeWalletConnect();
+            return () => unsubscribe();
           }
         }
 
         return () => unsubscribe();
       } catch (err) {
         if (!active) return;
-        setError(err instanceof Error ? err.message : 'WalletConnect init failed.');
+        if (isStaleSessionError(err)) {
+          await purgeWalletConnect();
+          return;
+        }
+        setError(formatWalletConnectError(err, 'WalletConnect init failed.'));
       }
     };
 
@@ -176,6 +215,10 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
       setAddresses(accounts);
       return session;
     } catch (err) {
+      if (isStaleSessionError(err)) {
+        await purgeWalletConnect();
+        throw new Error(INVALID_SESSION_MESSAGE);
+      }
       setStatus('idle');
       setUri(null);
       setError(formatWalletConnectError(err, 'WalletConnect connect failed.'));
@@ -187,6 +230,8 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
     if (!topic) return;
     try {
       await wcDisconnect(topic);
+    } catch (err) {
+      setError(formatWalletConnectError(err, 'WalletConnect disconnect failed.'));
     } finally {
       clearStoredTopic();
       resetState();
@@ -227,8 +272,14 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
       setStatus('connected');
       return result;
     } catch (err) {
+      if (isStaleSessionError(err)) {
+        await purgeWalletConnect();
+        throw new Error(INVALID_SESSION_MESSAGE);
+      }
       setStatus('connected');
-      throw err;
+      const formattedError = formatWalletConnectError(err, 'WalletConnect request failed.');
+      setError(formattedError);
+      throw new Error(formattedError);
     }
   };
 
