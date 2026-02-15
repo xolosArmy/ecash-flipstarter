@@ -1,6 +1,9 @@
-import { CampaignDefinition } from '../covenants/campaignDefinition';
+import {
+  CampaignDefinition,
+  ensureCampaignCovenant,
+  hasValidCampaignCovenant,
+} from '../covenants/campaignDefinition';
 import { CovenantIndex, type CovenantRef } from '../blockchain/covenantIndex';
-import { compileCampaignScript } from '../covenants/scriptCompiler';
 import {
   loadCampaignsFromDisk,
   saveCampaignToDisk,
@@ -22,6 +25,7 @@ type AuditLogRow = {
 };
 
 type ActivationOfferOutput = { address: string; valueSats: number };
+type ActivationVerificationState = 'none' | 'pending_verification' | 'verified' | 'invalid';
 
 function toBigIntGoal(value: unknown): bigint {
   if (typeof value === 'bigint') return value;
@@ -90,9 +94,22 @@ function toActivationFeeRequired(value: unknown): number {
 
 function normalizeSnapshot(snapshot: StoredCampaign): StoredCampaign {
   const activationFeeRequired = toActivationFeeRequired(snapshot.activationFeeRequired);
-  const activationFeePaid = snapshot.activationFeePaid === true;
+  const status = typeof snapshot.status === 'string' ? snapshot.status.toLowerCase() : '';
+  const activationFeePaid = snapshot.activationFeePaid === true
+    || snapshot.activationFeeVerificationStatus === 'verified'
+    || status === 'active'
+    || status === 'funded'
+    || status === 'expired'
+    || status === 'paid_out';
   const activationFeeTxid = snapshot.activationFeeTxid ?? snapshot.activation?.feeTxid ?? null;
   const activationFeePaidAt = snapshot.activationFeePaidAt ?? snapshot.activation?.feePaidAt ?? null;
+  const activationFeeVerificationStatus: ActivationVerificationState =
+    snapshot.activationFeeVerificationStatus === 'pending_verification'
+    || snapshot.activationFeeVerificationStatus === 'verified'
+    || snapshot.activationFeeVerificationStatus === 'invalid'
+      ? snapshot.activationFeeVerificationStatus
+      : 'none';
+  const activationFeeVerifiedAt = snapshot.activationFeeVerifiedAt ?? null;
 
   const activation = {
     feeSats: snapshot.activation?.feeSats ?? String(activationFeeRequired * 100),
@@ -109,11 +126,39 @@ function normalizeSnapshot(snapshot: StoredCampaign): StoredCampaign {
     activationFeePaid,
     activationFeeTxid,
     activationFeePaidAt,
+    activationFeeVerificationStatus,
+    activationFeeVerifiedAt,
     activationOfferMode: snapshot.activationOfferMode ?? null,
     activationOfferOutputs: snapshot.activationOfferOutputs ?? null,
     activationTreasuryAddressUsed: snapshot.activationTreasuryAddressUsed ?? null,
     treasuryAddressUsed: snapshot.treasuryAddressUsed ?? null,
   };
+}
+
+function normalizeActivationStatus(
+  rawStatus: unknown,
+  activationFeePaid: boolean,
+): CampaignDefinition['status'] {
+  const status = typeof rawStatus === 'string' ? rawStatus.toLowerCase() : '';
+
+  if (status === 'paid_out') return 'paid_out';
+  if (status === 'funded') return 'funded';
+  if (status === 'expired') return 'expired';
+
+  if (!activationFeePaid) {
+    if (status === 'draft') {
+      return 'draft';
+    }
+    if (status === 'pending_verification') {
+      return 'pending_verification';
+    }
+    if (status === 'fee_invalid') {
+      return 'fee_invalid';
+    }
+    return 'pending_fee';
+  }
+
+  return 'active';
 }
 
 function toStoredCampaign(definition: CampaignDefinition, prior?: StoredCampaign): StoredCampaign {
@@ -145,6 +190,8 @@ function toStoredCampaign(definition: CampaignDefinition, prior?: StoredCampaign
     activationFeePaid: priorNormalized?.activationFeePaid ?? false,
     activationFeeTxid: priorNormalized?.activationFeeTxid ?? null,
     activationFeePaidAt: priorNormalized?.activationFeePaidAt ?? null,
+    activationFeeVerificationStatus: priorNormalized?.activationFeeVerificationStatus ?? 'none',
+    activationFeeVerifiedAt: priorNormalized?.activationFeeVerifiedAt ?? null,
     activationOfferMode: priorNormalized?.activationOfferMode ?? null,
     activationOfferOutputs: priorNormalized?.activationOfferOutputs ?? null,
     activationTreasuryAddressUsed: priorNormalized?.activationTreasuryAddressUsed ?? null,
@@ -172,24 +219,31 @@ export function syncCampaignStoreFromDiskCampaigns(diskCampaigns: StoredCampaign
 
   for (const diskSnapshot of diskCampaigns) {
     const snapshot = normalizeSnapshot(diskSnapshot);
-    if (!snapshot.status) {
-      snapshot.status = snapshot.activationFeePaid ? 'active' : 'pending_fee';
-    }
-    if (snapshot.status === 'active' && !snapshot.activationFeePaid) {
-      snapshot.status = 'pending_fee';
-    }
+    snapshot.status = normalizeActivationStatus(snapshot.status, snapshot.activationFeePaid === true);
 
     const campaign = toCampaignDefinition(snapshot);
+    const ensured = ensureCampaignCovenant({
+      campaignId: campaign.id,
+      campaign,
+      existing: {
+        scriptPubKey: undefined,
+        scriptHash: undefined,
+        campaignAddress: snapshot.campaignAddress ?? snapshot.covenantAddress,
+      },
+    });
+    campaign.campaignAddress = ensured.campaignAddress;
+    campaign.covenantAddress = ensured.campaignAddress;
+    snapshot.campaignAddress = ensured.campaignAddress;
+    snapshot.covenantAddress = ensured.campaignAddress;
     campaigns.set(campaign.id, campaign);
     campaignSnapshots.set(campaign.id, snapshot);
 
-    const script = compileCampaignScript(campaign);
     covenantIndex.setCovenantRef({
       campaignId: campaign.id,
       txid: '',
       vout: 0,
-      scriptHash: script.scriptHash,
-      scriptPubKey: script.scriptHex,
+      scriptHash: ensured.scriptHash,
+      scriptPubKey: ensured.scriptPubKey,
       value: 0n,
     });
   }
@@ -205,6 +259,118 @@ export class CampaignService {
       'INSERT INTO audit_logs (campaignId, event, details) VALUES (?, ?, ?)',
       [campaignId, event, JSON.stringify(details)],
     );
+  }
+
+  private async hasAuditEventForTxid(campaignId: string, event: string, txid: string): Promise<boolean> {
+    const db = await getDb();
+    const row = await db.get<{ found: number }>(
+      `SELECT 1 as found
+       FROM audit_logs
+       WHERE campaignId = ?
+         AND event = ?
+         AND json_extract(details, '$.txid') = ?
+       LIMIT 1`,
+      [campaignId, event, txid],
+    );
+    return row?.found === 1;
+  }
+
+  private async logEventOnceByTxid(
+    campaignId: string,
+    event: string,
+    txid: string,
+    details: Record<string, unknown>,
+  ): Promise<void> {
+    if (await this.hasAuditEventForTxid(campaignId, event, txid)) {
+      return;
+    }
+    await this.logEvent(campaignId, event, details);
+  }
+
+  private buildEnsuredCovenant(campaign: CampaignDefinition, existing?: CovenantRef): CovenantRef {
+    const ensured = ensureCampaignCovenant({
+      campaignId: campaign.id,
+      campaign,
+      existing: {
+        txid: existing?.txid ?? '',
+        vout: existing?.vout ?? 0,
+        value: existing?.value ?? 0n,
+      },
+    });
+
+    return {
+      campaignId: campaign.id,
+      txid: ensured.txid ?? '',
+      vout: ensured.vout ?? 0,
+      scriptHash: ensured.scriptHash,
+      scriptPubKey: ensured.scriptPubKey,
+      value:
+        typeof ensured.value === 'bigint'
+          ? ensured.value
+          : typeof ensured.value === 'number'
+            ? BigInt(Math.floor(ensured.value))
+            : typeof ensured.value === 'string' && ensured.value.trim()
+              ? BigInt(ensured.value)
+              : 0n,
+    };
+  }
+
+  private applyEnsuredCovenant(campaign: CampaignDefinition, snapshot: StoredCampaign, covenant: CovenantRef): boolean {
+    const existingAddress = campaign.campaignAddress ?? snapshot.campaignAddress ?? snapshot.covenantAddress;
+    const existingCandidate = {
+      campaignId: campaign.id,
+      campaignAddress: existingAddress,
+      scriptHash: covenant.scriptHash,
+      scriptPubKey: covenant.scriptPubKey,
+    };
+    const needsAddressUpdate = !hasValidCampaignCovenant(existingCandidate);
+
+    const ensured = ensureCampaignCovenant({
+      campaignId: campaign.id,
+      campaign,
+      existing: {
+        txid: covenant.txid,
+        vout: covenant.vout,
+        value: covenant.value,
+      },
+    });
+
+    const nextAddress = ensured.campaignAddress;
+    const changed =
+      needsAddressUpdate
+      || campaign.campaignAddress !== nextAddress
+      || campaign.covenantAddress !== nextAddress
+      || snapshot.campaignAddress !== nextAddress
+      || snapshot.covenantAddress !== nextAddress;
+
+    campaign.campaignAddress = nextAddress;
+    campaign.covenantAddress = nextAddress;
+    snapshot.campaignAddress = nextAddress;
+    snapshot.covenantAddress = nextAddress;
+    covenant.scriptHash = ensured.scriptHash;
+    covenant.scriptPubKey = ensured.scriptPubKey;
+    return changed;
+  }
+
+  async ensureCampaignCovenant(campaignId: string): Promise<CovenantRef> {
+    const campaign = campaigns.get(campaignId);
+    if (!campaign) {
+      throw new Error('campaign-not-found');
+    }
+    const snapshotRaw = campaignSnapshots.get(campaignId);
+    const snapshot = normalizeSnapshot(toStoredCampaign(campaign, snapshotRaw));
+    const existing = covenantIndex.getCovenantRef(campaignId);
+    const covenant = this.buildEnsuredCovenant(campaign, existing);
+    const changed = this.applyEnsuredCovenant(campaign, snapshot, covenant);
+
+    campaigns.set(campaignId, campaign);
+    campaignSnapshots.set(campaignId, snapshot);
+    covenantIndex.setCovenantRef(covenant);
+
+    if (changed) {
+      await saveCampaignToDisk(snapshot);
+    }
+    return covenant;
   }
 
   /**
@@ -244,6 +410,17 @@ export class CampaignService {
       covenantAddress: payload.covenantAddress,
       status: initialStatus,
     };
+    const ensuredInitialCovenant = ensureCampaignCovenant({
+      campaignId: id,
+      campaign,
+      existing: {
+        txid: '',
+        vout: 0,
+        value: 0n,
+      },
+    });
+    campaign.campaignAddress = ensuredInitialCovenant.campaignAddress;
+    campaign.covenantAddress = ensuredInitialCovenant.campaignAddress;
 
     const snapshot: StoredCampaign = normalizeSnapshot({
       id,
@@ -282,6 +459,8 @@ export class CampaignService {
       activationFeePaid,
       activationFeeTxid: null,
       activationFeePaidAt: null,
+      activationFeeVerificationStatus: 'none',
+      activationFeeVerifiedAt: null,
       activationOfferMode: null,
       activationOfferOutputs: null,
       activationTreasuryAddressUsed: null,
@@ -314,13 +493,12 @@ export class CampaignService {
     campaigns.set(id, campaign);
     campaignSnapshots.set(id, snapshot);
 
-    const script = compileCampaignScript(campaign);
     const covenantRef: CovenantRef = {
       campaignId: id,
       txid: '',
       vout: 0,
-      scriptHash: script.scriptHash,
-      scriptPubKey: script.scriptHex,
+      scriptHash: ensuredInitialCovenant.scriptHash,
+      scriptPubKey: ensuredInitialCovenant.scriptPubKey,
       value: 0n,
     };
     covenantIndex.setCovenantRef(covenantRef);
@@ -339,8 +517,16 @@ export class CampaignService {
     const fromCache = campaigns.get(id);
     if (fromCache) {
       const snapshotRaw = campaignSnapshots.get(id);
-      const snapshot = snapshotRaw ? normalizeSnapshot(snapshotRaw) : undefined;
-      const covenant = covenantIndex.getCovenantRef(id);
+      const snapshot = snapshotRaw ? normalizeSnapshot(snapshotRaw) : normalizeSnapshot(toStoredCampaign(fromCache));
+      const existing = covenantIndex.getCovenantRef(id);
+      const covenant = existing ?? this.buildEnsuredCovenant(fromCache);
+      const changed = this.applyEnsuredCovenant(fromCache, snapshot, covenant);
+      campaignSnapshots.set(id, snapshot);
+      campaigns.set(id, fromCache);
+      covenantIndex.setCovenantRef(covenant);
+      if (changed) {
+        await saveCampaignToDisk(snapshot);
+      }
       const progress = covenant && fromCache.goal > 0n ? Number((covenant.value * 100n) / fromCache.goal) : 0;
       return this.serializeCampaign(fromCache, snapshot, covenant, progress);
     }
@@ -351,12 +537,7 @@ export class CampaignService {
     }
 
     const snapshot = normalizeSnapshot(snapshotRaw);
-    if (!snapshot.status) {
-      snapshot.status = snapshot.activationFeePaid ? 'active' : 'pending_fee';
-    }
-    if (snapshot.status === 'active' && !snapshot.activationFeePaid) {
-      snapshot.status = 'pending_fee';
-    }
+    snapshot.status = normalizeActivationStatus(snapshot.status, snapshot.activationFeePaid === true);
 
     const campaign = toCampaignDefinition(snapshot);
     campaigns.set(id, campaign);
@@ -364,16 +545,14 @@ export class CampaignService {
 
     let covenant = covenantIndex.getCovenantRef(id);
     if (!covenant) {
-      const script = compileCampaignScript(campaign);
-      covenant = {
-        campaignId: id,
-        txid: '',
-        vout: 0,
-        scriptHash: script.scriptHash,
-        scriptPubKey: script.scriptHex,
-        value: 0n,
-      };
-      covenantIndex.setCovenantRef(covenant);
+      covenant = this.buildEnsuredCovenant(campaign);
+    }
+    const changed = this.applyEnsuredCovenant(campaign, snapshot, covenant);
+    covenantIndex.setCovenantRef(covenant);
+    campaignSnapshots.set(id, snapshot);
+    campaigns.set(id, campaign);
+    if (changed) {
+      await saveCampaignToDisk(snapshot);
     }
 
     const progress = covenant && campaign.goal > 0n ? Number((covenant.value * 100n) / campaign.goal) : 0;
@@ -448,6 +627,7 @@ export class CampaignService {
       mode?: 'tx' | 'intent';
       outputs?: ActivationOfferOutput[];
       treasuryAddressUsed?: string | null;
+      logAuditEvent?: boolean;
     },
   ) {
     const campaign = campaigns.get(id);
@@ -471,20 +651,26 @@ export class CampaignService {
     await saveCampaignToDisk(nextSnapshot);
     campaignSnapshots.set(id, nextSnapshot);
 
-    await this.logEvent(id, 'ACTIVATION_FEE_OFFER_CREATED', {
-      wcOfferId,
-      payerAddress,
-      mode: nextSnapshot.activationOfferMode,
-      outputs: nextSnapshot.activationOfferOutputs,
-      treasuryAddressUsed: nextSnapshot.activationTreasuryAddressUsed,
-      createdAt: new Date().toISOString(),
-    });
+    if (options?.logAuditEvent !== false) {
+      await this.logEvent(id, 'ACTIVATION_FEE_OFFER_CREATED', {
+        wcOfferId,
+        payerAddress,
+        mode: nextSnapshot.activationOfferMode,
+        outputs: nextSnapshot.activationOfferOutputs,
+        treasuryAddressUsed: nextSnapshot.activationTreasuryAddressUsed,
+        createdAt: new Date().toISOString(),
+      });
+    }
   }
 
-  async markActivationFeePaid(
+  async recordActivationFeeBroadcast(
     id: string,
     txid: string,
-    options?: { paidAt?: string; payerAddress?: string | null },
+    options?: {
+      paidAt?: string;
+      payerAddress?: string | null;
+      treasuryAddressUsed?: string | null;
+    },
   ) {
     const campaign = campaigns.get(id);
     if (!campaign) {
@@ -493,28 +679,214 @@ export class CampaignService {
 
     const previousSnapshot = campaignSnapshots.get(id);
     const nextSnapshot = normalizeSnapshot(toStoredCampaign(campaign, previousSnapshot));
-    const paidAt = options?.paidAt ?? new Date().toISOString();
+    const normalizedTxid = txid.trim().toLowerCase();
+    const reusePaidAt =
+      nextSnapshot.activationFeeTxid?.toLowerCase() === normalizedTxid
+        ? nextSnapshot.activationFeePaidAt
+        : null;
+    const paidAt = reusePaidAt ?? options?.paidAt ?? new Date().toISOString();
 
-    nextSnapshot.activationFeePaid = true;
-    nextSnapshot.activationFeeTxid = txid;
+    nextSnapshot.activationFeeTxid = normalizedTxid;
     nextSnapshot.activationFeePaidAt = paidAt;
-    nextSnapshot.status = nextSnapshot.status === 'draft' ? 'draft' : 'active';
-
+    nextSnapshot.activationFeePaid = false;
+    nextSnapshot.activationFeeVerificationStatus = 'pending_verification';
+    nextSnapshot.activationFeeVerifiedAt = null;
+    nextSnapshot.status = 'pending_verification';
+    nextSnapshot.treasuryAddressUsed = options?.treasuryAddressUsed ?? nextSnapshot.treasuryAddressUsed ?? null;
     nextSnapshot.activation = {
       feeSats: nextSnapshot.activation?.feeSats ?? String(nextSnapshot.activationFeeRequired! * 100),
-      feeTxid: txid,
+      feeTxid: normalizedTxid,
       feePaidAt: paidAt,
       payerAddress: options?.payerAddress ?? nextSnapshot.activation?.payerAddress ?? null,
       wcOfferId: nextSnapshot.activation?.wcOfferId ?? null,
     };
+
+    campaign.status = 'pending_verification';
+    campaigns.set(id, campaign);
+    await saveCampaignToDisk(nextSnapshot);
+    campaignSnapshots.set(id, nextSnapshot);
+  }
+
+  async finalizeActivationFeeVerification(
+    id: string,
+    txid: string,
+    outcome: 'verified' | 'invalid' | 'pending_verification',
+    options?: {
+      payerAddress?: string | null;
+      treasuryAddressUsed?: string | null;
+      reason?: string | null;
+      paidAt?: string;
+      verifiedAt?: string;
+    },
+  ) {
+    const campaign = campaigns.get(id);
+    if (!campaign) {
+      throw new Error('campaign-not-found');
+    }
+
+    const previousSnapshot = campaignSnapshots.get(id);
+    const nextSnapshot = normalizeSnapshot(toStoredCampaign(campaign, previousSnapshot));
+    const normalizedTxid = txid.trim().toLowerCase();
+    const paidAt = options?.paidAt ?? nextSnapshot.activationFeePaidAt ?? new Date().toISOString();
+    const verifiedAt = options?.verifiedAt ?? new Date().toISOString();
+
+    nextSnapshot.activationFeeTxid = normalizedTxid;
+    nextSnapshot.activationFeePaidAt = paidAt;
+    nextSnapshot.treasuryAddressUsed = options?.treasuryAddressUsed ?? nextSnapshot.treasuryAddressUsed ?? null;
+    nextSnapshot.activation = {
+      feeSats: nextSnapshot.activation?.feeSats ?? String(nextSnapshot.activationFeeRequired! * 100),
+      feeTxid: normalizedTxid,
+      feePaidAt: paidAt,
+      payerAddress: options?.payerAddress ?? nextSnapshot.activation?.payerAddress ?? null,
+      wcOfferId: nextSnapshot.activation?.wcOfferId ?? null,
+    };
+
+    if (outcome === 'verified') {
+      nextSnapshot.activationFeePaid = true;
+      nextSnapshot.activationFeeVerificationStatus = 'verified';
+      nextSnapshot.activationFeeVerifiedAt = verifiedAt;
+      nextSnapshot.status = 'active';
+      campaign.status = 'active';
+      const existing = covenantIndex.getCovenantRef(id);
+      const covenant = existing ?? this.buildEnsuredCovenant(campaign);
+      this.applyEnsuredCovenant(campaign, nextSnapshot, covenant);
+      campaigns.set(id, campaign);
+      covenantIndex.setCovenantRef(covenant);
+      await saveCampaignToDisk(nextSnapshot);
+      campaignSnapshots.set(id, nextSnapshot);
+
+      await this.logEventOnceByTxid(id, 'ACTIVATION_FEE_VERIFIED', normalizedTxid, {
+        txid: normalizedTxid,
+        verifiedAt,
+        paidAt,
+        payerAddress: nextSnapshot.activation?.payerAddress ?? null,
+        activationFeeRequired: nextSnapshot.activationFeeRequired,
+        activationTreasuryAddressUsed: nextSnapshot.activationTreasuryAddressUsed ?? null,
+      });
+      return;
+    }
+
+    if (outcome === 'invalid') {
+      nextSnapshot.activationFeePaid = false;
+      nextSnapshot.activationFeeVerificationStatus = 'invalid';
+      nextSnapshot.activationFeeVerifiedAt = null;
+      nextSnapshot.status = 'pending_fee';
+      campaign.status = 'pending_fee';
+      campaigns.set(id, campaign);
+      await saveCampaignToDisk(nextSnapshot);
+      campaignSnapshots.set(id, nextSnapshot);
+
+      await this.logEventOnceByTxid(id, 'ACTIVATION_FEE_INVALID', normalizedTxid, {
+        txid: normalizedTxid,
+        invalidAt: verifiedAt,
+        reason: options?.reason ?? null,
+        activationFeeRequired: nextSnapshot.activationFeeRequired,
+        activationTreasuryAddressUsed: nextSnapshot.activationTreasuryAddressUsed ?? null,
+      });
+      return;
+    }
+
+    nextSnapshot.activationFeePaid = false;
+    nextSnapshot.activationFeeVerificationStatus = 'pending_verification';
+    nextSnapshot.activationFeeVerifiedAt = null;
+    nextSnapshot.status = 'pending_verification';
+    campaign.status = 'pending_verification';
+    campaigns.set(id, campaign);
+    await saveCampaignToDisk(nextSnapshot);
+    campaignSnapshots.set(id, nextSnapshot);
+  }
+
+  async markActivationFeePaid(
+    id: string,
+    txid: string,
+    options?: {
+      paidAt?: string;
+      payerAddress?: string | null;
+      treasuryAddressUsed?: string | null;
+    },
+  ) {
+    const campaign = campaigns.get(id);
+    if (!campaign) {
+      throw new Error('campaign-not-found');
+    }
+
+    const previousSnapshot = campaignSnapshots.get(id);
+    const nextSnapshot = normalizeSnapshot(toStoredCampaign(campaign, previousSnapshot));
+    const normalizedTxid = txid.trim().toLowerCase();
+    const previousTxid = (nextSnapshot.activationFeeTxid ?? '').toLowerCase();
+    const existingPaid = nextSnapshot.activationFeePaid === true;
+
+    if (existingPaid && previousTxid) {
+      if (previousTxid !== normalizedTxid) {
+        throw new Error('activation-fee-already-confirmed');
+      }
+
+      const previousStatus = nextSnapshot.status;
+      nextSnapshot.status = normalizeActivationStatus(nextSnapshot.status, true);
+      nextSnapshot.activationFeeVerificationStatus = 'verified';
+      nextSnapshot.activationFeeVerifiedAt = nextSnapshot.activationFeeVerifiedAt ?? new Date().toISOString();
+      if (options?.payerAddress) {
+        nextSnapshot.activation = {
+          feeSats: nextSnapshot.activation?.feeSats ?? String(nextSnapshot.activationFeeRequired! * 100),
+          feeTxid: nextSnapshot.activationFeeTxid ?? null,
+          feePaidAt: nextSnapshot.activationFeePaidAt ?? null,
+          payerAddress: options.payerAddress,
+          wcOfferId: nextSnapshot.activation?.wcOfferId ?? null,
+        };
+      }
+      let covenantChanged = false;
+      if (nextSnapshot.status === 'active') {
+        const existing = covenantIndex.getCovenantRef(id);
+        const covenant = existing ?? this.buildEnsuredCovenant(campaign);
+        covenantChanged = this.applyEnsuredCovenant(campaign, nextSnapshot, covenant);
+        covenantIndex.setCovenantRef(covenant);
+      }
+
+      const needsPersist =
+        previousStatus !== nextSnapshot.status
+        || nextSnapshot.activation?.payerAddress !== (previousSnapshot?.activation?.payerAddress ?? null)
+        || covenantChanged;
+      if (needsPersist) {
+        campaign.status = nextSnapshot.status;
+        campaigns.set(id, campaign);
+        await saveCampaignToDisk(nextSnapshot);
+        campaignSnapshots.set(id, nextSnapshot);
+      }
+      return;
+    }
+
+    const paidAt = options?.paidAt ?? new Date().toISOString();
+
+    nextSnapshot.activationFeePaid = true;
+    nextSnapshot.activationFeeTxid = normalizedTxid;
+    nextSnapshot.activationFeePaidAt = paidAt;
+    nextSnapshot.activationFeeVerificationStatus = 'verified';
+    nextSnapshot.activationFeeVerifiedAt = new Date().toISOString();
+    nextSnapshot.status = normalizeActivationStatus(nextSnapshot.status, true);
+    nextSnapshot.treasuryAddressUsed = options?.treasuryAddressUsed ?? nextSnapshot.treasuryAddressUsed ?? null;
+
+    nextSnapshot.activation = {
+      feeSats: nextSnapshot.activation?.feeSats ?? String(nextSnapshot.activationFeeRequired! * 100),
+      feeTxid: normalizedTxid,
+      feePaidAt: paidAt,
+      payerAddress: options?.payerAddress ?? nextSnapshot.activation?.payerAddress ?? null,
+      wcOfferId: nextSnapshot.activation?.wcOfferId ?? null,
+    };
+
+    if (nextSnapshot.status === 'active') {
+      const existing = covenantIndex.getCovenantRef(id);
+      const covenant = existing ?? this.buildEnsuredCovenant(campaign);
+      this.applyEnsuredCovenant(campaign, nextSnapshot, covenant);
+      covenantIndex.setCovenantRef(covenant);
+    }
 
     campaign.status = nextSnapshot.status;
     campaigns.set(id, campaign);
     await saveCampaignToDisk(nextSnapshot);
     campaignSnapshots.set(id, nextSnapshot);
 
-    await this.logEvent(id, 'ACTIVATION_FEE_PAID', {
-      txid,
+    await this.logEventOnceByTxid(id, 'ACTIVATION_FEE_PAID', normalizedTxid, {
+      txid: normalizedTxid,
       paidAt,
       payerAddress: nextSnapshot.activation?.payerAddress ?? null,
       activationFeeRequired: nextSnapshot.activationFeeRequired,
@@ -599,6 +971,12 @@ export class CampaignService {
     campaigns.set(id, campaign);
 
     nextSnapshot.status = status;
+    if (status === 'active') {
+      const existing = covenantIndex.getCovenantRef(id);
+      const covenant = existing ?? this.buildEnsuredCovenant(campaign);
+      this.applyEnsuredCovenant(campaign, nextSnapshot, covenant);
+      covenantIndex.setCovenantRef(covenant);
+    }
     await saveCampaignToDisk(nextSnapshot);
     campaignSnapshots.set(id, nextSnapshot);
 
@@ -637,12 +1015,20 @@ export class CampaignService {
       activationFeePaid: snapshot?.activationFeePaid ?? false,
       activationFeeTxid: snapshot?.activationFeeTxid ?? null,
       activationFeePaidAt: snapshot?.activationFeePaidAt ?? null,
+      activationFeeVerificationStatus: snapshot?.activationFeeVerificationStatus ?? 'none',
+      activationFeeVerifiedAt: snapshot?.activationFeeVerifiedAt ?? null,
       activationOfferMode: snapshot?.activationOfferMode ?? null,
       activationOfferOutputs: snapshot?.activationOfferOutputs ?? null,
       activationTreasuryAddressUsed: snapshot?.activationTreasuryAddressUsed ?? null,
       payout: snapshot?.payout,
       treasuryAddressUsed: snapshot?.treasuryAddressUsed ?? null,
-      covenant: covenant ? { ...covenant, value: covenant.value.toString() } : undefined,
+      covenant: covenant
+        ? {
+          ...covenant,
+          value: covenant.value.toString(),
+          campaignAddress: campaign.campaignAddress ?? snapshot?.campaignAddress ?? snapshot?.covenantAddress,
+        }
+        : undefined,
       progress,
     };
   }

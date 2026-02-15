@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { broadcastTx, createPledgeTx } from '../api/client';
+import { broadcastTx, createPledgeTx, fetchCampaign } from '../api/client';
 import type { BuiltTxResponse } from '../api/types';
 import { buildTonalliExternalSignUrl } from '../wallet/tonalliDeeplink';
 import { useWalletConnect } from '../wallet/useWalletConnect';
@@ -9,6 +9,7 @@ import { ExplorerLink } from './ExplorerLink';
 
 interface Props {
   campaignId: string;
+  campaignAddress?: string;
   onBuiltTx?: (tx: BuiltTxResponse) => void;
   onBroadcastSuccess?: () => void;
 }
@@ -22,6 +23,7 @@ function normalizeEcashAddress(address: string): string {
 
 export const PledgeForm: React.FC<Props> = ({
   campaignId,
+  campaignAddress,
   onBuiltTx,
   onBroadcastSuccess,
 }) => {
@@ -40,6 +42,7 @@ export const PledgeForm: React.FC<Props> = ({
   const [tonalliMessage, setTonalliMessage] = useState('');
   const [tonalliUrl, setTonalliUrl] = useState('');
   const [wcSigning, setWcSigning] = useState(false);
+  const [apiCampaignAddress, setApiCampaignAddress] = useState('');
 
   const {
     signClient,
@@ -69,6 +72,21 @@ export const PledgeForm: React.FC<Props> = ({
   useEffect(() => {
     setContributorAddressDisplay(toAddressPreview(contributorAddressFull));
   }, [contributorAddressFull]);
+
+  useEffect(() => {
+    if (campaignAddress?.trim()) {
+      setApiCampaignAddress(normalizeEcashAddress(campaignAddress));
+      return;
+    }
+    fetchCampaign(campaignId)
+      .then((campaign) => {
+        const fromApi = campaign.covenant?.campaignAddress || campaign.campaignAddress || '';
+        setApiCampaignAddress(fromApi ? normalizeEcashAddress(fromApi) : '');
+      })
+      .catch(() => {
+        setApiCampaignAddress('');
+      });
+  }, [campaignAddress, campaignId]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -320,10 +338,16 @@ export const PledgeForm: React.FC<Props> = ({
   }
 
   const broadcastTxid = extractTxidFromText(broadcastResult);
+  const normalizedCampaignAddress = apiCampaignAddress;
 
   return (
     <div style={{ border: '1px solid #eee', padding: 12, borderRadius: 8 }}>
       <h4>Pledge</h4>
+      {normalizedCampaignAddress && (
+        <p style={{ marginTop: 0 }}>
+          Campaign address: <code>{normalizedCampaignAddress}</code>
+        </p>
+      )}
       <form onSubmit={submit}>
         <div>
           <label>Contributor Address</label>

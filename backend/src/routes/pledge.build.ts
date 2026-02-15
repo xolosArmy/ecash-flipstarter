@@ -2,17 +2,23 @@ import { Router } from 'express';
 import { validateAddress } from '../utils/validation';
 import { createWalletConnectPledgeOffer } from '../services/PledgeOfferService';
 import { getCampaignStatusById } from './campaigns.routes';
+import { CampaignService } from '../services/CampaignService';
 
 const router = Router();
+const campaignService = new CampaignService();
 
 router.post('/campaigns/:id/pledge/build', async (req, res) => {
   try {
-    const status = getCampaignStatusById(req.params.id);
+    const status = await getCampaignStatusById(req.params.id);
     if (!status) {
       return res.status(404).json({ error: 'campaign-not-found' });
     }
     if (status !== 'active') {
       return res.status(400).json({ error: 'campaign-not-active' });
+    }
+    const ensured = await campaignService.ensureCampaignCovenant(req.params.id);
+    if (!ensured.scriptHash || !ensured.scriptPubKey) {
+      return res.status(400).json({ error: 'campaign-address-required' });
     }
 
     const contributorAddress = validateAddress(

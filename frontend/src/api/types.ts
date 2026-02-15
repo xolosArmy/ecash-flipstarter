@@ -4,6 +4,7 @@ export interface CovenantRef {
   value: string;
   scriptHash: string;
   scriptPubKey: string;
+  campaignAddress?: string;
 }
 
 export interface CampaignSummary {
@@ -12,8 +13,19 @@ export interface CampaignSummary {
   goal: number;
   expiresAt: string;
   createdAt?: string;
-  status?: 'draft' | 'pending_fee' | 'expired' | 'funded' | 'active' | 'paid_out';
+  status?:
+    | 'draft'
+    | 'created'
+    | 'pending_fee'
+    | 'pending_verification'
+    | 'fee_invalid'
+    | 'expired'
+    | 'funded'
+    | 'active'
+    | 'paid_out';
   beneficiaryAddress?: string;
+  campaignAddress?: string;
+  covenantAddress?: string;
   description?: string;
   location?: string;
   activation?: {
@@ -27,6 +39,8 @@ export interface CampaignSummary {
   activationFeePaid?: boolean;
   activationFeeTxid?: string | null;
   activationFeePaidAt?: string | null;
+  activationFeeVerificationStatus?: 'none' | 'pending_verification' | 'verified' | 'invalid';
+  activationFeeVerifiedAt?: string | null;
   activationOfferMode?: 'tx' | 'intent' | null;
   activationOfferOutputs?: Array<{ address: string; valueSats: number }> | null;
   activationTreasuryAddressUsed?: string | null;
