@@ -22,6 +22,7 @@ curl https://chronik.xolosarmy.xyz/chronik-info
 
 ## Activation Fee + Treasury env vars
 
+- `TEYOLIA_SQLITE_PATH` (optional): override SQLite DB path. Leave unset in runtime to keep default `backend/data/campaigns.db`; useful in tests/CI for writable temp DB files.
 - `TEYOLIA_ACTIVATION_FEE_XEC` (default `800000`): activation fee required before campaign can become `active`.
 - `TEYOLIA_TREASURY_ADDRESS` (default `ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk`): treasury destination for activation fee and 1% funded payout cut.
 

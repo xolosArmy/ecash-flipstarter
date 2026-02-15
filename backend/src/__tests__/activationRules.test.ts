@@ -1,9 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CampaignService } from '../services/CampaignService';
+import { makeTestDbPath } from './helpers/testDbPath';
 
 function uniqueId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 }
+
+beforeAll(() => {
+  process.env.TEYOLIA_SQLITE_PATH = makeTestDbPath();
+});
+
+afterAll(() => {
+  delete process.env.TEYOLIA_SQLITE_PATH;
+});
 
 describe('activation fee rules', () => {
   it('does not allow ACTIVE status before activation fee is paid', async () => {
@@ -46,5 +55,97 @@ describe('activation fee rules', () => {
     expect(summary?.status).toBe('active');
     expect(summary?.activationFeePaid).toBe(true);
     expect(summary?.activationFeeTxid).toBe('a'.repeat(64));
+
+    const history = await service.getCampaignHistory(campaignId);
+    const paidEvents = history.filter((entry) => entry.event === 'ACTIVATION_FEE_PAID');
+    expect(paidEvents).toHaveLength(1);
+  });
+
+  it('is idempotent when confirming the same activation txid twice', async () => {
+    const service = new CampaignService();
+    const campaignId = uniqueId('activation-idempotent');
+
+    await service.createCampaign({
+      id: campaignId,
+      name: 'Idempotent activation',
+      goal: 1000n,
+      expirationTime: BigInt(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      beneficiaryAddress: 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk',
+    });
+
+    const txid = 'b'.repeat(64);
+    await service.markActivationFeePaid(campaignId, txid, {
+      paidAt: new Date().toISOString(),
+      payerAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+    });
+    await service.markActivationFeePaid(campaignId, txid, {
+      paidAt: new Date().toISOString(),
+      payerAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+    });
+
+    const summary = await service.getCampaign(campaignId);
+    expect(summary?.status).toBe('active');
+    expect(summary?.activationFeePaid).toBe(true);
+    expect(summary?.activationFeeTxid).toBe(txid);
+
+    const history = await service.getCampaignHistory(campaignId);
+    const paidEvents = history.filter((entry) => entry.event === 'ACTIVATION_FEE_PAID');
+    expect(paidEvents).toHaveLength(1);
+  });
+
+  it('does not duplicate ACTIVATION_FEE_VERIFIED audit logs for same txid', async () => {
+    const service = new CampaignService();
+    const campaignId = uniqueId('activation-verified-idempotent');
+
+    await service.createCampaign({
+      id: campaignId,
+      name: 'Verified idempotent activation',
+      goal: 1000n,
+      expirationTime: BigInt(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      beneficiaryAddress: 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk',
+    });
+
+    const txid = 'c'.repeat(64);
+    await service.recordActivationFeeBroadcast(campaignId, txid);
+    await service.finalizeActivationFeeVerification(campaignId, txid, 'verified');
+    await service.finalizeActivationFeeVerification(campaignId, txid, 'verified');
+
+    const summary = await service.getCampaign(campaignId);
+    expect(summary?.status).toBe('active');
+    expect(summary?.activationFeePaid).toBe(true);
+    expect(summary?.activationFeeVerificationStatus).toBe('verified');
+
+    const history = await service.getCampaignHistory(campaignId);
+    const verifiedEvents = history.filter((entry) => entry.event === 'ACTIVATION_FEE_VERIFIED');
+    expect(verifiedEvents).toHaveLength(1);
+  });
+
+  it('does not duplicate ACTIVATION_FEE_OFFER_CREATED when reusing persisted intent', async () => {
+    const service = new CampaignService();
+    const campaignId = uniqueId('activation-offer-idempotent');
+
+    await service.createCampaign({
+      id: campaignId,
+      name: 'Offer reuse activation',
+      goal: 1000n,
+      expirationTime: BigInt(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      beneficiaryAddress: 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk',
+    });
+
+    await service.setActivationOffer(campaignId, 'offer-1', 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk', {
+      mode: 'intent',
+      outputs: [{ address: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk', valueSats: 80000000 }],
+      treasuryAddressUsed: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+    });
+    await service.setActivationOffer(campaignId, 'offer-1', 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk', {
+      mode: 'intent',
+      outputs: [{ address: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk', valueSats: 80000000 }],
+      treasuryAddressUsed: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+      logAuditEvent: false,
+    });
+
+    const history = await service.getCampaignHistory(campaignId);
+    const offerEvents = history.filter((entry) => entry.event === 'ACTIVATION_FEE_OFFER_CREATED');
+    expect(offerEvents).toHaveLength(1);
   });
 });

@@ -4,7 +4,18 @@ import sqlite3 from 'sqlite3';
 import { Database, open } from 'sqlite';
 import { ACTIVATION_FEE_XEC } from '../config/constants';
 
-export type CampaignStatus = 'draft' | 'pending_fee' | 'active' | 'expired' | 'funded' | 'paid_out';
+export type CampaignStatus =
+  | 'draft'
+  | 'created'
+  | 'pending_fee'
+  | 'pending_verification'
+  | 'fee_invalid'
+  | 'active'
+  | 'expired'
+  | 'funded'
+  | 'paid_out';
+
+export type ActivationFeeVerificationStatus = 'none' | 'pending_verification' | 'verified' | 'invalid';
 
 export type StoredCampaign = {
   id: string;
@@ -34,6 +45,8 @@ export type StoredCampaign = {
   activationFeePaid?: boolean;
   activationFeeTxid?: string | null;
   activationFeePaidAt?: string | null;
+  activationFeeVerificationStatus?: ActivationFeeVerificationStatus;
+  activationFeeVerifiedAt?: string | null;
   activationOfferMode?: 'tx' | 'intent' | null;
   activationOfferOutputs?: Array<{ address: string; valueSats: number }> | null;
   activationTreasuryAddressUsed?: string | null;
@@ -48,6 +61,7 @@ export type StoredCampaign = {
 const DEFAULT_DB_FILENAME = 'campaigns.db';
 
 let dbPromise: Promise<Database<sqlite3.Database, sqlite3.Statement>> | null = null;
+let dbPromisePath: string | null = null;
 
 function getDataDir(): string {
   const dataDir = path.join(process.cwd(), 'data');
@@ -59,12 +73,19 @@ export function getDefaultDbPath(): string {
   return path.join(getDataDir(), DEFAULT_DB_FILENAME);
 }
 
-export async function openDatabase(dbPath = getDefaultDbPath()): Promise<Database> {
-  if (!dbPromise || dbPath !== getDefaultDbPath()) {
+function getEffectiveDbPath(dbPath?: string): string {
+  const envPath = process.env.TEYOLIA_SQLITE_PATH?.trim();
+  return dbPath ?? (envPath && envPath.length > 0 ? envPath : getDefaultDbPath());
+}
+
+export async function openDatabase(dbPath?: string): Promise<Database> {
+  const effectivePath = getEffectiveDbPath(dbPath);
+  if (!dbPromise || dbPromisePath !== effectivePath) {
     dbPromise = open({
-      filename: dbPath,
+      filename: effectivePath,
       driver: sqlite3.Database,
     });
+    dbPromisePath = effectivePath;
   }
   return dbPromise;
 }
@@ -97,6 +118,8 @@ export async function initializeDatabase(database?: Database): Promise<void> {
       activationFeePaid INTEGER,
       activationFeeTxid TEXT,
       activationFeePaidAt TEXT,
+      activationFeeVerificationStatus TEXT,
+      activationFeeVerifiedAt TEXT,
       activationOfferMode TEXT,
       activationOfferOutputs TEXT,
       activationTreasuryAddressUsed TEXT,
@@ -121,6 +144,18 @@ export async function initializeDatabase(database?: Database): Promise<void> {
     `UPDATE campaigns
      SET activationFeePaid = 0
      WHERE activationFeePaid IS NULL`,
+  );
+
+  await db.run(
+    `UPDATE campaigns
+     SET activationFeeVerificationStatus = 'none'
+     WHERE activationFeeVerificationStatus IS NULL OR TRIM(activationFeeVerificationStatus) = ''`,
+  );
+
+  await db.run(
+    `UPDATE campaigns
+     SET status = 'created'
+     WHERE status IS NULL OR TRIM(status) = ''`,
   );
 }
 
@@ -151,6 +186,8 @@ async function ensureCampaignColumns(db: Database): Promise<void> {
     { name: 'activationFeePaid', sqlType: 'INTEGER', defaultSql: '0' },
     { name: 'activationFeeTxid', sqlType: 'TEXT' },
     { name: 'activationFeePaidAt', sqlType: 'TEXT' },
+    { name: 'activationFeeVerificationStatus', sqlType: 'TEXT', defaultSql: "'none'" },
+    { name: 'activationFeeVerifiedAt', sqlType: 'TEXT' },
     { name: 'activationOfferMode', sqlType: 'TEXT' },
     { name: 'activationOfferOutputs', sqlType: 'TEXT' },
     { name: 'activationTreasuryAddressUsed', sqlType: 'TEXT' },
@@ -194,6 +231,8 @@ type CampaignRow = {
   activationFeePaid: number | null;
   activationFeeTxid: string | null;
   activationFeePaidAt: string | null;
+  activationFeeVerificationStatus: string | null;
+  activationFeeVerifiedAt: string | null;
   activationOfferMode: string | null;
   activationOfferOutputs: string | null;
   activationTreasuryAddressUsed: string | null;
@@ -252,6 +291,13 @@ function mapRowToCampaign(row: CampaignRow): StoredCampaign {
     activationFeePaid: row.activationFeePaid === 1,
     activationFeeTxid: row.activationFeeTxid ?? row.activation_feeTxid,
     activationFeePaidAt: row.activationFeePaidAt ?? row.activation_feePaidAt,
+    activationFeeVerificationStatus:
+      row.activationFeeVerificationStatus === 'pending_verification'
+      || row.activationFeeVerificationStatus === 'verified'
+      || row.activationFeeVerificationStatus === 'invalid'
+        ? row.activationFeeVerificationStatus
+        : 'none',
+    activationFeeVerifiedAt: row.activationFeeVerifiedAt ?? null,
     activationOfferMode: row.activationOfferMode === 'intent' || row.activationOfferMode === 'tx'
       ? row.activationOfferMode
       : null,
@@ -289,6 +335,13 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
   const activationFeePaid = campaign.activationFeePaid ? 1 : 0;
   const activationFeeTxid = campaign.activationFeeTxid ?? campaign.activation?.feeTxid ?? null;
   const activationFeePaidAt = campaign.activationFeePaidAt ?? campaign.activation?.feePaidAt ?? null;
+  const activationFeeVerificationStatus =
+    campaign.activationFeeVerificationStatus === 'pending_verification'
+    || campaign.activationFeeVerificationStatus === 'verified'
+    || campaign.activationFeeVerificationStatus === 'invalid'
+      ? campaign.activationFeeVerificationStatus
+      : 'none';
+  const activationFeeVerifiedAt = campaign.activationFeeVerifiedAt ?? null;
   const activationOfferMode =
     campaign.activationOfferMode === 'intent' || campaign.activationOfferMode === 'tx'
       ? campaign.activationOfferMode
@@ -322,6 +375,8 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
         activationFeePaid,
         activationFeeTxid,
         activationFeePaidAt,
+        activationFeeVerificationStatus,
+        activationFeeVerifiedAt,
         activationOfferMode,
         activationOfferOutputs,
         activationTreasuryAddressUsed,
@@ -330,7 +385,7 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
         payout_paidAt,
         treasuryAddressUsed,
         expirationTime
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         campaign.id,
@@ -356,6 +411,8 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
         activationFeePaid,
         activationFeeTxid,
         activationFeePaidAt,
+        activationFeeVerificationStatus,
+        activationFeeVerifiedAt,
         activationOfferMode,
         activationOfferOutputs,
         campaign.activationTreasuryAddressUsed ?? null,
