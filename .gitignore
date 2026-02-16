@@ -18,3 +18,4 @@ npm-debug.log*
 
 # local sqlite dbs
 backend/data/*.db
+backend/data/*.db
