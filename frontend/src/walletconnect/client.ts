@@ -99,6 +99,15 @@ export function assertSessionSupportsEcashSign(session: SessionTypes.Struct, cha
   }
 }
 
+export function sessionSupportsEcashSigning(session: unknown, chainId: string): boolean {
+  try {
+    assertSessionSupportsEcashSign(session as SessionTypes.Struct, chainId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function getSignClient() {
   const client = await ensureWcInitialized();
   if (!subscribed) {
