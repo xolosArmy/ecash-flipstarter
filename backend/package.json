@@ -4,14 +4,14 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "dev": "ts-node-dev --respawn src/server.ts",
-    "build": "tsc",
-    "start": "node dist/server.js",
-    "migrate:campaigns": "ts-node src/scripts/migrateCampaigns.ts",
-    "test": "vitest run",
-    "lint": "echo \"TODO: add eslint\"",
-    "migrate:campaigns": "node scripts/migrateCampaigns.js"
-  },
+  "dev": "ts-node-dev --respawn src/server.ts",
+  "build": "tsc",
+  "start": "node dist/server.js",
+  "migrate:campaigns": "ts-node src/scripts/migrateCampaigns.ts",
+  "migrate:campaigns:js": "node scripts/migrateCampaigns.js",
+  "test": "vitest run",
+  "lint": "echo \"TODO: add eslint\""
+},
   "dependencies": {
     "@ecash/lib": "1.5.1-rc3",
     "b58-ts": "^0.1.0",
