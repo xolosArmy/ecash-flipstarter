@@ -8,7 +8,11 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
+<<<<<<< HEAD
     "test:wc-sanity": "node scripts/wc-sanity-check.mjs"
+=======
+    "test:walletconnect:sanity": "node scripts/walletconnect-sanity.mjs"
+>>>>>>> 22069b1 (Update Teyolia: pledge payload, activation polling, WalletConnect sanity + tests)
   },
   "dependencies": {
     "@walletconnect/sign-client": "^2.18.0",
@@ -16,7 +20,9 @@
     "qrcode.react": "^3.1.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-router-dom": "^6.22.3"
+    "react-router-dom": "^6.22.3",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7"
   },
   "devDependencies": {
     "@types/leaflet": "^1.9.12",

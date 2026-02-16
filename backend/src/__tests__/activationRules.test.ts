@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CampaignService } from '../services/CampaignService';
 import { makeTestDbPath } from './helpers/testDbPath';
 
@@ -12,6 +12,16 @@ beforeAll(() => {
 
 afterAll(() => {
   delete process.env.TEYOLIA_SQLITE_PATH;
+});
+
+beforeEach(() => {
+  vi.resetModules();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  delete process.env.E_CASH_BACKEND;
+  delete process.env.CHRONIK_URL;
 });
 
 describe('activation fee rules', () => {
@@ -147,5 +157,90 @@ describe('activation fee rules', () => {
     const history = await service.getCampaignHistory(campaignId);
     const offerEvents = history.filter((entry) => entry.event === 'ACTIVATION_FEE_OFFER_CREATED');
     expect(offerEvents).toHaveLength(1);
+  });
+});
+
+describe('ecashClient chronik protobuf wrapper', () => {
+  it('maps confirmed chronik tx to transaction info with confirmations >= 1', async () => {
+    process.env.E_CASH_BACKEND = 'chronik';
+    process.env.CHRONIK_URL = 'https://chronik.xolosarmy.xyz';
+    const txMock = vi.fn().mockResolvedValue({
+      outputs: [{ sats: 80000000n, outputScript: '76a914abcd88ac' }],
+      block: { height: 900000 },
+    });
+    const blockchainInfoMock = vi.fn().mockResolvedValue({ tipHeight: 900100 });
+    vi.doMock('chronik-client', () => ({
+      ChronikClient: vi.fn().mockImplementation(() => ({
+        tx: txMock,
+        blockchainInfo: blockchainInfoMock,
+      })),
+    }));
+
+    const ecashClient = await import('../blockchain/ecashClient');
+    const info = await ecashClient.getTransactionInfo('a'.repeat(64));
+    const blockchainInfo = await ecashClient.getBlockchainInfo();
+
+    expect(info.txid).toBe('a'.repeat(64));
+    expect(info.confirmations).toBe(1);
+    expect(info.height).toBe(900000);
+    expect(info.outputs).toEqual([{ scriptPubKey: '76a914abcd88ac', valueSats: 80000000n }]);
+    expect(blockchainInfo).toEqual({ tipHeight: 900100 });
+  });
+
+  it('maps unconfirmed chronik tx as pending (confirmations = 0)', async () => {
+    process.env.E_CASH_BACKEND = 'chronik';
+    process.env.CHRONIK_URL = 'https://chronik.xolosarmy.xyz';
+    const txMock = vi.fn().mockResolvedValue({
+      outputs: [{ sats: 2000n, outputScript: '76a914ffff88ac' }],
+    });
+    vi.doMock('chronik-client', () => ({
+      ChronikClient: vi.fn().mockImplementation(() => ({
+        tx: txMock,
+      })),
+    }));
+
+    const ecashClient = await import('../blockchain/ecashClient');
+    const info = await ecashClient.getTransactionInfo('b'.repeat(64));
+
+    expect(info.txid).toBe('b'.repeat(64));
+    expect(info.confirmations).toBe(0);
+    expect(info.height).toBe(-1);
+    expect(info.outputs).toEqual([{ scriptPubKey: '76a914ffff88ac', valueSats: 2000n }]);
+  });
+
+  it('preserves outputs needed to detect invalid treasury output/monto insuficiente', async () => {
+    process.env.E_CASH_BACKEND = 'chronik';
+    process.env.CHRONIK_URL = 'https://chronik.xolosarmy.xyz';
+    const txMock = vi.fn().mockResolvedValue({
+      outputs: [{ sats: 1000n, outputScript: '76a914not-treasury88ac' }],
+      block: { height: 910000 },
+    });
+    vi.doMock('chronik-client', () => ({
+      ChronikClient: vi.fn().mockImplementation(() => ({
+        tx: txMock,
+      })),
+    }));
+
+    const ecashClient = await import('../blockchain/ecashClient');
+    const info = await ecashClient.getTransactionInfo('c'.repeat(64));
+
+    expect(info.confirmations).toBe(1);
+    expect(info.outputs).toEqual([{ scriptPubKey: '76a914not-treasury88ac', valueSats: 1000n }]);
+  });
+
+  it('returns clear error with chronik url and txid when chronik is down', async () => {
+    process.env.E_CASH_BACKEND = 'chronik';
+    process.env.CHRONIK_URL = 'https://chronik.xolosarmy.xyz';
+    const txMock = vi.fn().mockRejectedValue(new Error('timeout'));
+    vi.doMock('chronik-client', () => ({
+      ChronikClient: vi.fn().mockImplementation(() => ({
+        tx: txMock,
+      })),
+    }));
+
+    const ecashClient = await import('../blockchain/ecashClient');
+    await expect(ecashClient.getTransactionInfo('d'.repeat(64))).rejects.toThrow(
+      /chronik tx d{64} failed for https:\/\/chronik\.xolosarmy\.xyz: timeout/,
+    );
   });
 });

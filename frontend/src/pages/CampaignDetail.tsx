@@ -5,6 +5,7 @@ import {
   buildPayoutTx,
   confirmActivationTx,
   confirmPayoutTx,
+  fetchCampaignActivationStatus,
   fetchCampaignHistory,
   fetchCampaignPledges,
   fetchCampaignSummary,
@@ -22,22 +23,14 @@ import { StatusBadge } from '../components/StatusBadge';
 import { SecurityBanner } from '../components/SecurityBanner';
 import { Countdown } from '../components/Countdown';
 import { WC_METHOD } from '../walletconnect/client';
+import { extractWalletTxid } from '../walletconnect/txid';
+import { shouldStopActivationPolling } from '../utils/activationPolling';
 
 function normalizeEcashAddress(address: string): string {
   const trimmed = address.trim();
   if (!trimmed) return '';
   if (trimmed.includes(':')) return trimmed;
   return `ecash:${trimmed}`;
-}
-
-function extractTxid(result: unknown): string | null {
-  if (!result) return null;
-  if (typeof result === 'string') return result;
-  if (typeof result === 'object' && 'txid' in result) {
-    const txid = (result as { txid?: unknown }).txid;
-    return typeof txid === 'string' ? txid : null;
-  }
-  return null;
 }
 
 export const CampaignDetail: React.FC = () => {
@@ -54,7 +47,15 @@ export const CampaignDetail: React.FC = () => {
   const [payingOut, setPayingOut] = useState(false);
   const [messages, setMessages] = useState<Array<{ amount: number; timestamp: string; message: string }>>([]);
   const [history, setHistory] = useState<AuditLog[]>([]);
-  const { signClient, topic, connected, connect, requestSignAndBroadcast, addresses } = useWalletConnect();
+  const {
+    signClient,
+    topic,
+    connected,
+    connect,
+    requestSignAndBroadcast,
+    requestSignAndBroadcastRawTx,
+    addresses,
+  } = useWalletConnect();
   const { showToast } = useToast();
 
   const loadMessages = useCallback((campaignId: string) => {
@@ -151,6 +152,47 @@ export const CampaignDetail: React.FC = () => {
     setPayerAddress(normalizeEcashAddress(addresses[0]));
   }, [addresses, payerAddress]);
 
+  useEffect(() => {
+    if (!id) return undefined;
+    if (campaign?.status !== 'pending_verification') return undefined;
+    const txid = campaign.activationFeeTxid || campaign.activation?.feeTxid;
+    if (!txid) return undefined;
+
+    const interval = window.setInterval(async () => {
+      try {
+        const activation = await fetchCampaignActivationStatus(id);
+        if (import.meta.env.DEV) {
+          console.debug('[ActivationFee] polling status tick', activation);
+        }
+        if (activation.status === 'active') {
+          const refreshed = await fetchCampaignSummary(id);
+          setCampaign(refreshed);
+          setActivationMessage('Pago verificado on-chain. Campaña activada.');
+          window.dispatchEvent(
+            new CustomEvent('campaign:summary:refresh', {
+              detail: { campaignId: id, summary: refreshed },
+            }),
+          );
+          window.dispatchEvent(new Event('campaigns:refresh'));
+          window.clearInterval(interval);
+          return;
+        }
+        if (shouldStopActivationPolling(activation)) {
+          const refreshed = await fetchCampaignSummary(id);
+          setCampaign(refreshed);
+          setActivationError('Pago inválido (monto/dirección). Reintenta.');
+          window.clearInterval(interval);
+        }
+      } catch {
+        // Keep polling on transient failures.
+      }
+    }, 5000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [campaign?.activation?.feeTxid, campaign?.activationFeeTxid, campaign?.status, id]);
+
   const description = campaign?.description ?? '';
   const renderedDescription = useMemo(() => parseLimitedMarkdown(description), [description]);
 
@@ -197,37 +239,53 @@ export const CampaignDetail: React.FC = () => {
           if (parts.length < 2) throw new Error('wc-no-chainid');
           return `${parts[0]}:${parts[1]}`;
         })();
-      console.debug('[ActivationFee][WC] payload', {
-        method: WC_METHOD,
-        chainId,
-        outputsCount: built.outputs.length,
-        firstOutput: built.outputs[0] ?? null,
-      });
+      if (import.meta.env.DEV) {
+        console.debug('[ActivationFee][WC] payload', {
+          method: WC_METHOD,
+          chainId,
+          outputsCount: built.outputs.length,
+          firstOutput: built.outputs[0] ?? null,
+        });
+      }
 
       setActivationMessage('Esperando confirmación en Tonalli...');
       const result = await requestSignAndBroadcast(built.wcOfferId, chainId, {
         outputs: built.outputs,
         userPrompt: built.userPrompt,
       });
-      const txid = extractTxid(result);
+      const txid = extractWalletTxid(result);
       if (!txid) {
         throw new Error('Tonalli returned an invalid txid.');
       }
+      if (import.meta.env.DEV) {
+        console.debug('[ActivationFee] broadcast txid', txid);
+      }
 
       const summary = await confirmActivationTx(id, txid, activeAddress);
-      setCampaign(summary);
+      if (import.meta.env.DEV) {
+        console.debug('[ActivationFee] confirm response', summary);
+      }
+      const refreshed = await fetchCampaignSummary(id);
+      setCampaign(refreshed);
       window.dispatchEvent(
         new CustomEvent('campaign:summary:refresh', {
-          detail: { campaignId: id, summary },
+          detail: { campaignId: id, summary: refreshed },
         }),
       );
       window.dispatchEvent(new Event('campaigns:refresh'));
-      if (summary.verificationStatus === 'pending_verification') {
-        setActivationMessage(`No se pudo verificar en Chronik, pero guardamos tu txid: ${txid}`);
+      const verificationStatus = summary.activationFeeVerificationStatus ?? summary.verificationStatus;
+      if (verificationStatus === 'pending_verification') {
+        setActivationMessage('Pago transmitido. Pendiente de confirmación on-chain (>=1 conf).');
+        showToast('Pago transmitido. Pendiente de confirmación on-chain (>=1 conf).', 'info');
+      } else if (verificationStatus === 'invalid') {
+        setActivationError('Pago inválido (monto/dirección). Reintenta.');
+        setActivationMessage('');
+        showToast('Pago inválido. Reintenta.', 'error');
       } else {
-        setActivationMessage('Campaña activada.');
+        setActivationMessage('Fee pagada. Campaña activada.');
+        showToast('Fee pagada. Campaña activada.', 'success');
       }
-      showToast('Campaña activada on-chain', 'success');
+      refreshCampaign();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'No se pudo activar la campaña.';
       const lower = message.toLowerCase();
@@ -265,20 +323,35 @@ export const CampaignDetail: React.FC = () => {
         activeSession = await connect();
       }
 
-      const built = await buildPayoutTx(id);
-      const ecashNs = activeSession?.namespaces?.ecash;
-      if (!ecashNs) throw new Error('wc-no-ecash-namespace');
-      const chainId =
-        (ecashNs.chains && ecashNs.chains[0]) ||
-        (() => {
-          const parts = ecashNs.accounts?.[0]?.split(':') ?? [];
-          if (parts.length < 2) throw new Error('wc-no-chainid');
-          return `${parts[0]}:${parts[1]}`;
-        })();
-
+      const { unsignedTxHex, wcOfferId } = await buildPayoutTx(id);
       setPayoutMessage('Esperando confirmación en Tonalli...');
-      const result = await requestSignAndBroadcast(built.wcOfferId, chainId);
-      const txid = extractTxid(result);
+      let txid: string | null = null;
+
+      if (typeof unsignedTxHex === 'string' && unsignedTxHex.trim().length > 0) {
+        const result = await requestSignAndBroadcastRawTx({
+          offerId: wcOfferId,
+          rawHex: unsignedTxHex,
+          userPrompt: 'Payout campaign',
+        });
+        txid = result.txid;
+      } else {
+        console.warn('[Payout][WC] Missing unsignedTxHex, falling back to legacy WalletConnect request', {
+          campaignId: id,
+          offerId: wcOfferId,
+        });
+        const ecashNs = activeSession?.namespaces?.ecash;
+        if (!ecashNs) throw new Error('wc-no-ecash-namespace');
+        const chainId =
+          (ecashNs.chains && ecashNs.chains[0]) ||
+          (() => {
+            const parts = ecashNs.accounts?.[0]?.split(':') ?? [];
+            if (parts.length < 2) throw new Error('wc-no-chainid');
+            return `${parts[0]}:${parts[1]}`;
+          })();
+        const result = await requestSignAndBroadcast(wcOfferId, chainId);
+        txid = extractWalletTxid(result);
+      }
+
       if (!txid) {
         throw new Error('Tonalli returned an invalid txid.');
       }
@@ -290,8 +363,9 @@ export const CampaignDetail: React.FC = () => {
         }),
       );
       window.dispatchEvent(new Event('campaigns:refresh'));
-      setPayoutMessage('Payout confirmado.');
+      setPayoutMessage(`Payout confirmado. Txid: ${txid}`);
       showToast('Payout confirmado on-chain', 'success');
+      refreshCampaign();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'No se pudo finalizar el payout.';
       setPayoutError(message);
@@ -343,6 +417,17 @@ export const CampaignDetail: React.FC = () => {
           Pendiente de pago
         </p>
       )}
+      {campaign.status === 'pending_verification' && (
+        <p style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, background: '#fef3c7', color: '#92400e' }}>
+          Pago transmitido. Pendiente de confirmación on-chain (&gt;=1 conf)
+        </p>
+      )}
+      {(campaign.status === 'fee_invalid'
+        || (campaign.status === 'pending_fee' && campaign.activationFeeVerificationStatus === 'invalid')) && (
+        <p style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, background: '#fee2e2', color: '#991b1b' }}>
+          Pago inválido (monto/dirección). Reintenta
+        </p>
+      )}
       {hasConfirmedActivation && (
         <p style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, background: '#dcfce7', color: '#166534' }}>
           Activación confirmada
@@ -353,6 +438,11 @@ export const CampaignDetail: React.FC = () => {
         {' · '}
         Estado: {activationFeePaid ? 'Pagada' : 'Pendiente'}
       </p>
+      {campaign.activationFeePaidAt && (
+        <p>
+          Fee pagada el: {new Date(campaign.activationFeePaidAt).toLocaleString()}
+        </p>
+      )}
       <p>
         Progreso: <AmountDisplay sats={campaign.totalPledged} /> / <AmountDisplay sats={campaign.goal} /> ({percent}%)
       </p>
@@ -395,7 +485,7 @@ export const CampaignDetail: React.FC = () => {
         </p>
       )}
       {campaign.status === 'funded' && <p>Meta alcanzada. Gracias por tu apoyo.</p>}
-      {(campaign.status === 'draft' || campaign.status === 'pending_fee') && (
+      {(campaign.status === 'draft' || campaign.status === 'created' || campaign.status === 'pending_fee' || campaign.status === 'fee_invalid') && !activationFeePaid && (
         <section style={{ border: '1px solid #eee', borderRadius: 8, padding: 12, marginTop: 12 }}>
           <h3>Activar campaña</h3>
           <p>
@@ -437,7 +527,11 @@ export const CampaignDetail: React.FC = () => {
       {campaign.status === 'paid_out' && <p>Esta campaña ya fue pagada.</p>}
       <WalletConnectModal />
       {campaign.status === 'active' ? (
-        <PledgeForm campaignId={id} onBroadcastSuccess={refreshCampaign} />
+        <PledgeForm
+          campaignId={id}
+          campaignAddress={campaign.covenant?.campaignAddress || campaign.campaignAddress}
+          onBroadcastSuccess={refreshCampaign}
+        />
       ) : (
         <p>La campaña debe estar activa antes de aceptar pledges.</p>
       )}

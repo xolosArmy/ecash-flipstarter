@@ -34,11 +34,18 @@ export VITE_TONALLI_BRIDGE_PATH=/#/external-sign
 export VITE_TONALLI_TIMEOUT_MS=120000
 ```
 
+<<<<<<< HEAD
 Local dev defaults:
 ```bash
 VITE_API_BASE_URL=http://127.0.0.1:3001/api
 # Tonalli es una app separada; no uses el mismo puerto del frontend.
 VITE_TONALLI_BASE_URL=https://cartera.xolosarmy.xyz
+=======
+Local dev defaults (Tonalli corre como app separada; no uses el mismo puerto del frontend):
+```bash
+VITE_API_BASE_URL=http://127.0.0.1:3001/api
+VITE_TONALLI_BASE_URL=http://127.0.0.1:5175
+>>>>>>> 22069b1 (Update Teyolia: pledge payload, activation polling, WalletConnect sanity + tests)
 ```
 
 The Tonalli callback URL resolves from the runtime origin (`window.location.origin + "/#/tonalli-callback"`)

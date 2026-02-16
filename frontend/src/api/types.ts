@@ -77,6 +77,9 @@ export interface BuiltTxResponse {
   unsignedTxHex?: string;
   nextCovenantValue?: string;
   fee?: string;
+  mode?: 'tx' | 'intent';
+  outputs?: Array<{ address: string; valueSats: number }>;
+  userPrompt?: string;
   wcOfferId?: string;
   offerId?: string;
   pledgeId?: string;

@@ -149,6 +149,100 @@ a {
   color: #166534;
 }
 
+.global-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.stat-card {
+  background: var(--bg-panel);
+  border: 1px solid rgba(217, 179, 106, 0.2);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+}
+
+.stat-value {
+  display: block;
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: var(--gold);
+  margin-bottom: 4px;
+}
+
+.stat-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.teyolia-audit-section {
+  margin-top: 32px;
+  border-top: 1px solid rgba(29, 183, 154, 0.2);
+  padding-top: 24px;
+}
+
+.audit-timeline {
+  position: relative;
+  padding-left: 20px;
+  border-left: 2px solid rgba(29, 183, 154, 0.1);
+}
+
+.audit-event {
+  position: relative;
+  margin-bottom: 20px;
+}
+
+.audit-dot {
+  position: absolute;
+  left: -26px;
+  top: 8px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--jade);
+  box-shadow: 0 0 8px var(--jade);
+}
+
+.audit-content {
+  background: rgba(255, 255, 255, 0.03);
+  padding: 12px;
+  border-radius: 8px;
+}
+
+.audit-badge {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-right: 10px;
+  font-weight: bold;
+}
+
+.badge-created {
+  background: var(--jade-deep);
+  color: white;
+}
+
+.badge-pledge_received {
+  background: var(--gold);
+  color: black;
+}
+
+.badge-active {
+  background: #166534;
+  color: white;
+}
+
+.audit-details {
+  margin-top: 8px;
+  font-family: monospace;
+  font-size: 0.9rem;
+  color: var(--text-main);
+}
+
 @media (max-width: 680px) {
   .teyolia-brand {
     align-items: flex-start;

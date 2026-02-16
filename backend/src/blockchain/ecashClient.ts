@@ -21,6 +21,13 @@ export type TransactionOutput = {
   scriptPubKey: string;
 };
 
+export type TransactionInfo = {
+  txid: string;
+  outputs: TransactionOutput[];
+  confirmations: number;
+  height: number;
+};
+
 export function getEffectiveChronikBaseUrl(): string {
   return effectiveChronikBaseUrl;
 }
@@ -111,6 +118,16 @@ export async function getTransactionOutputs(txid: string): Promise<TransactionOu
   return getTransactionOutputsViaRpc(txid);
 }
 
+export async function getTransactionInfo(txid: string): Promise<TransactionInfo> {
+  if (USE_MOCK) {
+    return { txid, outputs: [], confirmations: 0, height: -1 };
+  }
+  if (USE_CHRONIK) {
+    return getTransactionInfoViaChronik(txid);
+  }
+  return getTransactionInfoViaRpc(txid);
+}
+
 async function getUtxosForAddressViaChronik(address: string): Promise<Utxo[]> {
   const normalizedAddress = normalizeChronikAddress(address);
   const scriptUtxos = await chronikRequest(
@@ -167,6 +184,26 @@ async function getTransactionOutputsViaChronik(txid: string): Promise<Transactio
     valueSats: toBigIntSats(output.sats),
     scriptPubKey: typeof output.outputScript === 'string' ? output.outputScript.toLowerCase() : '',
   }));
+}
+
+async function getTransactionInfoViaChronik(txid: string): Promise<TransactionInfo> {
+  const tx = await chronikRequest(`tx ${txid}`, () => chronik.tx(txid));
+  const txRecord = tx as {
+    outputs?: Array<{ sats?: unknown; outputScript?: unknown }>;
+    block?: { height?: unknown };
+  };
+  const outputs = (txRecord.outputs ?? []).map((output) => ({
+    valueSats: toBigIntSats(output.sats),
+    scriptPubKey: typeof output.outputScript === 'string' ? output.outputScript.toLowerCase() : '',
+  }));
+  const heightRaw = txRecord.block?.height;
+  const height = typeof heightRaw === 'number' && Number.isFinite(heightRaw) ? Math.floor(heightRaw) : -1;
+  return {
+    txid,
+    outputs,
+    confirmations: height >= 0 ? 1 : 0,
+    height,
+  };
 }
 
 export async function getChronikBlockchainInfo() {
@@ -278,12 +315,41 @@ async function getTransactionOutputsViaRpc(txid: string): Promise<TransactionOut
   });
 }
 
+async function getTransactionInfoViaRpc(txid: string): Promise<TransactionInfo> {
+  const tx = await rpcCall<{
+    vout?: Array<{ value?: unknown; scriptPubKey?: { hex?: unknown } }>;
+    confirmations?: unknown;
+    blockhash?: unknown;
+  }>('getrawtransaction', [txid, true]);
+  const outputs = (tx.vout ?? []).map((output) => {
+    const scriptPubKey =
+      output.scriptPubKey && typeof output.scriptPubKey.hex === 'string'
+        ? output.scriptPubKey.hex.toLowerCase()
+        : '';
+    const valueSats =
+      typeof output.value === 'number'
+        ? BigInt(Math.round(output.value * 100_000_000))
+        : toBigIntSats(output.value);
+    return { valueSats, scriptPubKey };
+  });
+  const confirmations =
+    typeof tx.confirmations === 'number' && Number.isFinite(tx.confirmations)
+      ? Math.max(0, Math.floor(tx.confirmations))
+      : 0;
+  return {
+    txid,
+    outputs,
+    confirmations,
+    height: tx.blockhash ? 1 : -1,
+  };
+}
+
 async function chronikRequest<T>(label: string, action: () => Promise<T>): Promise<T> {
   try {
     return await action();
   } catch (err) {
     const message = formatChronikError(err);
-    throw new Error(`chronik ${label} failed: ${message}`);
+    throw new Error(`chronik ${label} failed for ${effectiveChronikBaseUrl}: ${message}`);
   }
 }
 

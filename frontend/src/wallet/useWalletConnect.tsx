@@ -15,6 +15,7 @@ import {
   getWalletConnectProjectId,
   isWalletConnectConfigured,
   onSessionDelete,
+  WC_METHOD,
   requestSignAndBroadcastTransaction,
   sessionSupportsEcashSigning,
 } from '../walletconnect/client';
@@ -40,6 +41,17 @@ type WalletConnectState = {
       userPrompt?: string;
     }
   ) => Promise<unknown>;
+  requestSignAndBroadcastIntent: (args: {
+    offerId: string;
+    outputs: Array<{ address: string; valueSats: string | number | bigint }>;
+    message?: string;
+    userPrompt?: string;
+  }) => Promise<{ txid: string }>;
+  requestSignAndBroadcastRawTx: (args: {
+    offerId: string;
+    rawHex: string;
+    userPrompt?: string;
+  }) => Promise<{ txid: string }>;
   setLastTxid: (txid: string | null) => void;
 };
 
@@ -76,6 +88,15 @@ function safelyGetSession(client: SignClient, topic: string): SessionTypes.Struc
   } catch {
     return null;
   }
+}
+
+function extractTxid(result: unknown): string | null {
+  if (typeof result === 'string') return result;
+  if (result && typeof result === 'object' && 'txid' in result) {
+    const txid = (result as { txid?: unknown }).txid;
+    return typeof txid === 'string' ? txid : null;
+  }
+  return null;
 }
 
 export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -283,6 +304,117 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
+  const requestSignAndBroadcastIntent = async (args: {
+    offerId: string;
+    outputs: Array<{ address: string; valueSats: string | number | bigint }>;
+    message?: string;
+    userPrompt?: string;
+  }): Promise<{ txid: string }> => {
+    const activeTopic = topic;
+    const client = clientRef.current;
+    if (!activeTopic || !client) {
+      throw new Error('Conecta WalletConnect');
+    }
+
+    const session = safelyGetSession(client, activeTopic);
+    if (!session) {
+      throw new Error('Conecta WalletConnect');
+    }
+    assertSessionSupportsEcashSign(session, CHAIN_ID);
+
+    setStatus('signing');
+    try {
+      const normalizedOutputs = args.outputs.map((output) => ({
+        address: output.address,
+        valueSats:
+          typeof output.valueSats === 'bigint' ? output.valueSats.toString() : String(output.valueSats),
+      }));
+      const result = await client.request({
+        topic: activeTopic,
+        chainId: CHAIN_ID,
+        request: {
+          method: WC_METHOD,
+          params: [
+            {
+              mode: 'intent',
+              offerId: args.offerId,
+              outputs: normalizedOutputs,
+              ...(args.message ? { message: args.message } : {}),
+              ...(args.userPrompt ? { userPrompt: args.userPrompt } : {}),
+              meta: { app: 'ecash-flipstarter', flow: 'pledge' },
+            },
+          ],
+        },
+      });
+      const txid = extractTxid(result);
+      if (!txid) {
+        throw new Error('WalletConnect response missing txid.');
+      }
+      setStatus('connected');
+      return { txid };
+    } catch (err) {
+      if (isStaleSessionError(err)) {
+        await purgeWalletConnect();
+      }
+      setStatus('connected');
+      const formattedError = formatWalletConnectError(err, 'WalletConnect request failed.');
+      setError(formattedError);
+      throw new Error(formattedError);
+    }
+  };
+
+  const requestSignAndBroadcastRawTx = async (args: {
+    offerId: string;
+    rawHex: string;
+    userPrompt?: string;
+  }): Promise<{ txid: string }> => {
+    const activeTopic = topic;
+    const client = clientRef.current;
+    if (!activeTopic || !client) {
+      throw new Error('Conecta WalletConnect');
+    }
+
+    const session = safelyGetSession(client, activeTopic);
+    if (!session) {
+      throw new Error('Conecta WalletConnect');
+    }
+    assertSessionSupportsEcashSign(session, CHAIN_ID);
+
+    setStatus('signing');
+    try {
+      const result = await client.request({
+        topic: activeTopic,
+        chainId: CHAIN_ID,
+        request: {
+          method: WC_METHOD,
+          params: [
+            {
+              mode: 'tx',
+              offerId: args.offerId,
+              rawHex: args.rawHex,
+              ...(args.userPrompt ? { userPrompt: args.userPrompt } : {}),
+              meta: { app: 'ecash-flipstarter', flow: 'payout' },
+            },
+          ],
+        },
+      });
+      const txid = extractTxid(result);
+      if (!txid) {
+        throw new Error('WalletConnect response missing txid.');
+      }
+      setStatus('connected');
+      return { txid };
+    } catch (err) {
+      if (isStaleSessionError(err)) {
+        await purgeWalletConnect();
+      }
+      setStatus('connected');
+      const formattedError = formatWalletConnectError(err, 'WalletConnect request failed.');
+      setError(formattedError);
+      throw new Error(formattedError);
+    }
+  };
+
   const value = useMemo<WalletConnectState>(
     () => ({
       signClient,
@@ -298,9 +430,23 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
       disconnect,
       requestAddresses,
       requestSignAndBroadcast,
+      requestSignAndBroadcastIntent,
+      requestSignAndBroadcastRawTx,
       setLastTxid,
     }),
-    [signClient, connected, topic, addresses, lastTxid, uri, status, error, projectIdMissing]
+    [
+      signClient,
+      connected,
+      topic,
+      addresses,
+      lastTxid,
+      uri,
+      status,
+      error,
+      projectIdMissing,
+      requestSignAndBroadcastIntent,
+      requestSignAndBroadcastRawTx,
+    ]
   );
 
   return <WalletConnectContext.Provider value={value}>{children}</WalletConnectContext.Provider>;

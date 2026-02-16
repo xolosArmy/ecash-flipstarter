@@ -4,6 +4,7 @@ import {
   buildCampaignActivationTx,
   confirmCampaignActivationTx,
   createCampaign,
+  fetchCampaignActivationStatus,
   fetchCampaignSummary,
   type CreatedCampaign,
 } from '../api/client';
@@ -19,6 +20,8 @@ import { useWalletConnect } from '../wallet/useWalletConnect';
 import { useToast } from '../components/ToastProvider';
 import { parseXecInputToSats } from '../utils/amount';
 import { WC_METHOD } from '../walletconnect/client';
+import { extractWalletTxid } from '../walletconnect/txid';
+import { shouldStopActivationPolling } from '../utils/activationPolling';
 
 type WizardStep = 1 | 2 | 3;
 
@@ -31,16 +34,6 @@ function normalizeEcashAddress(address: string): string {
   if (!trimmed) return '';
   if (trimmed.includes(':')) return trimmed;
   return `ecash:${trimmed}`;
-}
-
-function extractTxid(result: unknown): string | null {
-  if (!result) return null;
-  if (typeof result === 'string') return result;
-  if (typeof result === 'object' && 'txid' in result) {
-    const txid = (result as { txid?: unknown }).txid;
-    return typeof txid === 'string' ? txid : null;
-  }
-  return null;
 }
 
 function getChainIdFromSession(session: any): string {
@@ -108,7 +101,13 @@ export const CreateCampaignWizard: React.FC = () => {
       setCampaign(summary);
       if (summary.status === 'active') {
         setWizardStep(3);
-      } else if (summary.status === 'pending_fee' || summary.status === 'draft') {
+      } else if (
+        summary.status === 'pending_fee'
+        || summary.status === 'draft'
+        || summary.status === 'created'
+        || summary.status === 'pending_verification'
+        || summary.status === 'fee_invalid'
+      ) {
         setWizardStep(2);
       }
       return summary;
@@ -139,6 +138,49 @@ export const CreateCampaignWizard: React.FC = () => {
     if (!addresses.length) return;
     setPayerAddress(normalizeEcashAddress(addresses[0]));
   }, [addresses, payerAddress]);
+
+  useEffect(() => {
+    if (!campaignId) return undefined;
+    if (campaign?.status !== 'pending_verification') return undefined;
+    const txid = campaign.activationFeeTxid || campaign.activation?.feeTxid;
+    if (!txid) return undefined;
+
+    const interval = window.setInterval(async () => {
+      try {
+        const activation = await fetchCampaignActivationStatus(campaignId);
+        if (import.meta.env.DEV) {
+          console.debug('[ActivationFee] polling status tick', activation);
+        }
+        if (activation.status === 'active') {
+          const refreshed = await refreshCampaign(campaignId);
+          setCampaign(refreshed);
+          setWizardStep(3);
+          setMessage('Pago verificado on-chain. Campaña activada.');
+          window.dispatchEvent(
+            new CustomEvent('campaign:summary:refresh', {
+              detail: { campaignId, summary: refreshed },
+            }),
+          );
+          window.dispatchEvent(new Event('campaigns:refresh'));
+          window.clearInterval(interval);
+          return;
+        }
+        if (shouldStopActivationPolling(activation)) {
+          const refreshed = await refreshCampaign(campaignId);
+          setCampaign(refreshed);
+          setMessage(null);
+          setError('Pago inválido (monto/dirección). Reintenta.');
+          window.clearInterval(interval);
+        }
+      } catch {
+        // Keep polling while backend/chronik is transiently unavailable.
+      }
+    }, 5000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [campaign?.activation?.feeTxid, campaign?.activationFeeTxid, campaign?.status, campaignId]);
 
   const handleCreatedCampaign = async (created: CreatedCampaign) => {
     persistCampaignId(created.id);
@@ -204,23 +246,31 @@ export const CreateCampaignWizard: React.FC = () => {
     setMessage('Confirmando activación...');
     try {
       const summary = await confirmCampaignActivationTx(campaignId, txid, activePayerAddress);
-      setCampaign(summary);
-      setTxidInput(txid);
-      setWizardStep(summary.status === 'active' ? 3 : 2);
-      setMessage(summary.status === 'active' ? 'Campaña activada ✅' : 'Activación confirmada.');
-      if (summary.verificationStatus === 'pending_verification') {
-        setMessage(`No se pudo verificar en Chronik, pero guardamos tu txid: ${txid}`);
+      if (import.meta.env.DEV) {
+        console.debug('[ActivationFee] confirm response', summary);
       }
-      if (summary.status === 'active') {
-        showToast('Campaña activada');
+      const refreshed = await refreshCampaign(campaignId);
+      setCampaign(refreshed);
+      setTxidInput(txid);
+      setWizardStep(refreshed.status === 'active' ? 3 : 2);
+      setMessage(refreshed.status === 'active' ? 'Fee pagada. Campaña activada.' : 'Pago registrado.');
+      const verificationStatus = summary.activationFeeVerificationStatus ?? summary.verificationStatus;
+      if (verificationStatus === 'pending_verification') {
+        setMessage('Pago transmitido. Pendiente de confirmación on-chain (>=1 conf).');
+        showToast('Pago transmitido. Pendiente de confirmación on-chain (>=1 conf).', 'info');
+      } else if (verificationStatus === 'invalid') {
+        setError('Pago inválido (monto/dirección). Reintenta.');
+        setMessage(null);
+        showToast('Pago inválido. Reintenta.', 'error');
+      } else {
+        showToast('Fee pagada. Campaña activada.', 'success');
       }
       window.dispatchEvent(
         new CustomEvent('campaign:summary:refresh', {
-          detail: { campaignId, summary },
+          detail: { campaignId, summary: refreshed },
         }),
       );
       window.dispatchEvent(new Event('campaigns:refresh'));
-      await refreshCampaign(campaignId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo confirmar la activación.');
       setMessage(null);
@@ -263,20 +313,25 @@ export const CreateCampaignWizard: React.FC = () => {
         throw new Error('activation-mode-unsupported');
       }
       const chainId = getChainIdFromSession(activeSession);
-      console.debug('[ActivationFee][WC] payload', {
-        method: WC_METHOD,
-        chainId,
-        outputsCount: built.outputs.length,
-        firstOutput: built.outputs[0] ?? null,
-      });
+      if (import.meta.env.DEV) {
+        console.debug('[ActivationFee][WC] payload', {
+          method: WC_METHOD,
+          chainId,
+          outputsCount: built.outputs.length,
+          firstOutput: built.outputs[0] ?? null,
+        });
+      }
 
       setMessage('Activar campaña: revisa y firma en Tonalli.');
       const result = await requestSignAndBroadcast(built.wcOfferId, chainId, {
         outputs: built.outputs,
         userPrompt: built.userPrompt,
       });
-      const txid = extractTxid(result);
+      const txid = extractWalletTxid(result);
       if (!txid) throw new Error('Tonalli no devolvió un txid válido.');
+      if (import.meta.env.DEV) {
+        console.debug('[ActivationFee] broadcast txid', txid);
+      }
 
       await confirmActivation(txid, activeAddress);
     } catch (err) {

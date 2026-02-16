@@ -6,7 +6,10 @@ type StatusBadgeProps = {
 
 const STATUS_MAP: Record<string, { label: string; bg: string; color: string }> = {
   draft: { label: 'Draft', bg: '#d1d5db', color: '#1f2937' },
+  created: { label: 'Created', bg: '#d1d5db', color: '#1f2937' },
   pending_fee: { label: 'Pending fee', bg: '#fef3c7', color: '#92400e' },
+  pending_verification: { label: 'Pending verification', bg: '#fde68a', color: '#92400e' },
+  fee_invalid: { label: 'Fee invalid', bg: '#fee2e2', color: '#991b1b' },
   active: { label: 'Active', bg: '#dcfce7', color: '#166534' },
   funded: { label: 'Funded', bg: '#dbeafe', color: '#1d4ed8' },
   expired: { label: 'Expired', bg: '#fee2e2', color: '#991b1b' },

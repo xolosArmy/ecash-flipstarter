@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { createCampaign, fetchCampaigns, fetchCampaignSummary } from '../api/client';
+import { createCampaign, fetchCampaigns, fetchCampaignSummary, fetchGlobalStats } from '../api/client';
+import { AmountDisplay } from '../components/AmountDisplay';
+import type { GlobalStats } from '../api/types';
 import type { CampaignSummary as CampaignSummaryResponse } from '../types/campaign';
 import { CampaignCard } from '../components/CampaignCard';
 import { WalletConnectBar } from '../components/WalletConnectBar';
@@ -21,6 +23,7 @@ export const Home: React.FC = () => {
   const [goal, setGoal] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
   const [formMessage, setFormMessage] = useState<string | null>(null);
+  const [globalStats, setGlobalStats] = useState<GlobalStats | null>(null);
   const navigate = useNavigate();
 
   const loadCampaigns = useCallback(() => {
@@ -39,6 +42,10 @@ export const Home: React.FC = () => {
   useEffect(() => {
     loadCampaigns();
   }, [loadCampaigns]);
+
+  useEffect(() => {
+    fetchGlobalStats().then(setGlobalStats).catch(console.error);
+  }, []);
 
   useEffect(() => {
     const onCampaignRefresh = () => loadCampaigns();
@@ -132,6 +139,22 @@ export const Home: React.FC = () => {
       <h2 style={{ marginBottom: 2 }}>Teyolia</h2>
       <small style={{ display: 'block', marginBottom: 6 }}>Flipstarter 2.0</small>
       <p style={{ marginTop: 0, opacity: 0.9 }}>🐾 guardian xolo</p>
+      {globalStats && (
+        <div className="global-stats-grid">
+          <div className="stat-card">
+            <span className="stat-value">{globalStats.totalCampaigns}</span>
+            <span className="stat-label">Proyectos</span>
+          </div>
+          <div className="stat-card">
+            <span className="stat-value">{globalStats.totalPledges}</span>
+            <span className="stat-label">Donaciones</span>
+          </div>
+          <div className="stat-card">
+            <span className="stat-value"><AmountDisplay sats={globalStats.totalRaisedSats} /></span>
+            <span className="stat-label">Recaudado</span>
+          </div>
+        </div>
+      )}
       <SecurityBanner />
       <WalletConnectBar />
       <div style={{ marginBottom: 16 }}>

@@ -1,14 +1,17 @@
 [
   {
-    "id": "campaign-1767121959939",
-    "name": "Prueba persistencia",
-    "description": "Esta debe sobrevivir reinicios",
-    "recipientAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
-    "beneficiaryAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
-    "goal": 10000,
-    "expiresAt": "2026-12-31T00:00:00.000Z",
-    "createdAt": "2026-02-10T02:21:36.818Z",
-    "status": "active",
+    "id": "activation-unpaid-1771265990475-239909",
+    "name": "Needs fee",
+    "description": "",
+    "goal": "1000",
+    "expiresAt": "2026-02-23T18:19:50.475Z",
+    "createdAt": "2026-02-16T18:19:50.488Z",
+    "status": "pending_fee",
+    "recipientAddress": "ecash:pqx87w2wp47gcq2mx7nargg08vy74czg0sqdxccpss",
+    "beneficiaryAddress": "ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk",
+    "campaignAddress": "ecash:pqx87w2wp47gcq2mx7nargg08vy74czg0sqdxccpss",
+    "covenantAddress": "ecash:pqx87w2wp47gcq2mx7nargg08vy74czg0sqdxccpss",
+    "beneficiaryPubKey": "",
     "activation": {
       "feeSats": "80000000",
       "feeTxid": null,
@@ -16,114 +19,246 @@
       "payerAddress": null,
       "wcOfferId": null
     },
+    "activationFeeRequired": 800000,
+    "activationFeePaid": false,
+    "activationFeeTxid": null,
+    "activationFeePaidAt": null,
+    "activationFeeVerificationStatus": "none",
+    "activationFeeVerifiedAt": null,
+    "activationOfferMode": null,
+    "activationOfferOutputs": null,
+    "activationTreasuryAddressUsed": null,
     "payout": {
       "wcOfferId": null,
       "txid": null,
       "paidAt": null
     },
-    "campaignAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
-    "covenantAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a"
+    "treasuryAddressUsed": null
   },
   {
-    "id": "campaign-1767124661420",
-    "name": "Campaña con ubicación",
-    "description": "Ubicada en Tijuana",
-    "recipientAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
-    "beneficiaryAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
-    "goal": 20000,
-    "expiresAt": "2026-12-31T00:00:00.000Z",
-    "location": {
-      "latitude": 32.5149,
-      "longitude": -117.0382
-    },
-    "createdAt": "2026-02-10T02:21:36.818Z",
+    "id": "pledge-repair-1771265990458-26507",
+    "name": "Legacy active campaign",
+    "description": "",
+    "goal": "1000",
+    "expiresAt": "2026-02-19T18:19:50.458Z",
+    "createdAt": "2026-02-16T18:19:50.475Z",
     "status": "active",
-    "activation": {
-      "feeSats": "80000000",
-      "feeTxid": null,
-      "feePaidAt": null,
-      "payerAddress": null,
-      "wcOfferId": null
-    },
-    "payout": {
-      "wcOfferId": null,
-      "txid": null,
-      "paidAt": null
-    },
-    "campaignAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
-    "covenantAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a"
-  },
-  {
-    "id": "campaign-1770690317637",
-    "name": "Prueba",
-    "recipientAddress": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk",
+    "recipientAddress": "ecash:prr292mnckvqsperg5ukw4eeumjjfelwcgfwg72e8j",
     "beneficiaryAddress": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk",
-    "goal": 10000,
-    "expiresAt": "2026-02-10T18:00:00.000Z",
-    "createdAt": "2026-02-10T02:25:17.637Z",
-    "status": "active",
+    "campaignAddress": "ecash:prr292mnckvqsperg5ukw4eeumjjfelwcgfwg72e8j",
+    "covenantAddress": "ecash:prr292mnckvqsperg5ukw4eeumjjfelwcgfwg72e8j",
+    "beneficiaryPubKey": "",
     "activation": {
       "feeSats": "80000000",
-      "feeTxid": "fb58e8f5466ac8405c6c1c1f4c6d37d28b3b1b361fc360fbe223d516e11ac2ce",
-      "feePaidAt": "2026-02-10T02:33:06.603Z",
-      "payerAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
-      "wcOfferId": "c6722526-80c1-4d33-977f-fc5ab6882fdd"
+      "feeTxid": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "feePaidAt": "2026-02-16T18:19:50.536Z",
+      "payerAddress": null,
+      "wcOfferId": null
     },
+    "activationFeeRequired": 800000,
+    "activationFeePaid": true,
+    "activationFeeTxid": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "activationFeePaidAt": "2026-02-16T18:19:50.536Z",
+    "activationFeeVerificationStatus": "verified",
+    "activationFeeVerifiedAt": "2026-02-16T18:19:50.536Z",
+    "activationOfferMode": null,
+    "activationOfferOutputs": null,
+    "activationTreasuryAddressUsed": null,
     "payout": {
       "wcOfferId": null,
       "txid": null,
       "paidAt": null
     },
-    "campaignAddress": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk",
-    "covenantAddress": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk"
+    "treasuryAddressUsed": null
   },
   {
-    "id": "campaign-1770741953491",
-    "name": "Prueba campaña guiada",
-    "recipientAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
-    "beneficiaryAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
-    "goal": 10000,
-    "expiresAt": "2026-02-11T00:00:00.000Z",
-    "createdAt": "2026-02-10T16:45:53.491Z",
-    "status": "funded",
+    "id": "activation-paid-1771265990570-149592",
+    "name": "Fee paid campaign",
+    "description": "",
+    "goal": "1000",
+    "expiresAt": "2026-02-23T18:19:50.570Z",
+    "createdAt": "2026-02-16T18:19:50.574Z",
+    "status": "active",
+    "recipientAddress": "ecash:pqr8nkmuyrpt4zzsgkjhsj4kmhmq0j8e0vk89asmxh",
+    "beneficiaryAddress": "ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk",
+    "campaignAddress": "ecash:pqr8nkmuyrpt4zzsgkjhsj4kmhmq0j8e0vk89asmxh",
+    "covenantAddress": "ecash:pqr8nkmuyrpt4zzsgkjhsj4kmhmq0j8e0vk89asmxh",
+    "beneficiaryPubKey": "",
     "activation": {
       "feeSats": "80000000",
-      "feeTxid": "21b34311f1927ca0ecbe22d4c7d2d771661c47b74a1e46cd60ec26f80b23a8c4",
-      "feePaidAt": "2026-02-10T16:46:51.861Z",
-      "payerAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
-      "wcOfferId": "5cbd6b4a-e5cf-430f-9065-9c47a6512225"
+      "feeTxid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "feePaidAt": "2026-02-16T18:19:50.592Z",
+      "payerAddress": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk",
+      "wcOfferId": null
     },
+    "activationFeeRequired": 800000,
+    "activationFeePaid": true,
+    "activationFeeTxid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "activationFeePaidAt": "2026-02-16T18:19:50.592Z",
+    "activationFeeVerificationStatus": "verified",
+    "activationFeeVerifiedAt": "2026-02-16T18:19:50.593Z",
+    "activationOfferMode": null,
+    "activationOfferOutputs": null,
+    "activationTreasuryAddressUsed": null,
     "payout": {
-      "wcOfferId": "fad08dec-8987-4276-aa6a-6ad767e7a304",
+      "wcOfferId": null,
       "txid": null,
       "paidAt": null
     },
-    "campaignAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
-    "covenantAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a"
+    "treasuryAddressUsed": null
   },
   {
-    "id": "campaign-1770750810247",
-    "name": "Prueba payout Teyolia",
-    "description": "Ver si llega pago a direcciones",
-    "recipientAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
-    "beneficiaryAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
-    "campaignAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
-    "covenantAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
-    "goal": 1000000,
-    "expiresAt": "2026-02-11T18:00:00.000Z",
-    "createdAt": "2026-02-10T19:13:30.247Z",
-    "status": "paid_out",
+    "id": "activation-idempotent-1771265990628-28968",
+    "name": "Idempotent activation",
+    "description": "",
+    "goal": "1000",
+    "expiresAt": "2026-02-23T18:19:50.628Z",
+    "createdAt": "2026-02-16T18:19:50.634Z",
+    "status": "active",
+    "recipientAddress": "ecash:pr0nhcguzhq35cpqq6875md3crxnf2zkfq2hka4ytt",
+    "beneficiaryAddress": "ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk",
+    "campaignAddress": "ecash:pr0nhcguzhq35cpqq6875md3crxnf2zkfq2hka4ytt",
+    "covenantAddress": "ecash:pr0nhcguzhq35cpqq6875md3crxnf2zkfq2hka4ytt",
+    "beneficiaryPubKey": "",
     "activation": {
       "feeSats": "80000000",
-      "feeTxid": "eceaf82bfb768d346a4735ffd872cfb5b957175e757131711537c81e1624832f",
-      "feePaidAt": "2026-02-10T21:09:59.175Z",
-      "payerAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
-      "wcOfferId": "7229a288-677d-4d01-80bc-6ebbfbe2d30d"
+      "feeTxid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "feePaidAt": "2026-02-16T18:19:50.660Z",
+      "payerAddress": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk",
+      "wcOfferId": null
     },
+    "activationFeeRequired": 800000,
+    "activationFeePaid": true,
+    "activationFeeTxid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "activationFeePaidAt": "2026-02-16T18:19:50.660Z",
+    "activationFeeVerificationStatus": "verified",
+    "activationFeeVerifiedAt": "2026-02-16T18:19:50.660Z",
+    "activationOfferMode": null,
+    "activationOfferOutputs": null,
+    "activationTreasuryAddressUsed": null,
     "payout": {
-      "wcOfferId": "27d69282-2244-49a7-99e1-0c032cfd967a",
-      "txid": "e9eca5c8a68299f483fa0dc95df86a8f755e783c65e8d03d65a34f400425c63e",
-      "paidAt": "2026-02-10T21:30:20.964Z"
-    }
+      "wcOfferId": null,
+      "txid": null,
+      "paidAt": null
+    },
+    "treasuryAddressUsed": null
+  },
+  {
+    "id": "activation-verified-idempotent-1771265990693-859308",
+    "name": "Verified idempotent activation",
+    "description": "",
+    "goal": "1000",
+    "expiresAt": "2026-02-23T18:19:50.693Z",
+    "createdAt": "2026-02-16T18:19:50.695Z",
+    "status": "active",
+    "recipientAddress": "ecash:pqkg87mp6mr0asmsgqjtxr4f0ehm4gkelqvu07wk4q",
+    "beneficiaryAddress": "ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk",
+    "campaignAddress": "ecash:pqkg87mp6mr0asmsgqjtxr4f0ehm4gkelqvu07wk4q",
+    "covenantAddress": "ecash:pqkg87mp6mr0asmsgqjtxr4f0ehm4gkelqvu07wk4q",
+    "beneficiaryPubKey": "",
+    "activation": {
+      "feeSats": "80000000",
+      "feeTxid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "feePaidAt": "2026-02-16T18:19:50.709Z",
+      "payerAddress": null,
+      "wcOfferId": null
+    },
+    "activationFeeRequired": 800000,
+    "activationFeePaid": true,
+    "activationFeeTxid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "activationFeePaidAt": "2026-02-16T18:19:50.709Z",
+    "activationFeeVerificationStatus": "verified",
+    "activationFeeVerifiedAt": "2026-02-16T18:19:50.742Z",
+    "activationOfferMode": null,
+    "activationOfferOutputs": null,
+    "activationTreasuryAddressUsed": null,
+    "payout": {
+      "wcOfferId": null,
+      "txid": null,
+      "paidAt": null
+    },
+    "treasuryAddressUsed": null
+  },
+  {
+    "id": "activation-offer-idempotent-1771265990768-40392",
+    "name": "Offer reuse activation",
+    "description": "",
+    "goal": "1000",
+    "expiresAt": "2026-02-23T18:19:50.768Z",
+    "createdAt": "2026-02-16T18:19:50.770Z",
+    "status": "pending_fee",
+    "recipientAddress": "ecash:prw358juzpqp72krl67pvls78hmat9esvvg3wjv96z",
+    "beneficiaryAddress": "ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk",
+    "campaignAddress": "ecash:prw358juzpqp72krl67pvls78hmat9esvvg3wjv96z",
+    "covenantAddress": "ecash:prw358juzpqp72krl67pvls78hmat9esvvg3wjv96z",
+    "beneficiaryPubKey": "",
+    "activation": {
+      "feeSats": "80000000",
+      "feeTxid": null,
+      "feePaidAt": null,
+      "payerAddress": "ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk",
+      "wcOfferId": "offer-1"
+    },
+    "activationFeeRequired": 800000,
+    "activationFeePaid": false,
+    "activationFeeTxid": null,
+    "activationFeePaidAt": null,
+    "activationFeeVerificationStatus": "none",
+    "activationFeeVerifiedAt": null,
+    "activationOfferMode": "intent",
+    "activationOfferOutputs": [
+      {
+        "address": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk",
+        "valueSats": 80000000
+      }
+    ],
+    "activationTreasuryAddressUsed": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk",
+    "payout": {
+      "wcOfferId": null,
+      "txid": null,
+      "paidAt": null
+    },
+    "treasuryAddressUsed": null
+  },
+  {
+    "id": "campaign-1771194961293",
+    "name": "proof of work",
+    "description": "pow",
+    "goal": "1333300",
+    "expiresAt": "2026-02-18T19:00:00.000Z",
+    "createdAt": "2026-02-15T22:36:01.294Z",
+    "status": "paid_out",
+    "recipientAddress": "ecash:pqde0h0n45sw459uf00f0nue39z8u8ck3yj8s4v3ts",
+    "beneficiaryAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
+    "campaignAddress": "ecash:pqde0h0n45sw459uf00f0nue39z8u8ck3yj8s4v3ts",
+    "covenantAddress": "ecash:pqde0h0n45sw459uf00f0nue39z8u8ck3yj8s4v3ts",
+    "beneficiaryPubKey": "",
+    "activation": {
+      "feeSats": "80000000",
+      "feeTxid": "c542e26672401a64c9dd1287d630ef64e1427ada6d33e7c2b79ce1057ddf99b4",
+      "feePaidAt": "2026-02-15T22:38:25.093Z",
+      "payerAddress": "ecash:qrtnqtjfppwyr4rcfnpl8ce38ahhcqssdvc2p8pp8a",
+      "wcOfferId": "49085d12-d7f6-44cf-965b-74a25bffb989"
+    },
+    "activationFeeRequired": 800000,
+    "activationFeePaid": true,
+    "activationFeeTxid": "c542e26672401a64c9dd1287d630ef64e1427ada6d33e7c2b79ce1057ddf99b4",
+    "activationFeePaidAt": "2026-02-15T22:38:25.093Z",
+    "activationFeeVerificationStatus": "verified",
+    "activationFeeVerifiedAt": "2026-02-15T22:51:01.623Z",
+    "activationOfferMode": "intent",
+    "activationOfferOutputs": [
+      {
+        "address": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk",
+        "valueSats": 80000000
+      }
+    ],
+    "activationTreasuryAddressUsed": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk",
+    "payout": {
+      "wcOfferId": "66970a22-97da-4a28-90df-060c6d56d773",
+      "txid": "a27555cb4ff2c671f271d749affd9a36a2953014a41b206b05b21d975c625da0",
+      "paidAt": "2026-02-16T19:25:17.667Z"
+    },
+    "treasuryAddressUsed": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk"
   }
 ]

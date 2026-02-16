@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import campaignsRouter, { loadCampaignsFromDisk } from './routes/campaigns.routes';
+import campaignsRouter from './routes/campaigns.routes';
 import pledgeRouter from './routes/pledge.routes';
 import pledgeBuildRouter from './routes/pledge.build';
 import finalizeRouter from './routes/finalize.routes';
@@ -47,10 +47,6 @@ export function createApp() {
   app.options('*', cors(corsOptions));
 
   app.use(express.json());
-
-  loadCampaignsFromDisk().catch((err) => {
-    console.error('[campaigns] startup load failed', err);
-  });
 
   // Healthchecks
   app.get('/health', (_req, res) => {

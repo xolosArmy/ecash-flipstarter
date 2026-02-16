@@ -3,11 +3,12 @@ import { validateAddress } from '../utils/validation';
 import { createWalletConnectPledgeOffer } from '../services/PledgeOfferService';
 import { getCampaignStatusById } from './campaigns.routes';
 import { CampaignService } from '../services/CampaignService';
+import { parsePledgeAmountSats, parsePledgeMessage } from './pledgePayload';
 
 const router = Router();
 const campaignService = new CampaignService();
 
-router.post('/campaigns/:id/pledge/build', async (req, res) => {
+export const createPledgeBuildHandler = async (req: any, res: any) => {
   try {
     const status = await getCampaignStatusById(req.params.id);
     if (!status) {
@@ -20,16 +21,24 @@ router.post('/campaigns/:id/pledge/build', async (req, res) => {
     if (!ensured.scriptHash || !ensured.scriptPubKey) {
       return res.status(400).json({ error: 'campaign-address-required' });
     }
+    const campaign = await campaignService.getCampaign(req.params.id) as
+      | { campaignAddress?: string; covenantAddress?: string }
+      | null;
+    const campaignAddress = campaign?.campaignAddress || campaign?.covenantAddress || '';
+    if (!campaignAddress) {
+      return res.status(400).json({ error: 'campaign-address-required' });
+    }
 
     const contributorAddress = validateAddress(
       req.body.contributorAddress as string,
       'contributorAddress'
     );
-    const amount = BigInt(req.body.amount);
-    if (amount <= 0n) {
-      return res.status(400).json({ error: 'amount-required' });
-    }
-    const response = await createWalletConnectPledgeOffer(req.params.id, contributorAddress, amount);
+    const amount = parsePledgeAmountSats(req.body);
+    const message = parsePledgeMessage(req.body);
+    const response = await createWalletConnectPledgeOffer(req.params.id, contributorAddress, amount, {
+      campaignAddress,
+      message,
+    });
     const totalInputs = response.unsignedTx.inputs.reduce(
       (acc, input) => acc + BigInt(input.value),
       0n,
@@ -42,6 +51,8 @@ router.post('/campaigns/:id/pledge/build', async (req, res) => {
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
   }
-});
+};
+
+router.post('/campaigns/:id/pledge/build', createPledgeBuildHandler);
 
 export default router;

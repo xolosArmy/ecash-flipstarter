@@ -1,5 +1,13 @@
 import fs from 'fs';
 import path from 'path';
+import { getDb } from './store/db';
+import { hydrateCampaignStore } from './services/CampaignService';
+import {
+  getCampaignsJsonPath,
+  loadCampaignsFromDisk,
+  shouldMigrateOnStart,
+} from './store/campaignPersistence';
+import { countCampaigns, initializeDatabase, openDatabase } from './db/SQLiteStore';
 
 function loadDotEnv(): void {
   const envPath = path.resolve(process.cwd(), '.env');
@@ -42,21 +50,52 @@ function loadDotEnv(): void {
   }
 }
 
-loadDotEnv();
+async function initializeCampaignPersistence(): Promise<void> {
+  const sqliteDb = await openDatabase();
+  await initializeDatabase(sqliteDb);
+  await getDb();
 
-const app = require('./app').default as typeof import('./app').default;
-const { getEffectiveChronikBaseUrl } = require('./blockchain/ecashClient') as typeof import('./blockchain/ecashClient');
-const { ECASH_BACKEND, USE_CHRONIK } = require('./config/ecash') as typeof import('./config/ecash');
+  const beforeCount = await countCampaigns(sqliteDb);
+  const jsonPath = getCampaignsJsonPath();
+  const hasJson = fs.existsSync(jsonPath);
+  const migrateOnStart = shouldMigrateOnStart();
 
-const port = Number(process.env.PORT ?? 3001);
-const host = process.env.HOST ?? '127.0.0.1';
+  const campaigns = await loadCampaignsFromDisk({ migrateOnStart });
+  const afterCount = await countCampaigns(sqliteDb);
 
-app.listen(port, host, () => {
-  if (process.env.NODE_ENV !== 'production') {
-    const chronikBaseUrl = USE_CHRONIK ? getEffectiveChronikBaseUrl() : 'unused';
-    console.log(
-      `[config] backendMode=${ECASH_BACKEND} chronikBaseUrl=${chronikBaseUrl}`
-    );
+  if (beforeCount === 0 && hasJson && migrateOnStart) {
+    console.log(`[db] migrated campaigns from JSON to SQLite: loaded=${campaigns.length} sqlite=${afterCount}`);
   }
-  console.log(`Flipstarter backend listening on http://${host}:${port}`);
+}
+
+async function startServer() {
+  loadDotEnv();
+
+  await initializeCampaignPersistence();
+  console.log('[db] SQLite initialized');
+
+  await hydrateCampaignStore();
+  console.log('[db] Campaigns hydrated into memory');
+
+  const app = require('./app').default as typeof import('./app').default;
+  const { getEffectiveChronikBaseUrl } = require('./blockchain/ecashClient') as typeof import('./blockchain/ecashClient');
+  const { ECASH_BACKEND, USE_CHRONIK } = require('./config/ecash') as typeof import('./config/ecash');
+
+  const port = Number(process.env.PORT ?? 3001);
+  const host = process.env.HOST ?? '127.0.0.1';
+
+  app.listen(port, host, () => {
+    if (process.env.NODE_ENV !== 'production') {
+      const chronikBaseUrl = USE_CHRONIK ? getEffectiveChronikBaseUrl() : 'unused';
+      console.log(
+        `[config] backendMode=${ECASH_BACKEND} chronikBaseUrl=${chronikBaseUrl}`
+      );
+    }
+    console.log(`Flipstarter backend listening on http://${host}:${port}`);
+  });
+}
+
+startServer().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
 });

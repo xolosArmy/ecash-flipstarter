@@ -2,13 +2,22 @@ import { Router } from 'express';
 import { CampaignService } from '../services/CampaignService';
 import { validateAddress } from '../utils/validation';
 import { getPledgesByCampaign } from '../store/simplePledges';
-import { addressToScriptPubKey, getTransactionOutputs, getUtxosForAddress } from '../blockchain/ecashClient';
+import { addressToScriptPubKey, getTransactionInfo, getUtxosForAddress } from '../blockchain/ecashClient';
 import { buildPayoutTx } from '../blockchain/txBuilder';
 import { serializeBuiltTx } from './serialize';
 import { walletConnectOfferStore } from '../services/WalletConnectOfferStore';
 import { ACTIVATION_FEE_SATS, ACTIVATION_FEE_XEC, TREASURY_ADDRESS } from '../config/constants';
 
-type CampaignStatus = 'draft' | 'pending_fee' | 'active' | 'expired' | 'funded' | 'paid_out';
+type CampaignStatus =
+  | 'draft'
+  | 'created'
+  | 'pending_fee'
+  | 'pending_verification'
+  | 'fee_invalid'
+  | 'active'
+  | 'expired'
+  | 'funded'
+  | 'paid_out';
 
 type CampaignApiRecord = {
   id: string;
@@ -33,6 +42,8 @@ type CampaignApiRecord = {
   activationFeePaid?: boolean;
   activationFeeTxid?: string | null;
   activationFeePaidAt?: string | null;
+  activationFeeVerificationStatus?: 'none' | 'pending_verification' | 'verified' | 'invalid';
+  activationFeeVerifiedAt?: string | null;
   activationOfferMode?: 'tx' | 'intent' | null;
   activationOfferOutputs?: Array<{ address: string; valueSats: number }> | null;
   activationTreasuryAddressUsed?: string | null;
@@ -69,7 +80,13 @@ function isActivationFeePaid(campaign: CampaignApiRecord): boolean {
   if (typeof campaign.activationFeePaid === 'boolean') {
     return campaign.activationFeePaid;
   }
-  return Boolean(campaign.activationFeeTxid || campaign.activation?.feeTxid);
+  if (campaign.activationFeeVerificationStatus === 'verified') {
+    return true;
+  }
+  return campaign.status === 'active'
+    || campaign.status === 'funded'
+    || campaign.status === 'expired'
+    || campaign.status === 'paid_out';
 }
 
 function getActivationFeeTxid(campaign: CampaignApiRecord): string | null {
@@ -81,8 +98,11 @@ function getActivationFeePaidAt(campaign: CampaignApiRecord): string | null {
 }
 
 function deriveCampaignStatus(campaign: CampaignApiRecord, totalPledged: number): CampaignStatus {
-  if (campaign.status === 'draft') {
-    return 'draft';
+  if (campaign.status === 'pending_verification') {
+    return 'pending_verification';
+  }
+  if (campaign.status === 'fee_invalid') {
+    return 'fee_invalid';
   }
   if (campaign.status === 'paid_out') {
     return 'paid_out';
@@ -90,6 +110,9 @@ function deriveCampaignStatus(campaign: CampaignApiRecord, totalPledged: number)
 
   const activationPaid = isActivationFeePaid(campaign);
   if (!activationPaid) {
+    if (campaign.status === 'draft') {
+      return 'draft';
+    }
     return 'pending_fee';
   }
 
@@ -121,6 +144,8 @@ function toSummary(campaign: CampaignApiRecord, totalPledged: number) {
     activationFeePaid: isActivationFeePaid(campaign),
     activationFeeTxid,
     activationFeePaidAt,
+    activationFeeVerificationStatus: campaign.activationFeeVerificationStatus ?? 'none',
+    activationFeeVerifiedAt: campaign.activationFeeVerifiedAt ?? null,
     activation: {
       feeSats: campaign.activation?.feeSats ?? String(activationFeeRequired * 100),
       feeTxid: activationFeeTxid,
@@ -143,9 +168,26 @@ function sanitizeTxid(raw: unknown): string {
 }
 
 type VerificationResult =
-  | { status: 'verified' }
-  | { status: 'pending_verification'; warning: string }
-  | { status: 'invalid'; error: string };
+  | {
+    status: 'verified';
+    confirmations: number;
+    treasuryOk: true;
+    amountOk: true;
+  }
+  | {
+    status: 'pending_verification';
+    warning: string;
+    confirmations: number;
+    treasuryOk: boolean;
+    amountOk: boolean;
+  }
+  | {
+    status: 'invalid';
+    error: string;
+    confirmations: number;
+    treasuryOk: boolean;
+    amountOk: boolean;
+  };
 
 async function verifyActivationTxBestEffort(
   txid: string,
@@ -154,25 +196,62 @@ async function verifyActivationTxBestEffort(
 ): Promise<VerificationResult> {
   try {
     const treasuryScript = (await addressToScriptPubKey(treasuryAddress)).toLowerCase();
-    const outputs = await getTransactionOutputs(txid);
-    const found = outputs.some(
-      (output) =>
-        output.scriptPubKey.toLowerCase() === treasuryScript && output.valueSats >= activationFeeRequiredSats,
+    const tx = await getTransactionInfo(txid);
+    const treasuryOutputs = tx.outputs.filter(
+      (output) => output.scriptPubKey.toLowerCase() === treasuryScript,
     );
-    if (!found) {
+    const treasuryOk = treasuryOutputs.length > 0;
+    const amountOk = treasuryOutputs.some((output) => output.valueSats >= activationFeeRequiredSats);
+    const confirmations = Math.max(
+      Number.isFinite(tx.confirmations) ? Math.floor(tx.confirmations) : 0,
+      tx.height >= 0 ? 1 : 0,
+    );
+    if (!treasuryOk || !amountOk) {
       return {
         status: 'invalid',
         error: 'activation-fee-output-mismatch',
+        confirmations,
+        treasuryOk,
+        amountOk,
       };
     }
-    return { status: 'verified' };
+    if (confirmations < 1) {
+      return {
+        status: 'pending_verification',
+        warning: 'activation-fee-unconfirmed',
+        confirmations,
+        treasuryOk,
+        amountOk,
+      };
+    }
+    return { status: 'verified', confirmations, treasuryOk: true, amountOk: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    console.warn('[activation] chronik unavailable', { txid, message });
     return {
       status: 'pending_verification',
-      warning: `chronik-unavailable:${message}`,
+      warning: 'chronik-unavailable',
+      confirmations: 0,
+      treasuryOk: false,
+      amountOk: false,
     };
   }
+}
+
+async function toActivationResponse(campaignId: string, campaign: CampaignApiRecord, warning?: string, txid?: string) {
+  const totalPledged = await getTotalPledged(campaign.id);
+  const summary = toSummary(campaign, totalPledged);
+  return {
+    ...summary,
+    pledgeCount: (await getPledgesByCampaign(campaign.id)).length,
+    campaignId,
+    txid: txid ?? summary.activationFeeTxid ?? null,
+    feeTxid: summary.activationFeeTxid ?? undefined,
+    feePaidAt: summary.activationFeePaidAt ?? undefined,
+    activationFeeVerificationStatus: summary.activationFeeVerificationStatus ?? 'none',
+    verificationStatus: summary.activationFeeVerificationStatus ?? 'none',
+    warning,
+  };
 }
 
 function resolveCampaignEscrowAddress(campaign: CampaignApiRecord): string {
@@ -338,8 +417,41 @@ export const buildActivationHandler: Parameters<typeof router.post>[1] = async (
     const payerAddress = validateAddress(req.body?.payerAddress as string, 'payerAddress');
     const activationFeeRequired = toCampaignActivationFeeRequired(campaign);
     const amount = BigInt(activationFeeRequired * 100);
-    const outputs = [{ address: TREASURY_ADDRESS, valueSats: Number(amount) }];
+    const activationFeeTxid = getActivationFeeTxid(campaign);
+    const persistedOutputs =
+      Array.isArray(campaign.activationOfferOutputs) && campaign.activationOfferOutputs.length > 0
+        ? campaign.activationOfferOutputs
+        : null;
+    const treasuryAddress = campaign.activationTreasuryAddressUsed || TREASURY_ADDRESS;
+    const outputs = persistedOutputs ?? [{ address: treasuryAddress, valueSats: Number(amount) }];
     const userPrompt = 'Pagar fee de activación';
+    const shouldLogOfferCreated =
+      campaign.status === 'pending_fee'
+      && !persistedOutputs
+      && !activationFeeTxid;
+
+    const persistedOfferId =
+      typeof campaign.activation?.wcOfferId === 'string' && campaign.activation.wcOfferId.trim()
+        ? campaign.activation.wcOfferId.trim()
+        : null;
+    if (!shouldLogOfferCreated && persistedOfferId && persistedOutputs) {
+      return res.json({
+        offerId: persistedOfferId,
+        wcOfferId: persistedOfferId,
+        mode: campaign.activationOfferMode ?? 'intent',
+        activationFeeRequired,
+        feeSats: amount.toString(),
+        payerAddress,
+        campaignId: campaign.id,
+        treasuryAddress,
+        outputs,
+        userPrompt,
+        // Deprecated compatibility fields from tx-build mode.
+        inputsUsed: [],
+        outpoints: [],
+      });
+    }
+
     const offer = walletConnectOfferStore.createOffer({
       campaignId: campaign.id,
       mode: 'intent',
@@ -352,7 +464,8 @@ export const buildActivationHandler: Parameters<typeof router.post>[1] = async (
     await service.setActivationOffer(campaign.id, offer.offerId, payerAddress, {
       mode: 'intent',
       outputs,
-      treasuryAddressUsed: TREASURY_ADDRESS,
+      treasuryAddressUsed: treasuryAddress,
+      logAuditEvent: shouldLogOfferCreated,
     });
 
     return res.json({
@@ -363,7 +476,7 @@ export const buildActivationHandler: Parameters<typeof router.post>[1] = async (
       feeSats: amount.toString(),
       payerAddress,
       campaignId: campaign.id,
-      treasuryAddress: TREASURY_ADDRESS,
+      treasuryAddress,
       outputs,
       userPrompt,
       // Deprecated compatibility fields from tx-build mode.
@@ -380,7 +493,7 @@ router.post('/campaigns/:id/pay-activation-fee', buildActivationHandler);
 router.post('/campaign/:id/activation/build', buildActivationHandler);
 router.post('/campaigns/:id/activation/build', buildActivationHandler);
 
-const confirmActivationHandler: Parameters<typeof router.post>[1] = async (req, res) => {
+export const confirmActivationHandler: Parameters<typeof router.post>[1] = async (req, res) => {
   try {
     const campaign = await getCampaignOr404(req, res);
     if (!campaign) return;
@@ -396,31 +509,75 @@ const confirmActivationHandler: Parameters<typeof router.post>[1] = async (req, 
       || campaign.treasuryAddressUsed
       || TREASURY_ADDRESS;
 
-    const verification = await verifyActivationTxBestEffort(txid, treasuryAddress, activationFeeRequiredSats);
-    if (verification.status === 'invalid') {
-      return res.status(400).json({ error: verification.error });
+    const existingTxid = (campaign.activationFeeTxid ?? campaign.activation?.feeTxid ?? '').toLowerCase();
+    const existingVerification = campaign.activationFeeVerificationStatus ?? 'none';
+    if (existingVerification === 'verified' && existingTxid) {
+      if (existingTxid !== txid) {
+        return res.status(400).json({ error: 'activation-fee-already-verified' });
+      }
+      return res.json(await toActivationResponse(campaign.id, campaign, undefined, txid));
     }
 
-    await service.markActivationFeePaid(campaign.id, txid, {
+    await service.recordActivationFeeBroadcast(campaign.id, txid, {
+      paidAt: new Date().toISOString(),
       payerAddress,
+      treasuryAddressUsed: treasuryAddress,
     });
+
+    const verification = await verifyActivationTxBestEffort(txid, treasuryAddress, activationFeeRequiredSats);
+    if (process.env.NODE_ENV !== 'production') {
+      console.debug('[activation] confirm', {
+        id: campaign.id,
+        txid,
+        result: verification.status,
+        confs: verification.confirmations,
+        treasuryOk: verification.treasuryOk,
+        amountOk: verification.amountOk,
+      });
+    }
+    if (verification.status === 'invalid') {
+      await service.finalizeActivationFeeVerification(campaign.id, txid, 'invalid', {
+        payerAddress,
+        treasuryAddressUsed: treasuryAddress,
+        reason: verification.error,
+      });
+      const updatedInvalid = (await service.getCampaign(campaign.id)) as CampaignApiRecord | null;
+      if (!updatedInvalid) {
+        return res.status(404).json({ error: 'campaign-not-found' });
+      }
+      return res.json({
+        ...(await toActivationResponse(campaign.id, updatedInvalid, verification.error, txid)),
+        message: 'Pago inválido: la transacción no cumple monto o dirección de treasury.',
+      });
+    }
+
+    if (verification.status === 'verified') {
+      await service.finalizeActivationFeeVerification(campaign.id, txid, 'verified', {
+        payerAddress,
+        treasuryAddressUsed: treasuryAddress,
+      });
+    } else {
+      await service.finalizeActivationFeeVerification(campaign.id, txid, 'pending_verification', {
+        payerAddress,
+        treasuryAddressUsed: treasuryAddress,
+      });
+    }
 
     const updated = (await service.getCampaign(campaign.id)) as CampaignApiRecord | null;
     if (!updated) {
       return res.status(404).json({ error: 'campaign-not-found' });
     }
-
-    const totalPledged = await getTotalPledged(campaign.id);
-    const summary = toSummary(updated, totalPledged);
-    const response: Record<string, unknown> = {
-      ...summary,
-      pledgeCount: (await getPledgesByCampaign(campaign.id)).length,
-    };
+    const response = await toActivationResponse(
+      campaign.id,
+      updated,
+      verification.status === 'pending_verification' ? verification.warning : undefined,
+      txid,
+    );
     if (verification.status === 'pending_verification') {
-      response.verificationStatus = 'pending_verification';
-      response.warning = verification.warning;
-    } else {
-      response.verificationStatus = 'verified';
+      return res.json({
+        ...response,
+        message: 'Tx transmitida. Esperando confirmación on-chain.',
+      });
     }
     return res.json(response);
   } catch (err) {
@@ -431,25 +588,60 @@ const confirmActivationHandler: Parameters<typeof router.post>[1] = async (req, 
 router.post('/campaign/:id/activation/confirm', confirmActivationHandler);
 router.post('/campaigns/:id/activation/confirm', confirmActivationHandler);
 
-router.get('/campaigns/:id/activation/status', async (req, res) => {
+export const activationStatusHandler: Parameters<typeof router.get>[1] = async (req, res) => {
   try {
     const campaign = await getCampaignOr404(req, res);
     if (!campaign) return;
 
-    const totalPledged = await getTotalPledged(campaign.id);
-    const summary = toSummary(campaign, totalPledged);
+    let verificationStatus = campaign.activationFeeVerificationStatus ?? 'none';
+    let warning: string | undefined;
+    const feeTxid = campaign.activationFeeTxid ?? campaign.activation?.feeTxid ?? null;
+    if (feeTxid && verificationStatus === 'pending_verification') {
+      const activationFeeRequiredSats = BigInt(toCampaignActivationFeeRequired(campaign) * 100);
+      const treasuryAddress =
+        campaign.activationTreasuryAddressUsed
+        || campaign.treasuryAddressUsed
+        || TREASURY_ADDRESS;
+      const verification = await verifyActivationTxBestEffort(feeTxid, treasuryAddress, activationFeeRequiredSats);
+      if (process.env.NODE_ENV !== 'production') {
+        console.debug('[activation] status', {
+          id: campaign.id,
+          txid: feeTxid,
+          result: verification.status,
+          confs: verification.confirmations,
+          treasuryOk: verification.treasuryOk,
+          amountOk: verification.amountOk,
+        });
+      }
+      if (verification.status === 'verified') {
+        await service.finalizeActivationFeeVerification(campaign.id, feeTxid, 'verified', {
+          treasuryAddressUsed: treasuryAddress,
+        });
+        verificationStatus = 'verified';
+      } else if (verification.status === 'invalid') {
+        await service.finalizeActivationFeeVerification(campaign.id, feeTxid, 'invalid', {
+          treasuryAddressUsed: treasuryAddress,
+          reason: verification.error,
+        });
+        verificationStatus = 'invalid';
+      } else {
+        warning = verification.warning;
+      }
+    }
 
-    return res.json({
-      status: summary.status,
-      feeTxid: summary.activationFeeTxid ?? undefined,
-      feePaidAt: summary.activationFeePaidAt ?? undefined,
-      activationFeeRequired: summary.activationFeeRequired,
-      activationFeePaid: summary.activationFeePaid,
-    });
+    const refreshed = (await service.getCampaign(campaign.id)) as CampaignApiRecord | null;
+    if (!refreshed) {
+      return res.status(404).json({ error: 'campaign-not-found' });
+    }
+    const response = await toActivationResponse(refreshed.id, refreshed, warning, feeTxid ?? undefined);
+    return res.json(response);
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
   }
-});
+};
+
+router.get('/campaigns/:id/activation/status', activationStatusHandler);
+router.get('/campaign/:id/activation/status', activationStatusHandler);
 
 router.post('/campaigns/:id/payout/build', async (req, res) => {
   try {

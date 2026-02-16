@@ -61,7 +61,16 @@ export interface CreatedCampaign {
   goal: number;
   expiresAt: string;
   createdAt?: string;
-  status?: 'draft' | 'pending_fee' | 'expired' | 'funded' | 'active' | 'paid_out';
+  status?:
+    | 'draft'
+    | 'created'
+    | 'pending_fee'
+    | 'pending_verification'
+    | 'fee_invalid'
+    | 'expired'
+    | 'funded'
+    | 'active'
+    | 'paid_out';
   beneficiaryAddress: string;
   description?: string;
   location?: string;
@@ -76,6 +85,8 @@ export interface CreatedCampaign {
   activationFeePaid?: boolean;
   activationFeeTxid?: string | null;
   activationFeePaidAt?: string | null;
+  activationFeeVerificationStatus?: 'none' | 'pending_verification' | 'verified' | 'invalid';
+  activationFeeVerifiedAt?: string | null;
 }
 
 export async function createCampaign(payload: CreateCampaignPayload): Promise<CreatedCampaign> {
@@ -129,8 +140,23 @@ export async function confirmActivationTx(
   campaignId: string,
   txid: string,
   payerAddress?: string,
-): Promise<CampaignSummaryResponse & { verificationStatus?: 'verified' | 'pending_verification'; warning?: string }> {
-  return jsonFetch<CampaignSummaryResponse & { verificationStatus?: 'verified' | 'pending_verification'; warning?: string }>(`/campaigns/${campaignId}/activation/confirm`, {
+): Promise<
+CampaignSummaryResponse & {
+  campaignId?: string;
+  txid?: string | null;
+  activationFeeVerificationStatus?: 'none' | 'pending_verification' | 'verified' | 'invalid';
+  verificationStatus?: 'verified' | 'pending_verification' | 'invalid';
+  warning?: string;
+  message?: string;
+}> {
+  return jsonFetch<CampaignSummaryResponse & {
+    campaignId?: string;
+    txid?: string | null;
+    activationFeeVerificationStatus?: 'none' | 'pending_verification' | 'verified' | 'invalid';
+    verificationStatus?: 'verified' | 'pending_verification' | 'invalid';
+    warning?: string;
+    message?: string;
+  }>(`/campaigns/${campaignId}/activation/confirm`, {
     method: 'POST',
     body: JSON.stringify({ txid, payerAddress }),
   });
@@ -140,16 +166,30 @@ export async function confirmCampaignActivationTx(
   campaignId: string,
   txid: string,
   payerAddress?: string,
-): Promise<CampaignSummaryResponse & { verificationStatus?: 'verified' | 'pending_verification'; warning?: string }> {
+): Promise<
+CampaignSummaryResponse & {
+  campaignId?: string;
+  txid?: string | null;
+  activationFeeVerificationStatus?: 'none' | 'pending_verification' | 'verified' | 'invalid';
+  verificationStatus?: 'verified' | 'pending_verification' | 'invalid';
+  warning?: string;
+  message?: string;
+}
+> {
   return confirmActivationTx(campaignId, txid, payerAddress);
 }
 
 export interface CampaignActivationStatusResponse {
-  status: 'draft' | 'pending_fee' | 'active' | 'expired' | 'funded' | 'paid_out';
+  status: 'draft' | 'created' | 'pending_fee' | 'pending_verification' | 'fee_invalid' | 'active' | 'expired' | 'funded' | 'paid_out';
+  campaignId?: string;
+  txid?: string | null;
   activationFeeRequired?: number;
   activationFeePaid?: boolean;
+  activationFeeVerificationStatus?: 'none' | 'pending_verification' | 'verified' | 'invalid';
   feeTxid?: string;
   feePaidAt?: string;
+  verificationStatus?: 'none' | 'pending_verification' | 'verified' | 'invalid';
+  warning?: string;
 }
 
 export async function fetchCampaignActivationStatus(
@@ -187,23 +227,24 @@ export async function confirmPayoutTx(
 export async function createPledgeTx(
   campaignId: string,
   contributorAddress: string,
-  amount: bigint,
+  amountXec: number,
   message?: string,
 ): Promise<BuiltTxResponse> {
   return jsonFetch<BuiltTxResponse>(`/campaigns/${campaignId}/pledge`, {
     method: 'POST',
-    body: JSON.stringify({ contributorAddress, amount: amount.toString(), message }),
+    body: JSON.stringify({ contributorAddress, amountXec, message }),
   });
 }
 
 export async function createPledgeBuildTx(
   campaignId: string,
   contributorAddress: string,
-  amount: bigint,
+  amountXec: number,
+  message?: string,
 ): Promise<BuiltTxResponse> {
   return jsonFetch<BuiltTxResponse>(`/campaigns/${campaignId}/pledge/build`, {
     method: 'POST',
-    body: JSON.stringify({ contributorAddress, amount: amount.toString() }),
+    body: JSON.stringify({ contributorAddress, amountXec, message }),
   });
 }
 
@@ -233,6 +274,7 @@ export async function confirmPledgeTx(
 export async function confirmLatestPendingPledgeTx(
   campaignId: string,
   txid: string,
+  wcOfferId?: string,
 ): Promise<{
   pledgeId: string;
   txid: string;
@@ -250,7 +292,7 @@ export async function confirmLatestPendingPledgeTx(
     message?: string;
   }>(`/campaigns/${campaignId}/pledge/confirm`, {
     method: 'POST',
-    body: JSON.stringify({ txid }),
+    body: JSON.stringify({ txid, wcOfferId }),
   });
 }
 
