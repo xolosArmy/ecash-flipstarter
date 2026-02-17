@@ -10,11 +10,11 @@ export const WC_METHOD = 'ecash_signAndBroadcastTransaction' as const;
 export const WC_METHOD_ALIAS = 'ecash_signAndBroadcast' as const;
 const STORAGE_TOPIC = 'wc_topic';
 
-export const REQUIRED_NAMESPACES = {
+export const OPTIONAL_NAMESPACES = {
   [WC_NAMESPACE]: {
-    chains: [CHAIN_ID],
-    methods: [WC_METHOD, WC_METHOD_ALIAS],
-    events: [] as string[],
+    chains: [CHAIN_ID, 'ecash:mainnet'],
+    methods: ['ecash_signAndBroadcastTransaction', 'ecash_getAddresses'],
+    events: ['accountsChanged'],
   },
 } as const;
 
@@ -31,8 +31,7 @@ export function getWalletConnectProjectId(): string | null {
 
 export function getRequestedNamespaces() {
   return {
-    requiredNamespaces: REQUIRED_NAMESPACES,
-    optionalNamespaces: REQUIRED_NAMESPACES,
+    optionalNamespaces: OPTIONAL_NAMESPACES,
   };
 }
 
@@ -133,9 +132,8 @@ export async function connect(opts?: { onUri?: (uri: string) => void }): Promise
   accounts: string[];
 }> {
   const client = await getSignClient();
-  const { requiredNamespaces, optionalNamespaces } = getRequestedNamespaces();
+  const { optionalNamespaces } = getRequestedNamespaces();
   const { uri, approval } = await client.connect({
-    requiredNamespaces,
     optionalNamespaces,
   });
   if (uri) opts?.onUri?.(uri);
