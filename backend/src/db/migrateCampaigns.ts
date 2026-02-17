@@ -1,28 +1,31 @@
 import fs from 'fs';
 import path from 'path';
-import { SQLiteStore, type CampaignRecord } from './SQLiteStore';
+import { openDatabase, initializeDatabase, upsertCampaign, type StoredCampaign } from './SQLiteStore';
 
 export const CAMPAIGNS_JSON_PATH = path.resolve(__dirname, '../../data/campaigns.json');
 
-export function readCampaignsFromJson(filePath = CAMPAIGNS_JSON_PATH): CampaignRecord[] {
+export function readCampaignsFromJson(filePath = CAMPAIGNS_JSON_PATH): StoredCampaign[] {
   if (!fs.existsSync(filePath)) return [];
   const raw = fs.readFileSync(filePath, 'utf8');
   if (!raw.trim()) return [];
-  const parsed = JSON.parse(raw) as CampaignRecord[];
+  const parsed = JSON.parse(raw) as StoredCampaign[];
   return Array.isArray(parsed) ? parsed : [];
 }
 
 export async function migrateJsonCampaignsToSqlite(
-  store: SQLiteStore,
   filePath = CAMPAIGNS_JSON_PATH,
 ): Promise<{ jsonCount: number; sqliteCount: number; migrated: number }> {
+  const db = await openDatabase();
+  await initializeDatabase(db);
+
   const campaigns = readCampaignsFromJson(filePath);
   for (const campaign of campaigns) {
     if (campaign && typeof campaign.id === 'string' && campaign.id.trim()) {
-      await store.upsertCampaign(campaign);
+      await upsertCampaign(campaign, db);
     }
   }
-  const sqliteCount = await store.countCampaigns();
+  const row = await db.get<{ total: number }>('SELECT COUNT(*) as total FROM campaigns');
+  const sqliteCount = row?.total ?? 0;
   return {
     jsonCount: campaigns.length,
     sqliteCount,

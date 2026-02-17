@@ -260,5 +260,226 @@
       "paidAt": "2026-02-16T19:25:17.667Z"
     },
     "treasuryAddressUsed": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk"
+  },
+  {
+    "id": "pledge-repair-1771276798932-429114",
+    "name": "Legacy active campaign",
+    "description": "",
+    "goal": "1000",
+    "expiresAt": "2026-02-19T21:19:58.932Z",
+    "createdAt": "2026-02-16T21:19:58.944Z",
+    "status": "active",
+    "recipientAddress": "ecash:prg0npj6qc4yun5ngn2et3h68zl4p9pl9v8xsuj8sa",
+    "beneficiaryAddress": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk",
+    "campaignAddress": "ecash:prg0npj6qc4yun5ngn2et3h68zl4p9pl9v8xsuj8sa",
+    "covenantAddress": "ecash:prg0npj6qc4yun5ngn2et3h68zl4p9pl9v8xsuj8sa",
+    "beneficiaryPubKey": "",
+    "activation": {
+      "feeSats": "80000000",
+      "feeTxid": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "feePaidAt": "2026-02-16T21:19:58.993Z",
+      "payerAddress": null,
+      "wcOfferId": null
+    },
+    "activationFeeRequired": 800000,
+    "activationFeePaid": true,
+    "activationFeeTxid": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "activationFeePaidAt": "2026-02-16T21:19:58.993Z",
+    "activationFeeVerificationStatus": "verified",
+    "activationFeeVerifiedAt": "2026-02-16T21:19:58.993Z",
+    "activationOfferMode": null,
+    "activationOfferOutputs": null,
+    "activationTreasuryAddressUsed": null,
+    "payout": {
+      "wcOfferId": null,
+      "txid": null,
+      "paidAt": null
+    },
+    "treasuryAddressUsed": null
+  },
+  {
+    "id": "activation-unpaid-1771276798952-142744",
+    "name": "Needs fee",
+    "description": "",
+    "goal": "1000",
+    "expiresAt": "2026-02-23T21:19:58.952Z",
+    "createdAt": "2026-02-16T21:19:58.959Z",
+    "status": "pending_fee",
+    "recipientAddress": "ecash:pr6hm05kh5zwr3kngv3hssqjed0mqwgsx5eczmtvr7",
+    "beneficiaryAddress": "ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk",
+    "campaignAddress": "ecash:pr6hm05kh5zwr3kngv3hssqjed0mqwgsx5eczmtvr7",
+    "covenantAddress": "ecash:pr6hm05kh5zwr3kngv3hssqjed0mqwgsx5eczmtvr7",
+    "beneficiaryPubKey": "",
+    "activation": {
+      "feeSats": "80000000",
+      "feeTxid": null,
+      "feePaidAt": null,
+      "payerAddress": null,
+      "wcOfferId": null
+    },
+    "activationFeeRequired": 800000,
+    "activationFeePaid": false,
+    "activationFeeTxid": null,
+    "activationFeePaidAt": null,
+    "activationFeeVerificationStatus": "none",
+    "activationFeeVerifiedAt": null,
+    "activationOfferMode": null,
+    "activationOfferOutputs": null,
+    "activationTreasuryAddressUsed": null,
+    "payout": {
+      "wcOfferId": null,
+      "txid": null,
+      "paidAt": null
+    },
+    "treasuryAddressUsed": null
+  },
+  {
+    "id": "activation-paid-1771276799005-188852",
+    "name": "Fee paid campaign",
+    "description": "",
+    "goal": "1000",
+    "expiresAt": "2026-02-23T21:19:59.005Z",
+    "createdAt": "2026-02-16T21:19:59.009Z",
+    "status": "active",
+    "recipientAddress": "ecash:pq0krzwajerd2lhy9ygf4ad9u2qy3w8jmgdfjyx78w",
+    "beneficiaryAddress": "ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk",
+    "campaignAddress": "ecash:pq0krzwajerd2lhy9ygf4ad9u2qy3w8jmgdfjyx78w",
+    "covenantAddress": "ecash:pq0krzwajerd2lhy9ygf4ad9u2qy3w8jmgdfjyx78w",
+    "beneficiaryPubKey": "",
+    "activation": {
+      "feeSats": "80000000",
+      "feeTxid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "feePaidAt": "2026-02-16T21:19:59.028Z",
+      "payerAddress": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk",
+      "wcOfferId": null
+    },
+    "activationFeeRequired": 800000,
+    "activationFeePaid": true,
+    "activationFeeTxid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "activationFeePaidAt": "2026-02-16T21:19:59.028Z",
+    "activationFeeVerificationStatus": "verified",
+    "activationFeeVerifiedAt": "2026-02-16T21:19:59.029Z",
+    "activationOfferMode": null,
+    "activationOfferOutputs": null,
+    "activationTreasuryAddressUsed": null,
+    "payout": {
+      "wcOfferId": null,
+      "txid": null,
+      "paidAt": null
+    },
+    "treasuryAddressUsed": null
+  },
+  {
+    "id": "activation-idempotent-1771276799055-924832",
+    "name": "Idempotent activation",
+    "description": "",
+    "goal": "1000",
+    "expiresAt": "2026-02-23T21:19:59.055Z",
+    "createdAt": "2026-02-16T21:19:59.058Z",
+    "status": "active",
+    "recipientAddress": "ecash:pzh6yp3wgeus7fffk4ewfvj0ywwwey908c4u8sscg3",
+    "beneficiaryAddress": "ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk",
+    "campaignAddress": "ecash:pzh6yp3wgeus7fffk4ewfvj0ywwwey908c4u8sscg3",
+    "covenantAddress": "ecash:pzh6yp3wgeus7fffk4ewfvj0ywwwey908c4u8sscg3",
+    "beneficiaryPubKey": "",
+    "activation": {
+      "feeSats": "80000000",
+      "feeTxid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "feePaidAt": "2026-02-16T21:19:59.068Z",
+      "payerAddress": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk",
+      "wcOfferId": null
+    },
+    "activationFeeRequired": 800000,
+    "activationFeePaid": true,
+    "activationFeeTxid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "activationFeePaidAt": "2026-02-16T21:19:59.068Z",
+    "activationFeeVerificationStatus": "verified",
+    "activationFeeVerifiedAt": "2026-02-16T21:19:59.068Z",
+    "activationOfferMode": null,
+    "activationOfferOutputs": null,
+    "activationTreasuryAddressUsed": null,
+    "payout": {
+      "wcOfferId": null,
+      "txid": null,
+      "paidAt": null
+    },
+    "treasuryAddressUsed": null
+  },
+  {
+    "id": "activation-verified-idempotent-1771276799110-755711",
+    "name": "Verified idempotent activation",
+    "description": "",
+    "goal": "1000",
+    "expiresAt": "2026-02-23T21:19:59.110Z",
+    "createdAt": "2026-02-16T21:19:59.112Z",
+    "status": "active",
+    "recipientAddress": "ecash:prxyevukja2gza0un5dz4x659yujrs49wc3283wjlp",
+    "beneficiaryAddress": "ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk",
+    "campaignAddress": "ecash:prxyevukja2gza0un5dz4x659yujrs49wc3283wjlp",
+    "covenantAddress": "ecash:prxyevukja2gza0un5dz4x659yujrs49wc3283wjlp",
+    "beneficiaryPubKey": "",
+    "activation": {
+      "feeSats": "80000000",
+      "feeTxid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "feePaidAt": "2026-02-16T21:19:59.146Z",
+      "payerAddress": null,
+      "wcOfferId": null
+    },
+    "activationFeeRequired": 800000,
+    "activationFeePaid": true,
+    "activationFeeTxid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "activationFeePaidAt": "2026-02-16T21:19:59.146Z",
+    "activationFeeVerificationStatus": "verified",
+    "activationFeeVerifiedAt": "2026-02-16T21:19:59.197Z",
+    "activationOfferMode": null,
+    "activationOfferOutputs": null,
+    "activationTreasuryAddressUsed": null,
+    "payout": {
+      "wcOfferId": null,
+      "txid": null,
+      "paidAt": null
+    },
+    "treasuryAddressUsed": null
+  },
+  {
+    "id": "activation-offer-idempotent-1771276799226-894883",
+    "name": "Offer reuse activation",
+    "description": "",
+    "goal": "1000",
+    "expiresAt": "2026-02-23T21:19:59.226Z",
+    "createdAt": "2026-02-16T21:19:59.234Z",
+    "status": "pending_fee",
+    "recipientAddress": "ecash:pq0zkfrx3ddm7f205ap8slgcc3wxgq5aty60tm2vrk",
+    "beneficiaryAddress": "ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk",
+    "campaignAddress": "ecash:pq0zkfrx3ddm7f205ap8slgcc3wxgq5aty60tm2vrk",
+    "covenantAddress": "ecash:pq0zkfrx3ddm7f205ap8slgcc3wxgq5aty60tm2vrk",
+    "beneficiaryPubKey": "",
+    "activation": {
+      "feeSats": "80000000",
+      "feeTxid": null,
+      "feePaidAt": null,
+      "payerAddress": "ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk",
+      "wcOfferId": "offer-1"
+    },
+    "activationFeeRequired": 800000,
+    "activationFeePaid": false,
+    "activationFeeTxid": null,
+    "activationFeePaidAt": null,
+    "activationFeeVerificationStatus": "none",
+    "activationFeeVerifiedAt": null,
+    "activationOfferMode": "intent",
+    "activationOfferOutputs": [
+      {
+        "address": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk",
+        "valueSats": 80000000
+      }
+    ],
+    "activationTreasuryAddressUsed": "ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk",
+    "payout": {
+      "wcOfferId": null,
+      "txid": null,
+      "paidAt": null
+    },
+    "treasuryAddressUsed": null
   }
 ]
