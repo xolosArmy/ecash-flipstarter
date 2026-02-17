@@ -19,7 +19,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import { useWalletConnect } from '../wallet/useWalletConnect';
 import { useToast } from '../components/ToastProvider';
 import { parseXecInputToSats } from '../utils/amount';
-import { WC_METHOD } from '../walletconnect/client';
+import { getPreferredEcashChain, WC_METHOD } from '../walletconnect/client';
 import { extractWalletTxid } from '../walletconnect/txid';
 import { shouldStopActivationPolling } from '../utils/activationPolling';
 
@@ -37,14 +37,9 @@ function normalizeEcashAddress(address: string): string {
 }
 
 function getChainIdFromSession(session: any): string {
-  const ecashNs = session?.namespaces?.ecash;
-  if (!ecashNs) throw new Error('wc-no-ecash-namespace');
-  if (Array.isArray(ecashNs.chains) && ecashNs.chains.length > 0 && typeof ecashNs.chains[0] === 'string') {
-    return ecashNs.chains[0];
-  }
-  const parts = typeof ecashNs.accounts?.[0] === 'string' ? ecashNs.accounts[0].split(':') : [];
-  if (parts.length < 2) throw new Error('wc-no-chainid');
-  return `${parts[0]}:${parts[1]}`;
+  const chainId = getPreferredEcashChain(session);
+  if (!chainId) throw new Error('wc-no-chainid');
+  return chainId;
 }
 
 function parseStoredStep(value: string | null): WizardStep | null {

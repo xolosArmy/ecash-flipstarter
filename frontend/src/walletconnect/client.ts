@@ -142,6 +142,26 @@ export function getEcashSessionDiagnostics(session?: SessionTypes.Struct): {
   };
 }
 
+export function getPreferredEcashChain(session?: SessionTypes.Struct): string | null {
+  const details = getEcashSessionDetails(session);
+  const parsedAccounts = getParsedEcashAccounts(session);
+  const availableChains = new Set<string>([
+    ...details.chains,
+    ...parsedAccounts.map((account) => account.chainId),
+  ]);
+  if (availableChains.has(CHAIN_ID)) return CHAIN_ID;
+  if (availableChains.has(CHAIN_ID_ALIAS)) return CHAIN_ID_ALIAS;
+  const firstAvailable = [...availableChains].find((chain) => chain.startsWith(`${WC_NAMESPACE}:`));
+  return firstAvailable ?? null;
+}
+
+function getPreferredEcashMethod(session: SessionTypes.Struct): typeof WC_METHOD | typeof WC_METHOD_ALIAS | null {
+  const details = getEcashSessionDetails(session);
+  if (details.methods.includes(WC_METHOD)) return WC_METHOD;
+  if (details.methods.includes(WC_METHOD_ALIAS)) return WC_METHOD_ALIAS;
+  return null;
+}
+
 function supportsEcashChain(session: SessionTypes.Struct, allowedChains: string[]): boolean {
   const details = getEcashSessionDetails(session);
   if (details.chains.some((chain) => allowedChains.includes(chain))) return true;
@@ -150,8 +170,7 @@ function supportsEcashChain(session: SessionTypes.Struct, allowedChains: string[
 }
 
 function supportsEcashMethod(session: SessionTypes.Struct): boolean {
-  const details = getEcashSessionDetails(session);
-  return details.methods.includes(WC_METHOD) || details.methods.includes(WC_METHOD_ALIAS);
+  return Boolean(getPreferredEcashMethod(session));
 }
 
 export function isEcashSessionValid(session: SessionTypes.Struct): boolean {
@@ -173,6 +192,14 @@ export function assertSessionSupportsEcashSign(session: SessionTypes.Struct, cha
         `detected methods: ${diagnostics.detectedMethods.join(', ') || '(none)'}. Reconecta la wallet.`
     );
   }
+}
+
+function resolveEcashChainForRequest(session: SessionTypes.Struct, requestedChainId?: string): string {
+  const allowedChains = [CHAIN_ID, CHAIN_ID_ALIAS];
+  if (requestedChainId && allowedChains.includes(requestedChainId) && supportsEcashChain(session, [requestedChainId])) {
+    return requestedChainId;
+  }
+  return getPreferredEcashChain(session) ?? requestedChainId ?? CHAIN_ID;
 }
 
 export function sessionSupportsEcashSigning(session: unknown, chainId?: string): boolean {
@@ -250,6 +277,13 @@ export async function requestSignAndBroadcastTransaction(
   const client = await getSignClient();
   const session = client.session.get(topic);
   assertSessionSupportsEcashSign(session, chainId);
+  const resolvedMethod = getPreferredEcashMethod(session);
+  if (!resolvedMethod) {
+    throw new Error(
+      `WalletConnect session is missing required signing method (${WC_METHOD}/${WC_METHOD_ALIAS}). Reconecta la wallet.`,
+    );
+  }
+  const resolvedChainId = resolveEcashChainForRequest(session, chainId);
   const outputs = options?.outputs || [];
   const mode: 'legacy' | 'intent' = outputs.length > 0 ? 'intent' : 'legacy';
   const params = {
@@ -274,6 +308,8 @@ export async function requestSignAndBroadcastTransaction(
   const requestMode = typeof requestPayload.mode === 'string' ? requestPayload.mode : mode;
   if (import.meta.env.DEV) {
     console.debug('[WC] ecash_signAndBroadcastTransaction request', {
+      method: resolvedMethod,
+      chainId: resolvedChainId,
       mode: requestMode,
       hasRawHex: Boolean(rawHex),
       hasOutpoints: outpoints.length > 0,
@@ -286,9 +322,9 @@ export async function requestSignAndBroadcastTransaction(
   // Activation intent mode sends business outputs only and lets the wallet build the final tx.
   const result = await client.request({
     topic,
-    chainId,
+    chainId: resolvedChainId,
     request: {
-      method: WC_METHOD,
+      method: resolvedMethod,
       params,
     },
   });

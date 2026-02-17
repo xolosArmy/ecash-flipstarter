@@ -22,7 +22,7 @@ import { ExplorerLink } from '../components/ExplorerLink';
 import { StatusBadge } from '../components/StatusBadge';
 import { SecurityBanner } from '../components/SecurityBanner';
 import { Countdown } from '../components/Countdown';
-import { WC_METHOD } from '../walletconnect/client';
+import { getEcashAccounts, getPreferredEcashChain, WC_METHOD } from '../walletconnect/client';
 import { extractWalletTxid } from '../walletconnect/txid';
 import { shouldStopActivationPolling } from '../utils/activationPolling';
 
@@ -31,6 +31,12 @@ function normalizeEcashAddress(address: string): string {
   if (!trimmed) return '';
   if (trimmed.includes(':')) return trimmed;
   return `ecash:${trimmed}`;
+}
+
+function requireEcashChainId(session: unknown): string {
+  const chainId = getPreferredEcashChain(session as any);
+  if (!chainId) throw new Error('wc-no-chainid');
+  return chainId;
 }
 
 export const CampaignDetail: React.FC = () => {
@@ -214,7 +220,7 @@ export const CampaignDetail: React.FC = () => {
 
       if (!connected) {
         const session = await connect();
-        const account = session?.namespaces?.ecash?.accounts?.[0]?.split(':').slice(2).join(':') || '';
+        const account = getEcashAccounts(session ?? undefined)[0] || '';
         activeAddress = normalizeEcashAddress(account || activeAddress);
         activeSession = session;
       }
@@ -232,13 +238,7 @@ export const CampaignDetail: React.FC = () => {
       }
       const ecashNs = activeSession?.namespaces?.ecash;
       if (!ecashNs) throw new Error('wc-no-ecash-namespace');
-      const chainId =
-        (ecashNs.chains && ecashNs.chains[0]) ||
-        (() => {
-          const parts = ecashNs.accounts?.[0]?.split(':') ?? [];
-          if (parts.length < 2) throw new Error('wc-no-chainid');
-          return `${parts[0]}:${parts[1]}`;
-        })();
+      const chainId = requireEcashChainId(activeSession);
       if (import.meta.env.DEV) {
         console.debug('[ActivationFee][WC] payload', {
           method: WC_METHOD,
@@ -341,13 +341,7 @@ export const CampaignDetail: React.FC = () => {
         });
         const ecashNs = activeSession?.namespaces?.ecash;
         if (!ecashNs) throw new Error('wc-no-ecash-namespace');
-        const chainId =
-          (ecashNs.chains && ecashNs.chains[0]) ||
-          (() => {
-            const parts = ecashNs.accounts?.[0]?.split(':') ?? [];
-            if (parts.length < 2) throw new Error('wc-no-chainid');
-            return `${parts[0]}:${parts[1]}`;
-          })();
+        const chainId = requireEcashChainId(activeSession);
         const result = await requestSignAndBroadcast(wcOfferId, chainId);
         txid = extractWalletTxid(result);
       }
