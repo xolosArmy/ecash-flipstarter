@@ -17,6 +17,7 @@ export const WalletConnectModal: React.FC = () => {
     projectIdMissing,
     connect,
     disconnect,
+    resetSession,
     requestAddresses,
   } = useWalletConnect();
 
@@ -33,7 +34,14 @@ export const WalletConnectModal: React.FC = () => {
           Falta Project ID de WalletConnect. Configura VITE_WC_PROJECT_ID.
         </p>
       )}
-      {error && <p style={{ color: '#b00020' }}>{error}</p>}
+      {error && (
+        <div>
+          <p style={{ color: '#b00020', marginBottom: 8 }}>{error}</p>
+          <button type="button" onClick={resetSession}>
+            Reset sesión WC
+          </button>
+        </div>
+      )}
       {!connected ? (
         <div>
           <button

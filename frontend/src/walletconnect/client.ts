@@ -6,14 +6,15 @@ const PROJECT_ID = import.meta.env.VITE_WC_PROJECT_ID as string | undefined;
 
 export const WC_NAMESPACE = 'ecash' as const;
 export const CHAIN_ID = 'ecash:1' as const;
+export const CHAIN_ID_ALIAS = 'ecash:mainnet' as const;
 export const WC_METHOD = 'ecash_signAndBroadcastTransaction' as const;
 export const WC_METHOD_ALIAS = 'ecash_signAndBroadcast' as const;
 const STORAGE_TOPIC = 'wc_topic';
 
 export const OPTIONAL_NAMESPACES = {
   [WC_NAMESPACE]: {
-    chains: [CHAIN_ID, 'ecash:mainnet'],
-    methods: ['ecash_signAndBroadcastTransaction', 'ecash_getAddresses'],
+    chains: [CHAIN_ID, CHAIN_ID_ALIAS],
+    methods: [WC_METHOD, WC_METHOD_ALIAS, 'ecash_getAddresses'],
     events: ['accountsChanged'],
   },
 } as const;
@@ -68,39 +69,115 @@ function notifySessionDelete(topic?: string) {
 }
 
 export function getEcashAccounts(session?: SessionTypes.Struct): string[] {
-  if (!session?.namespaces?.[WC_NAMESPACE]?.accounts) return [];
-  return session.namespaces[WC_NAMESPACE].accounts
-    .map((account) => account.split(':').slice(2).join(':'))
-    .filter((address): address is string => Boolean(address));
+  const parsedAccounts = getParsedEcashAccounts(session);
+  const preferredOrder = [CHAIN_ID, CHAIN_ID_ALIAS];
+  const sorted = [...parsedAccounts].sort((left, right) => {
+    const leftIndex = preferredOrder.indexOf(left.chainId);
+    const rightIndex = preferredOrder.indexOf(right.chainId);
+    const normalizedLeft = leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex;
+    const normalizedRight = rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex;
+    return normalizedLeft - normalizedRight;
+  });
+
+  const deduped = new Set<string>();
+  sorted.forEach((account) => {
+    if (account.address) deduped.add(account.address);
+  });
+  return [...deduped];
 }
 
-function sessionSupportsRequiredCapabilities(session: SessionTypes.Struct, chainId: string): boolean {
-  const ecashNamespace = session.namespaces?.[WC_NAMESPACE];
-  if (!ecashNamespace) return false;
+type EcashSessionDetails = {
+  chains: string[];
+  methods: string[];
+  accounts: string[];
+};
 
-  const hasMethod =
-    ecashNamespace.methods.includes(WC_METHOD) ||
-    ecashNamespace.methods.includes(WC_METHOD_ALIAS);
-  if (!hasMethod) return false;
+type ParsedEcashAccount = {
+  chainId: string;
+  address: string;
+};
 
-  if (ecashNamespace.chains && ecashNamespace.chains.length > 0) {
-    return ecashNamespace.chains.includes(chainId);
-  }
+function getEcashSessionDetails(session?: SessionTypes.Struct): EcashSessionDetails {
+  const ecashNamespace = session?.namespaces?.[WC_NAMESPACE];
+  return {
+    chains: Array.isArray(ecashNamespace?.chains)
+      ? ecashNamespace.chains.filter((chain): chain is string => typeof chain === 'string')
+      : [],
+    methods: Array.isArray(ecashNamespace?.methods)
+      ? ecashNamespace.methods.filter((method): method is string => typeof method === 'string')
+      : [],
+    accounts: Array.isArray(ecashNamespace?.accounts)
+      ? ecashNamespace.accounts.filter((account): account is string => typeof account === 'string')
+      : [],
+  };
+}
 
-  return ecashNamespace.accounts.some((account) => account.startsWith(`${chainId}:`));
+function parseEcashAccountEntry(account: string): ParsedEcashAccount | null {
+  const [namespace, chainRef, ...addressParts] = account.split(':');
+  if (namespace !== WC_NAMESPACE || !chainRef) return null;
+  const address = addressParts.join(':');
+  if (!address) return null;
+  return {
+    chainId: `${namespace}:${chainRef}`,
+    address,
+  };
+}
+
+function getParsedEcashAccounts(session?: SessionTypes.Struct): ParsedEcashAccount[] {
+  const details = getEcashSessionDetails(session);
+  return details.accounts
+    .map((account) => parseEcashAccountEntry(account))
+    .filter((account): account is ParsedEcashAccount => Boolean(account));
+}
+
+export function getEcashSessionDiagnostics(session?: SessionTypes.Struct): {
+  detectedChains: string[];
+  detectedMethods: string[];
+} {
+  const details = getEcashSessionDetails(session);
+  const accountChains = getParsedEcashAccounts(session).map((account) => account.chainId);
+  return {
+    detectedChains: [...new Set([...details.chains, ...accountChains])],
+    detectedMethods: [...new Set(details.methods)],
+  };
+}
+
+function supportsEcashChain(session: SessionTypes.Struct, allowedChains: string[]): boolean {
+  const details = getEcashSessionDetails(session);
+  if (details.chains.some((chain) => allowedChains.includes(chain))) return true;
+  const parsedAccounts = getParsedEcashAccounts(session);
+  return parsedAccounts.some((account) => allowedChains.includes(account.chainId));
+}
+
+function supportsEcashMethod(session: SessionTypes.Struct): boolean {
+  const details = getEcashSessionDetails(session);
+  return details.methods.includes(WC_METHOD) || details.methods.includes(WC_METHOD_ALIAS);
+}
+
+export function isEcashSessionValid(session: SessionTypes.Struct): boolean {
+  const allowedChains = [CHAIN_ID, CHAIN_ID_ALIAS];
+  return supportsEcashMethod(session) && supportsEcashChain(session, allowedChains);
+}
+
+function sessionSupportsRequiredCapabilities(session: SessionTypes.Struct, chainId?: string): boolean {
+  const allowedChains = chainId ? [chainId, CHAIN_ID, CHAIN_ID_ALIAS] : [CHAIN_ID, CHAIN_ID_ALIAS];
+  return supportsEcashMethod(session) && supportsEcashChain(session, [...new Set(allowedChains)]);
 }
 
 export function assertSessionSupportsEcashSign(session: SessionTypes.Struct, chainId: string): void {
   if (!sessionSupportsRequiredCapabilities(session, chainId)) {
+    const diagnostics = getEcashSessionDiagnostics(session);
     throw new Error(
-      `WalletConnect session is missing required chain/method (${chainId}, ${WC_METHOD}/${WC_METHOD_ALIAS}). Reconecta la wallet.`
+      `WalletConnect session is missing required chain/method (${chainId}, ${WC_METHOD}/${WC_METHOD_ALIAS}). ` +
+        `Detected chains: ${diagnostics.detectedChains.join(', ') || '(none)'}; ` +
+        `detected methods: ${diagnostics.detectedMethods.join(', ') || '(none)'}. Reconecta la wallet.`
     );
   }
 }
 
-export function sessionSupportsEcashSigning(session: unknown, chainId: string): boolean {
+export function sessionSupportsEcashSigning(session: unknown, chainId?: string): boolean {
   try {
-    assertSessionSupportsEcashSign(session as SessionTypes.Struct, chainId);
+    assertSessionSupportsEcashSign(session as SessionTypes.Struct, chainId ?? CHAIN_ID);
     return true;
   } catch {
     return false;
@@ -138,8 +215,6 @@ export async function connect(opts?: { onUri?: (uri: string) => void }): Promise
   });
   if (uri) opts?.onUri?.(uri);
   const session = await approval();
-
-  assertSessionSupportsEcashSign(session, CHAIN_ID);
 
   storeTopic(session.topic);
   return { session, accounts: getEcashAccounts(session) };

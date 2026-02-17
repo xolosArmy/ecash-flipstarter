@@ -9,15 +9,16 @@ import {
   connect as wcConnect,
   disconnect as wcDisconnect,
   getEcashAccounts,
+  getEcashSessionDiagnostics,
   getRequestedNamespaces,
   getSignClient,
   getStoredTopic,
   getWalletConnectProjectId,
+  isEcashSessionValid,
   isWalletConnectConfigured,
   onSessionDelete,
   WC_METHOD,
   requestSignAndBroadcastTransaction,
-  sessionSupportsEcashSigning,
 } from '../walletconnect/client';
 
 type WalletConnectState = {
@@ -32,6 +33,7 @@ type WalletConnectState = {
   projectIdMissing: boolean;
   connect: () => Promise<SessionTypes.Struct | null>;
   disconnect: () => Promise<void>;
+  resetSession: () => Promise<void>;
   requestAddresses: () => Promise<string[]>;
   requestSignAndBroadcast: (
     offerId: string,
@@ -57,6 +59,7 @@ type WalletConnectState = {
 
 const WalletConnectContext = createContext<WalletConnectState | null>(null);
 const INVALID_SESSION_MESSAGE = 'Sesión WalletConnect inválida. Desconecta y vuelve a conectar.';
+const INVALID_SESSION_RECONNECT_MESSAGE = 'La sesión WalletConnect no es compatible. Resetea y reconecta Tonalli.';
 
 function formatWalletConnectError(err: unknown, fallback: string) {
   if (err && typeof err === 'object') {
@@ -99,6 +102,13 @@ function extractTxid(result: unknown): string | null {
   return null;
 }
 
+function formatInvalidEcashSessionMessage(session: SessionTypes.Struct): string {
+  const diagnostics = getEcashSessionDiagnostics(session);
+  const chains = diagnostics.detectedChains.join(', ') || '(ninguna)';
+  const methods = diagnostics.detectedMethods.join(', ') || '(ninguno)';
+  return `${INVALID_SESSION_RECONNECT_MESSAGE} Chains detectadas: ${chains}. Methods detectados: ${methods}.`;
+}
+
 export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const clientRef = useRef<SignClient | null>(null);
   const [signClient, setSignClient] = useState<SignClient | null>(null);
@@ -126,7 +136,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
     setLastTxid(null);
   };
 
-  const purgeWalletConnect = async () => {
+  const purgeWalletConnect = async (nextError: string | null = INVALID_SESSION_MESSAGE) => {
     clearStoredTopic();
     await clearWalletConnectStorage().catch(() => {
       // Best effort cleanup for stale walletconnect storage.
@@ -134,7 +144,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
     resetState();
     setTopic(null);
     setStatus('idle');
-    setError(INVALID_SESSION_MESSAGE);
+    setError(nextError);
     if (import.meta.env.DEV) {
       console.debug('[WC] purge complete');
     }
@@ -177,7 +187,14 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
             client.session.getAll().find((existingSession) => existingSession.topic === storedTopic) ??
             null;
           if (session) {
-            assertSessionSupportsEcashSign(session, CHAIN_ID);
+            if (!isEcashSessionValid(session)) {
+              setTopic(session.topic);
+              setConnected(false);
+              setStatus('idle');
+              setAddresses(getEcashAccounts(session));
+              setError(formatInvalidEcashSessionMessage(session));
+              return () => unsubscribe();
+            }
             setTopic(session.topic);
             setConnected(true);
             setStatus('connected');
@@ -224,9 +241,12 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
         },
       });
 
-      if (!sessionSupportsEcashSigning(session)) {
+      if (!isEcashSessionValid(session)) {
+        setTopic(session.topic);
+        setConnected(false);
+        setAddresses(getEcashAccounts(session));
         setStatus('idle');
-        setError('La sesión no incluye ecash:1 + ecash_signAndBroadcastTransaction. Reconecta Tonalli.');
+        setError(formatInvalidEcashSessionMessage(session));
         return null;
       }
       setTopic(session.topic);
@@ -257,6 +277,10 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
       clearStoredTopic();
       resetState();
     }
+  };
+
+  const resetSession = async () => {
+    await purgeWalletConnect(null);
   };
 
   const requestAddresses = async () => {
@@ -428,6 +452,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
       projectIdMissing,
       connect,
       disconnect,
+      resetSession,
       requestAddresses,
       requestSignAndBroadcast,
       requestSignAndBroadcastIntent,
@@ -446,6 +471,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
       projectIdMissing,
       requestSignAndBroadcastIntent,
       requestSignAndBroadcastRawTx,
+      resetSession,
     ]
   );
 

@@ -22,6 +22,7 @@ export const WalletConnectBar: React.FC = () => {
     projectIdMissing,
     connect,
     disconnect,
+    resetSession,
     requestAddresses,
   } = useWalletConnect();
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
@@ -59,9 +60,12 @@ export const WalletConnectBar: React.FC = () => {
         </p>
       )}
       {error && (
-        <p style={{ color: '#b00020', marginTop: 8 }}>
-          {error}
-        </p>
+        <div style={{ marginTop: 8 }}>
+          <p style={{ color: '#b00020', marginTop: 0, marginBottom: 6 }}>{error}</p>
+          <button type="button" onClick={resetSession}>
+            Reset sesión WC
+          </button>
+        </div>
       )}
       {!connected ? (
         <div style={{ marginTop: 12 }}>
