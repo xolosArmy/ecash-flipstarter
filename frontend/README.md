@@ -55,3 +55,8 @@ Test flow:
 1) Build a pledge to get the unsigned hex.
 2) Click "Sign & Broadcast with Tonalli".
 3) Approve in Tonalli and confirm the returned txid in the UI.
+
+## Vercel SPA fallback
+Vercel SPA fallback: rewrites all deep links to `/` so React Router can render pages on refresh/new tab.
+
+The frontend deployment should use `frontend/` as the Vercel Root Directory, with `frontend/vercel.json` applied at that root. Static assets under `/assets/*` remain available because Vercel resolves filesystem files before rewrite rules.
