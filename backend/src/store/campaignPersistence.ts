@@ -22,6 +22,24 @@ export function getCampaignsJsonPath(): string {
   return path.join(getDataDir(), CAMPAIGNS_JSON_FILE);
 }
 
+
+function normalizeEscrowCampaign(campaign: StoredCampaign): StoredCampaign {
+  const escrowAddress = campaign.escrowAddress
+    ?? campaign.covenantAddress
+    ?? campaign.campaignAddress
+    ?? campaign.recipientAddress;
+
+  if (!escrowAddress) return campaign;
+
+  return {
+    ...campaign,
+    escrowAddress,
+    covenantAddress: escrowAddress,
+    campaignAddress: escrowAddress,
+    recipientAddress: escrowAddress,
+  };
+}
+
 function parseBooleanEnv(raw: string | undefined, fallback: boolean): boolean {
   if (raw === undefined) return fallback;
   const normalized = raw.trim().toLowerCase();
@@ -48,7 +66,7 @@ export function readCampaignsJson(): StoredCampaign[] {
     if (!Array.isArray(parsed)) {
       return [];
     }
-    return parsed as StoredCampaign[];
+    return (parsed as StoredCampaign[]).map(normalizeEscrowCampaign);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[campaignPersistence] failed to read campaigns.json: ${message}`);
@@ -58,7 +76,7 @@ export function readCampaignsJson(): StoredCampaign[] {
 
 export function writeCampaignsJson(campaigns: StoredCampaign[]): void {
   const filePath = getCampaignsJsonPath();
-  const payload = JSON.stringify(campaigns, null, 2);
+  const payload = JSON.stringify(campaigns.map(normalizeEscrowCampaign), null, 2);
   fs.writeFileSync(filePath, `${payload}\n`, 'utf8');
 }
 
@@ -74,7 +92,7 @@ export async function migrateJsonCampaignsToSqlite(): Promise<{
   let migrated = 0;
 
   for (const campaign of jsonCampaigns) {
-    await upsertCampaign(campaign, db);
+    await upsertCampaign(normalizeEscrowCampaign(campaign), db);
     migrated += 1;
   }
 
@@ -105,7 +123,7 @@ export async function loadCampaignsFromDisk(options?: { migrateOnStart?: boolean
   if (jsonCampaigns.length > 0 && migrateOnStart) {
     try {
       for (const campaign of jsonCampaigns) {
-        await upsertCampaign(campaign, db);
+        await upsertCampaign(normalizeEscrowCampaign(campaign), db);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -121,7 +139,7 @@ export async function saveCampaignsToDisk(campaigns: StoredCampaign[]): Promise<
   await initializeDatabase(db);
 
   for (const campaign of campaigns) {
-    await upsertCampaign(campaign, db);
+    await upsertCampaign(normalizeEscrowCampaign(campaign), db);
   }
 
   if (shouldDualWriteJson()) {
@@ -132,7 +150,8 @@ export async function saveCampaignsToDisk(campaigns: StoredCampaign[]): Promise<
 export async function saveCampaignToDisk(campaign: StoredCampaign): Promise<void> {
   const db = await openDatabase();
   await initializeDatabase(db);
-  await upsertCampaign(campaign, db);
+  const normalizedCampaign = normalizeEscrowCampaign(campaign);
+  await upsertCampaign(normalizedCampaign, db);
 
   if (!shouldDualWriteJson()) {
     return;
@@ -141,9 +160,9 @@ export async function saveCampaignToDisk(campaign: StoredCampaign): Promise<void
   const existing = readCampaignsJson();
   const idx = existing.findIndex((entry) => entry.id === campaign.id);
   if (idx >= 0) {
-    existing[idx] = campaign;
+    existing[idx] = normalizedCampaign;
   } else {
-    existing.push(campaign);
+    existing.push(normalizedCampaign);
   }
   writeCampaignsJson(existing);
 }

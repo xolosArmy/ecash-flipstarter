@@ -34,7 +34,7 @@ export const createPledgeBuildHandler = async (req: any, res: any) => {
     }
     const escrow = validateEscrowConsistency({ id: canonicalId, ...campaign });
     if (!escrow.ok) {
-      return res.status(400).json({ error: 'escrow-address-mismatch', ...buildEscrowMismatchDetails({ id: canonicalId, ...campaign }, escrow.details.expectedEscrow) });
+      return res.status(400).json({ error: 'escrow-address-mismatch', ...buildEscrowMismatchDetails({ id: canonicalId, ...campaign }, escrow.details.canonicalEscrow) });
     }
     const campaignAddress = escrow.escrowAddress;
 

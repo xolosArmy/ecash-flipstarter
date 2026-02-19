@@ -285,7 +285,7 @@ async function selectCampaignFundingUtxos(
   const utxos = (await getUtxosForAddress(escrowAddress)).filter(isSpendableXecUtxo);
   const total = utxos.reduce((acc, utxo) => acc + utxo.value, 0n);
   console.log(
-    `[escrow-check] campaign=${campaign.id} escrow=${escrowAddress} utxos=${utxos.length} total=${total} fee=${feeSats}`,
+    `[payout/build] id=${campaign.id} escrow=${escrowAddress} utxos=${utxos.length} raised=${total.toString()} goal=${String(campaign.goal)}`,
   );
   return { escrowAddress, utxos, total };
 }
@@ -693,10 +693,6 @@ export const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = asy
     const { escrowAddress, utxos: campaignUtxos, total } = await selectCampaignFundingUtxos(campaign, PLEDGE_FEE_SATS);
     const goalSats = BigInt(campaign.goal);
 
-    console.log(
-      `[payout/build] Campaña: ${canonicalId} (requested: ${requestedId}) | Escrow: ${escrowAddress} | Total On-Chain: ${total} | Meta: ${campaign.goal}`,
-    );
-
     if (total < goalSats) {
       return res.status(400).json({
         error: 'insufficient-funds-on-chain',
@@ -772,22 +768,41 @@ router.post('/campaigns/:id/payout/build', buildCampaignPayoutHandler);
 router.post('/campaigns/:id/repair-escrow', async (req, res) => {
   try {
     const token = String(req.headers['x-admin-token'] ?? req.body?.adminToken ?? '').trim();
-    const expected = String(process.env.CAMPAIGN_ADMIN_TOKEN ?? '').trim();
+    const expected = String(process.env.ADMIN_TOKEN ?? process.env.CAMPAIGN_ADMIN_TOKEN ?? '').trim();
     if (!expected || token !== expected) {
       return res.status(401).json({ error: 'unauthorized' });
     }
     const resolvedCampaign = await resolveCampaignOr404(req, res);
     if (!resolvedCampaign) return;
     const storedCampaign = toStoredCampaignRecord(resolvedCampaign.campaign);
+    const before = {
+      escrowAddress: storedCampaign.escrowAddress ?? null,
+      covenantAddress: storedCampaign.covenantAddress ?? null,
+      campaignAddress: storedCampaign.campaignAddress ?? null,
+      recipientAddress: storedCampaign.recipientAddress ?? null,
+    };
     const repaired = await repairCampaignEscrowAddress(storedCampaign);
     resolvedCampaign.campaign.escrowAddress = repaired.escrowAddress;
     resolvedCampaign.campaign.campaignAddress = repaired.escrowAddress;
     resolvedCampaign.campaign.covenantAddress = repaired.escrowAddress;
+    resolvedCampaign.campaign.recipientAddress = repaired.escrowAddress;
     await sqliteUpsertCampaign(storedCampaign);
     const campaigns = (await service.listCampaigns()) as StoredCampaign[];
     syncCampaignStoreFromDiskCampaigns(campaigns);
     await saveCampaignsToDisk(campaigns);
-    return res.json({ ok: true, campaignId: resolvedCampaign.canonicalId, ...repaired });
+    return res.json({
+      ok: true,
+      campaignId: resolvedCampaign.canonicalId,
+      before,
+      after: {
+        escrowAddress: repaired.escrowAddress,
+        covenantAddress: repaired.escrowAddress,
+        campaignAddress: repaired.escrowAddress,
+        recipientAddress: repaired.escrowAddress,
+      },
+      txidUsed: repaired.txidUsed,
+      source: repaired.source,
+    });
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
   }

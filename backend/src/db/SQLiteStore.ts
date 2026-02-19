@@ -298,6 +298,7 @@ function deriveExpirationTime(expiresAt: string, explicit?: string | null): stri
 
 function mapRowToCampaign(row: CampaignRow): StoredCampaign {
   const expiresAt = row.expiresAt && row.expiresAt.trim() ? row.expiresAt : row.expirationTime ?? '';
+  const canonicalEscrow = row.escrowAddress ?? row.covenantAddress ?? row.campaignAddress ?? row.recipientAddress;
   const campaign: StoredCampaign = {
     id: row.id,
     slug: row.slug ?? undefined,
@@ -307,11 +308,11 @@ function mapRowToCampaign(row: CampaignRow): StoredCampaign {
     expiresAt,
     createdAt: row.createdAt ?? new Date(0).toISOString(),
     status: row.status ?? undefined,
-    recipientAddress: row.recipientAddress ?? undefined,
+    recipientAddress: canonicalEscrow ?? row.recipientAddress ?? undefined,
     beneficiaryAddress: row.beneficiaryAddress ?? undefined,
-    campaignAddress: row.campaignAddress ?? undefined,
-    covenantAddress: row.covenantAddress ?? undefined,
-    escrowAddress: row.escrowAddress ?? undefined,
+    campaignAddress: canonicalEscrow ?? row.campaignAddress ?? undefined,
+    covenantAddress: canonicalEscrow ?? row.covenantAddress ?? undefined,
+    escrowAddress: canonicalEscrow ?? undefined,
     beneficiaryPubKey: row.beneficiaryPubKey ?? undefined,
     activation: {
       feeSats: row.activation_feeSats ?? String(ACTIVATION_FEE_XEC * 100),
@@ -360,6 +361,7 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
   const expiresAt = toIsoDate(campaign.expiresAt, nowIso);
   const createdAt = toIsoDate(campaign.createdAt, nowIso);
   const goal = toGoalString(campaign.goal);
+  const canonicalEscrow = campaign.escrowAddress ?? campaign.covenantAddress ?? campaign.campaignAddress ?? campaign.recipientAddress ?? null;
 
   const activationFeeRequired =
     typeof campaign.activationFeeRequired === 'number' && campaign.activationFeeRequired > 0
@@ -433,11 +435,11 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
         expiresAt,
         createdAt,
         campaign.status ?? null,
-        campaign.recipientAddress ?? null,
+        canonicalEscrow ?? campaign.recipientAddress ?? null,
         campaign.beneficiaryAddress ?? null,
-        campaign.campaignAddress ?? null,
-        campaign.covenantAddress ?? null,
-        campaign.escrowAddress ?? null,
+        canonicalEscrow ?? campaign.campaignAddress ?? null,
+        canonicalEscrow ?? campaign.covenantAddress ?? null,
+        canonicalEscrow,
         campaign.beneficiaryPubKey ?? null,
         campaign.location?.latitude ?? null,
         campaign.location?.longitude ?? null,
