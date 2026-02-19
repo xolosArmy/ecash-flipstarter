@@ -17,7 +17,8 @@ const effectiveChronikBaseUrl = CHRONIK_URL;
 const chronik = new ChronikClient([effectiveChronikBaseUrl]);
 
 export type ChronikUnavailableDetails = {
-  url: string;
+  url?: string;
+  usedUrl?: string;
   triedUrls?: string[];
   status?: number;
   contentType?: string;
@@ -172,100 +173,106 @@ async function getUtxosForAddressViaChronik(address: string): Promise<Utxo[]> {
 
 export async function fetchChronikUtxos(address: string): Promise<ChronikUtxoFetchResult> {
   const normalizedAddress = normalizeChronikAddress(address);
-  const endpoints = [
-    `/address/${normalizedAddress}/utxos`,
-    `/v1/address/${normalizedAddress}/utxos`,
-  ];
-  const triedUrls: string[] = [];
-  let lastError: ChronikUnavailableError | null = null;
+  const primaryPath = `/address/${normalizedAddress}/utxos`;
+  const fallbackPath = `/v1/address/${normalizedAddress}/utxos`;
+  const primaryResult = await chronikGet(primaryPath);
 
-  for (const endpoint of endpoints) {
-    const result = await chronikGet(endpoint);
-    triedUrls.push(result.url);
-
-    const contentType = result.contentType;
-    console.log(
-      `[chronik] url=${result.url} status=${String(result.status)} contentType=${contentType || 'unknown'}`,
-    );
-
-    if (result.status < 200 || result.status >= 300) {
-      const error = new ChronikUnavailableError('chronik-http-error', {
-        url: result.url,
-        triedUrls,
-        status: result.status,
-        contentType: contentType || undefined,
-        bodyPreviewHex: toBodyPreviewHex(result.raw),
-      });
-      lastError = error;
-      continue;
-    }
-
-    if (contentType.toLowerCase().includes('application/x-protobuf')) {
-      throw new ChronikUnavailableError('chronik-protobuf-mode', {
-        url: result.url,
-        triedUrls,
-        status: result.status,
-        contentType: contentType || undefined,
-        bodyPreviewHex: toBodyPreviewHex(result.raw),
-        hint: 'chronik-protobuf-mode; backend expected json',
+  if (primaryResult.status === 404) {
+    const fallbackResult = await chronikGet(fallbackPath);
+    if (fallbackResult.status === 404) {
+      throw new ChronikUnavailableError('chronik-address-utxos-not-found', {
+        usedUrl: fallbackResult.url,
+        triedUrls: [primaryResult.url, fallbackResult.url],
+        status: fallbackResult.status,
+        contentType: fallbackResult.contentType || undefined,
+        bodyPreviewHex: toBodyPreviewHex(fallbackResult.raw),
       });
     }
+    return parseChronikUtxoResponse(fallbackResult, [primaryResult.url, fallbackResult.url]);
+  }
 
-    if (!contentType.toLowerCase().includes('application/json')) {
-      throw new ChronikUnavailableError('chronik-non-json-response', {
-        url: result.url,
-        triedUrls,
-        status: result.status,
-        contentType: contentType || undefined,
-        bodyPreviewHex: toBodyPreviewHex(result.raw),
-        hint: 'chronik-non-json-response',
-      });
-    }
+  return parseChronikUtxoResponse(primaryResult, [primaryResult.url]);
+}
 
-    let payload: {
-      utxos?: Array<Record<string, unknown>>;
-      outputScript?: string;
-      output_script?: string;
-    };
-    try {
-      payload = JSON.parse(result.raw.toString('utf8')) as typeof payload;
-    } catch (_err) {
-      throw new ChronikUnavailableError('chronik-json-parse-error', {
-        url: result.url,
-        triedUrls,
-        status: result.status,
-        contentType: contentType || undefined,
-        bodyPreviewHex: toBodyPreviewHex(result.raw),
-      });
-    }
+function parseChronikUtxoResponse(
+  result: { url: string; status: number; contentType: string; raw: Buffer },
+  triedUrls: string[],
+): ChronikUtxoFetchResult {
+  const contentType = result.contentType;
+  console.log(
+    `[chronik] url=${result.url} status=${String(result.status)} contentType=${contentType || 'unknown'}`,
+  );
 
-    const outputScript = payload.outputScript ?? payload.output_script ?? '';
-    const utxos = (payload.utxos ?? []).map((u) => ({
-      txid: String((u.outpoint as { txid?: string } | undefined)?.txid ?? ''),
-      vout: Number((u.outpoint as { outIdx?: number; out_idx?: number } | undefined)?.outIdx ?? (u.outpoint as { out_idx?: number } | undefined)?.out_idx ?? 0),
-      value: toBigIntSats(u.sats ?? u.value),
-      scriptPubKey: String(outputScript),
-      token: u.token,
-      slpToken: u.slpToken,
-      tokenStatus: u.tokenStatus,
-      plugins: u.plugins as { token?: unknown; [key: string]: unknown } | undefined,
-    }));
-    return {
-      utxos,
+  if (result.status < 200 || result.status >= 300) {
+    throw new ChronikUnavailableError('chronik-http-error', {
       usedUrl: result.url,
+      triedUrls,
       status: result.status,
-      contentType,
-      branch: 'json',
-    };
+      contentType: contentType || undefined,
+      bodyPreviewHex: toBodyPreviewHex(result.raw),
+    });
   }
 
-  if (lastError) {
-    throw lastError;
+  if (!contentType.toLowerCase().includes('application/json')) {
+    throw new ChronikUnavailableError('chronik-unavailable', {
+      usedUrl: result.url,
+      triedUrls,
+      status: result.status,
+      contentType: contentType || undefined,
+      bodyPreviewHex: toBodyPreviewHex(result.raw),
+    });
   }
-  throw new ChronikUnavailableError('chronik-utxo-fetch-failed', {
-    url: `${effectiveChronikBaseUrl.replace(/\/+$/, '')}/address/${normalizedAddress}/utxos`,
-    triedUrls,
-  });
+
+  let payload: {
+    utxos?: Array<Record<string, unknown>>;
+    outputScript?: string;
+    output_script?: string;
+  };
+  try {
+    payload = JSON.parse(result.raw.toString('utf8')) as typeof payload;
+  } catch (_err) {
+    throw new ChronikUnavailableError('chronik-json-parse-error', {
+      usedUrl: result.url,
+      triedUrls,
+      status: result.status,
+      contentType: contentType || undefined,
+      bodyPreviewHex: toBodyPreviewHex(result.raw),
+    });
+  }
+
+  const outputScript = payload.outputScript ?? payload.output_script ?? '';
+  const utxos = (payload.utxos ?? []).map((u) => ({
+    txid: String((u.outpoint as { txid?: string } | undefined)?.txid ?? ''),
+    vout: Number((u.outpoint as { outIdx?: number; out_idx?: number } | undefined)?.outIdx ?? (u.outpoint as { out_idx?: number } | undefined)?.out_idx ?? 0),
+    value: toBigIntSats(u.sats ?? u.value),
+    scriptPubKey: String(outputScript),
+    token: u.token,
+    slpToken: u.slpToken,
+    tokenStatus: u.tokenStatus,
+    plugins: u.plugins as { token?: unknown; [key: string]: unknown } | undefined,
+  }));
+  return {
+    utxos,
+    usedUrl: result.url,
+    status: result.status,
+    contentType,
+    branch: 'json',
+  };
+}
+
+function getChronikErrorUsedUrl(details: ChronikUnavailableDetails): string | null {
+  return details.usedUrl ?? details.url ?? details.triedUrls?.at(-1) ?? null;
+}
+
+export function getChronikErrorDetails(details: ChronikUnavailableDetails) {
+  return {
+    usedUrl: getChronikErrorUsedUrl(details),
+    triedUrls: details.triedUrls,
+    status: details.status ?? null,
+    contentType: details.contentType ?? null,
+    bodyPreviewHex: details.bodyPreviewHex ?? null,
+    hint: details.hint ?? null,
+  };
 }
 
 async function chronikGet(path: string): Promise<{ url: string; status: number; contentType: string; raw: Buffer }> {
@@ -282,7 +289,7 @@ async function chronikGet(path: string): Promise<{ url: string; status: number; 
     };
   } catch {
     throw new ChronikUnavailableError('chronik-network-error', {
-      url: requestUrl,
+      usedUrl: requestUrl,
       triedUrls: [requestUrl],
       hint: 'chronik-network-error',
     });

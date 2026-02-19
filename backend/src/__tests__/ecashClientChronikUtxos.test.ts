@@ -45,6 +45,39 @@ describe('getUtxosForAddress chronik raw endpoint handling', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, 'https://chronik.xolosarmy.xyz/v1/address/qq1234/utxos');
   });
 
+  it('throws when /address and /v1 both return 404', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(Buffer.from('not-found-a'), {
+          status: 404,
+          headers: { 'content-type': 'text/plain' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(Buffer.from('not-found-b'), {
+          status: 404,
+          headers: { 'content-type': 'text/plain' },
+        }),
+      );
+
+    vi.stubGlobal('fetch', fetchMock);
+    const { getUtxosForAddress } = await import('../blockchain/ecashClient');
+
+    await expect(getUtxosForAddress('bitcoincash:qq1234')).rejects.toMatchObject({
+      name: 'ChronikUnavailableError',
+      message: 'chronik-address-utxos-not-found',
+      details: {
+        usedUrl: 'https://chronik.xolosarmy.xyz/v1/address/qq1234/utxos',
+        triedUrls: [
+          'https://chronik.xolosarmy.xyz/address/qq1234/utxos',
+          'https://chronik.xolosarmy.xyz/v1/address/qq1234/utxos',
+        ],
+        status: 404,
+      },
+    });
+  });
+
   it('throws ChronikUnavailableError when chronik responds protobuf', async () => {
     vi.stubGlobal(
       'fetch',
@@ -60,13 +93,12 @@ describe('getUtxosForAddress chronik raw endpoint handling', () => {
 
     await expect(getUtxosForAddress('ecash:qq1234')).rejects.toMatchObject({
       name: 'ChronikUnavailableError',
-      message: 'chronik-protobuf-mode',
+      message: 'chronik-unavailable',
       details: {
-        url: 'https://chronik.xolosarmy.xyz/address/qq1234/utxos',
+        usedUrl: 'https://chronik.xolosarmy.xyz/address/qq1234/utxos',
         status: 200,
         contentType: 'application/x-protobuf',
         bodyPreviewHex: '00010203',
-        hint: 'chronik-protobuf-mode; backend expected json',
       },
     });
 
