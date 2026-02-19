@@ -159,7 +159,17 @@ export async function initializeDatabase(database?: Database): Promise<void> {
      SET status = 'created'
      WHERE status IS NULL OR TRIM(status) = ''`,
   );
+
+  await db.run(
+    `UPDATE campaigns
+     SET slug = 'campaign-' || CAST(strftime('%s', createdAt) AS INTEGER) || '000'
+     WHERE (slug IS NULL OR TRIM(slug) = '')
+       AND createdAt IS NOT NULL
+       AND TRIM(createdAt) <> ''
+       AND strftime('%s', createdAt) IS NOT NULL`,
+  );
 }
+
 
 async function ensureCampaignColumns(db: Database): Promise<void> {
   const columns = await db.all<Array<{ name: string }>>('PRAGMA table_info(campaigns)');
@@ -246,6 +256,19 @@ type CampaignRow = {
   treasuryAddressUsed: string | null;
   expirationTime: string | null;
 };
+
+
+function derivePersistedSlug(id: string, createdAt: string): string {
+  const createdAtTs = Date.parse(createdAt);
+  if (Number.isFinite(createdAtTs) && createdAtTs > 0) {
+    return `campaign-${Math.floor(createdAtTs)}`;
+  }
+  const idMatch = id.match(/(\d{10,})/);
+  if (idMatch) {
+    return `campaign-${idMatch[1]}`;
+  }
+  return `campaign-${id}`;
+}
 
 function toIsoDate(input: unknown, fallback: string): string {
   if (typeof input === 'string' && input.trim()) {
@@ -395,7 +418,9 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
       `,
       [
         campaign.id,
-        campaign.slug ?? null,
+        (typeof campaign.slug === 'string' && campaign.slug.trim())
+          ? campaign.slug.trim()
+          : derivePersistedSlug(campaign.id, createdAt),
         campaign.name,
         campaign.description ?? '',
         goal,
