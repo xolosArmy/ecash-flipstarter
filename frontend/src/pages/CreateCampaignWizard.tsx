@@ -219,7 +219,7 @@ export const CreateCampaignWizard: React.FC = () => {
 
     setSubmittingCreate(true);
     try {
-      const created = await createCampaign({
+      const response = await createCampaign({
         name: trimmedName,
         goal: parsedGoal.sats,
         expiresAt: new Date(trimmedExpiresAt).toISOString(),
@@ -228,12 +228,13 @@ export const CreateCampaignWizard: React.FC = () => {
         location: location.trim() || undefined,
       });
 
-      if (!created?.id) {
+      // Always trust the canonical ID returned by backend.
+      if (!response?.id) {
         throw new Error('El servidor no devolvió un ID de campaña válido');
       }
 
-      await handleCreatedCampaign(created);
-      navigate(`/campaigns/${created.id}`);
+      await handleCreatedCampaign(response);
+      navigate(`/campaigns/${response.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo crear la campaña.');
     } finally {

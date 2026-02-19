@@ -380,7 +380,9 @@ export class CampaignService {
    * Crea una campaña y la persiste en SQLite (con dual-write JSON opcional).
    */
   async createCampaign(payload: Partial<CampaignDefinition> & Record<string, unknown>) {
-    const id = payload.id || `campaign-${Date.now()}`;
+    const id = typeof payload.id === 'string' && payload.id.trim()
+      ? payload.id.trim()
+      : `campaign-${Date.now()}`;
 
     const expiresAtCandidate = typeof payload.expiresAt === 'string'
       ? payload.expiresAt
