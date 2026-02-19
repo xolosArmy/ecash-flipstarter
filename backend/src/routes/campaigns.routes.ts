@@ -393,6 +393,7 @@ const createCampaign: Parameters<typeof router.post>[1] = async (req, res) => {
       id: serverGeneratedId,
     });
 
+    // Return canonical campaign payload (including the server-generated ID).
     return res.status(201).json(campaign);
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
