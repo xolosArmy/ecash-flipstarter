@@ -106,13 +106,9 @@ describe('buildCampaignPayoutHandler', () => {
         escrowAddress: campaign.campaignAddress,
         chronikUrl: 'https://chronik.xolosarmy.xyz',
         usedUrl: 'https://chronik.xolosarmy.xyz/address/qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk/utxos',
-        status: 200,
-        contentType: 'application/json',
         utxoCount: 3,
         raisedSats: '300',
-        goal: '1000',
-        branch: 'json',
-        derivedScriptHash: null,
+        goalSats: '1000',
       },
     });
     expect(buildPayoutTxMock).not.toHaveBeenCalled();
@@ -145,11 +141,11 @@ describe('buildCampaignPayoutHandler', () => {
         campaignId: 'camp-canonical',
         escrowAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
         chronikUrl: 'https://chronik.xolosarmy.xyz',
-        triedUrl: 'https://chronik.xolosarmy.xyz/address/qq/utxos',
+        usedUrl: 'https://chronik.xolosarmy.xyz/address/qq/utxos',
         status: 200,
         contentType: 'application/x-protobuf',
         bodyPreviewHex: '0a0b0c',
-        branch: 'protobuf',
+        hint: null,
       },
     });
     expect(buildPayoutTxMock).not.toHaveBeenCalled();
