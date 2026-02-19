@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { CampaignService } from '../services/CampaignService';
+import { syncCampaignStoreFromDiskCampaigns } from '../services/CampaignService';
 import { validateAddress } from '../utils/validation';
 import { getPledgesByCampaign } from '../store/simplePledges';
 import { addressToScriptPubKey, getTransactionInfo, getUtxosForAddress } from '../blockchain/ecashClient';
@@ -7,6 +8,9 @@ import { buildPayoutTx } from '../blockchain/txBuilder';
 import { serializeBuiltTx } from './serialize';
 import { walletConnectOfferStore } from '../services/WalletConnectOfferStore';
 import { ACTIVATION_FEE_SATS, ACTIVATION_FEE_XEC, TREASURY_ADDRESS } from '../config/constants';
+import type { Utxo } from '../blockchain/types';
+import { upsertCampaign as upsertCampaignInSqlite, type StoredCampaign } from '../db/SQLiteStore';
+import { saveCampaignsToDisk } from '../store/campaignPersistence';
 
 type CampaignStatus =
   | 'draft'
@@ -26,6 +30,8 @@ type CampaignApiRecord = {
   description?: string;
   goal: string;
   expirationTime: string;
+  expiresAt?: string;
+  createdAt?: string;
   beneficiaryAddress?: string;
   recipientAddress?: string;
   campaignAddress?: string;
@@ -57,6 +63,7 @@ type CampaignApiRecord = {
 };
 
 const TXID_HEX_REGEX = /^[0-9a-f]{64}$/i;
+const PLEDGE_FEE_SATS = 500n;
 
 const router = Router();
 const service = new CampaignService();
@@ -287,6 +294,89 @@ function normalizeCampaign(c: any) {
 
 function isPublicCampaign(c: any): boolean {
   return typeof c?.id === 'string' && c.id.startsWith('campaign-');
+}
+
+function resolveCampaignBeneficiaryAddress(campaign: CampaignApiRecord): string {
+  const candidate = campaign.beneficiaryAddress || campaign.recipientAddress;
+  if (!candidate) {
+    throw new Error('beneficiary-address-required');
+  }
+  return validateAddress(candidate, 'beneficiaryAddress');
+}
+
+async function selectCampaignFundingUtxos(
+  campaign: CampaignApiRecord,
+  minAmountSats: bigint,
+  feeSats: bigint,
+): Promise<Utxo[]> {
+  const escrowAddress = resolveCampaignEscrowAddress(campaign);
+  const campaignUtxos = (await getUtxosForAddress(escrowAddress)).filter(
+    (utxo) => !utxo.token && !utxo.slpToken && !utxo.tokenStatus && !utxo.plugins?.token,
+  );
+
+  if (minAmountSats > 0n) {
+    const total = campaignUtxos.reduce((acc, utxo) => acc + utxo.value, 0n);
+    if (total < minAmountSats + feeSats) {
+      throw new Error('insufficient-funds');
+    }
+  }
+
+  return campaignUtxos;
+}
+
+function toStoredCampaignRecord(campaign: CampaignApiRecord): StoredCampaign {
+  const expirationMs = Number(campaign.expirationTime);
+  const expiresAt =
+    typeof campaign.expiresAt === 'string' && campaign.expiresAt.trim()
+      ? campaign.expiresAt
+      : Number.isFinite(expirationMs)
+        ? new Date(expirationMs).toISOString()
+        : new Date(0).toISOString();
+
+  return {
+    id: campaign.id,
+    name: campaign.name,
+    description: campaign.description ?? '',
+    goal: campaign.goal,
+    expiresAt,
+    createdAt:
+      typeof campaign.createdAt === 'string' && campaign.createdAt.trim()
+        ? campaign.createdAt
+        : new Date().toISOString(),
+    status: campaign.status,
+    recipientAddress: campaign.recipientAddress,
+    beneficiaryAddress: campaign.beneficiaryAddress,
+    campaignAddress: campaign.campaignAddress,
+    covenantAddress: campaign.covenantAddress,
+    activation: campaign.activation
+      ? {
+        feeSats: campaign.activation.feeSats ?? String(toCampaignActivationFeeRequired(campaign) * 100),
+        feeTxid: campaign.activation.feeTxid ?? null,
+        feePaidAt: campaign.activation.feePaidAt ?? null,
+        payerAddress: campaign.activation.payerAddress ?? null,
+        wcOfferId: campaign.activation.wcOfferId ?? null,
+      }
+      : undefined,
+    activationFeeRequired: campaign.activationFeeRequired,
+    activationFeePaid: campaign.activationFeePaid,
+    activationFeeTxid: campaign.activationFeeTxid,
+    activationFeePaidAt: campaign.activationFeePaidAt,
+    activationFeeVerificationStatus: campaign.activationFeeVerificationStatus,
+    activationFeeVerifiedAt: campaign.activationFeeVerifiedAt,
+    activationOfferMode: campaign.activationOfferMode,
+    activationOfferOutputs: campaign.activationOfferOutputs,
+    activationTreasuryAddressUsed: campaign.activationTreasuryAddressUsed,
+    payout: campaign.payout,
+    treasuryAddressUsed: campaign.treasuryAddressUsed,
+  };
+}
+
+function isValidationError(message: string): boolean {
+  return message.includes('invalid')
+    || message.includes('required')
+    || message.includes('insufficient-funds')
+    || message.includes('campaign-funds-empty')
+    || message.includes('activation-fee-unpaid');
 }
 
 async function getCampaignOr404(req: any, res: any): Promise<CampaignApiRecord | null> {
@@ -689,46 +779,77 @@ export const activationStatusHandler: Parameters<typeof router.get>[1] = async (
 router.get('/campaigns/:id/activation/status', activationStatusHandler);
 router.get('/campaign/:id/activation/status', activationStatusHandler);
 
-router.post('/campaigns/:id/payout/build', async (req, res) => {
+const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req, res) => {
   try {
     const campaign = await getCampaignOr404(req, res);
     if (!campaign) return;
 
     if (!isActivationFeePaid(campaign)) {
-      return res.status(400).json({ error: 'activation-fee-unpaid' });
+      return res.status(400).json({
+        error: 'validation-error',
+        message: 'activation-fee-unpaid',
+      });
     }
 
-    const totalPledged = await getTotalPledged(campaign.id);
-    const summary = toSummary(campaign, totalPledged);
-    if (summary.status !== 'funded') {
-      return res.status(400).json({ error: 'campaign-not-funded' });
+    const escrowAddress = resolveCampaignEscrowAddress(campaign);
+    const campaignUtxos = await selectCampaignFundingUtxos(campaign, 0n, PLEDGE_FEE_SATS);
+    const raisedSats = campaignUtxos.reduce((acc, utxo) => acc + utxo.value, 0n);
+
+    console.log(
+      `[payout/build] Campaign=${campaign.id} Escrow=${escrowAddress} `
+      + `UTXOs=${campaignUtxos.length} Total=${raisedSats.toString()} Goal=${campaign.goal.toString()}`,
+    );
+
+    if (raisedSats < BigInt(campaign.goal)) {
+      return res.status(400).json({
+        error: 'insufficient-funds',
+        details: 'La meta on-chain aún no se ha alcanzado.',
+        escrowAddress,
+        goal: campaign.goal.toString(),
+        raised: raisedSats.toString(),
+        utxoCount: campaignUtxos.length,
+      });
     }
 
-    const campaignAddress = resolveCampaignEscrowAddress(campaign);
-    const campaignUtxos = (await getUtxosForAddress(campaignAddress)).filter(
-      (utxo) => !utxo.token && !utxo.slpToken && !utxo.tokenStatus && !utxo.plugins?.token,
-    );
-
-    const beneficiaryAddress = validateAddress(
-      campaign.beneficiaryAddress || campaign.recipientAddress || '',
-      'beneficiaryAddress',
-    );
+    const destinationBeneficiary =
+      typeof req.body?.destinationBeneficiary === 'string' && req.body.destinationBeneficiary.trim()
+        ? validateAddress(req.body.destinationBeneficiary, 'destinationBeneficiary')
+        : resolveCampaignBeneficiaryAddress(campaign);
 
     const built = await buildPayoutTx({
       campaignUtxos,
-      totalRaised: BigInt(Math.floor(totalPledged)),
-      beneficiaryAddress,
+      totalRaised: raisedSats,
+      beneficiaryAddress: destinationBeneficiary,
       treasuryAddress: TREASURY_ADDRESS,
-      fixedFee: 500n,
+      fixedFee: 0n,
     });
 
     const serialized = serializeBuiltTx(built);
     const offer = walletConnectOfferStore.createOffer({
       campaignId: campaign.id,
       unsignedTxHex: serialized.unsignedTxHex || serialized.rawHex,
-      amount: String(totalPledged),
-      contributorAddress: beneficiaryAddress,
+      amount: raisedSats.toString(),
+      contributorAddress: destinationBeneficiary,
     });
+
+    campaign.status = 'funded';
+    campaign.payout = {
+      wcOfferId: offer.offerId,
+      txid: campaign.payout?.txid ?? null,
+      paidAt: campaign.payout?.paidAt ?? null,
+    };
+
+    await upsertCampaignInSqlite(toStoredCampaignRecord(campaign));
+    const campaigns = (await service.listCampaigns()).map((entry) => toStoredCampaignRecord(entry as CampaignApiRecord));
+    const current = toStoredCampaignRecord(campaign);
+    const existingIndex = campaigns.findIndex((entry) => entry.id === campaign.id);
+    if (existingIndex >= 0) {
+      campaigns[existingIndex] = current;
+    } else {
+      campaigns.push(current);
+    }
+    syncCampaignStoreFromDiskCampaigns(campaigns);
+    await saveCampaignsToDisk(campaigns);
 
     await service.setPayoutOffer(campaign.id, offer.offerId);
 
@@ -741,9 +862,21 @@ router.post('/campaigns/:id/payout/build', async (req, res) => {
       campaignId: campaign.id,
     });
   } catch (err) {
-    return res.status(400).json({ error: (err as Error).message });
+    const message = err instanceof Error ? err.message : String(err);
+    if (isValidationError(message)) {
+      return res.status(400).json({
+        error: 'validation-error',
+        message,
+      });
+    }
+    return res.status(500).json({
+      error: 'internal-error',
+      message,
+    });
   }
-});
+};
+
+router.post('/campaigns/:id/payout/build', buildCampaignPayoutHandler);
 
 router.post('/campaigns/:id/payout/confirm', async (req, res) => {
   try {
