@@ -49,31 +49,37 @@ vi.mock('../services/CampaignService', () => {
   };
 });
 
-const BASE_CAMPAIGN = {
-  id: 'camp-canonical',
-  slug: 'camp-slug',
-  name: 'Campaign',
-  goal: '1000',
-  expirationTime: String(Date.now() + 86_400_000),
-  beneficiaryAddress: 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk',
-  campaignAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
-  covenantAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
-  escrowAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
-  status: 'active',
-};
+function createBaseCampaign(status: 'active' | 'funded' | 'paid_out' = 'active') {
+  return {
+    id: 'camp-canonical',
+    slug: 'camp-slug',
+    name: 'Campaign',
+    goal: '1000',
+    expirationTime: String(Date.now() + 86_400_000),
+    beneficiaryAddress: 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk',
+    campaignAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+    covenantAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+    escrowAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+    status,
+  };
+}
 
 describe('buildCampaignPayoutHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     createOfferMock.mockReturnValue({ offerId: 'offer-123' });
-    getCanonicalCampaignMock.mockResolvedValue({ canonicalId: 'camp-canonical', campaign: BASE_CAMPAIGN });
-    listCampaignsMock.mockResolvedValue([BASE_CAMPAIGN]);
+    const campaign = createBaseCampaign();
+    getCanonicalCampaignMock.mockResolvedValue({ canonicalId: 'camp-canonical', campaign });
+    listCampaignsMock.mockResolvedValue([campaign]);
   });
 
   it('returns 400 insufficient-funds-on-chain with structured details', async () => {
     const { buildCampaignPayoutHandler } = (await import('../routes/campaigns.routes')) as {
       buildCampaignPayoutHandler: (req: any, res: any) => Promise<void>;
     };
+
+    const campaign = createBaseCampaign();
+    getCanonicalCampaignMock.mockResolvedValue({ canonicalId: 'camp-canonical', campaign });
 
     getUtxosForAddressMock.mockResolvedValue([
       { txid: 'a'.repeat(64), vout: 0, value: 600n, scriptPubKey: '76a914', token: { tokenId: '1' } },
@@ -90,17 +96,38 @@ describe('buildCampaignPayoutHandler', () => {
     expect(res.body).toEqual({
       error: 'insufficient-funds-on-chain',
       details: {
-        escrowAddress: BASE_CAMPAIGN.campaignAddress,
+        escrowAddress: campaign.campaignAddress,
         goal: '1000',
         raised: '300',
         missing: '700',
         utxoCount: 1,
-        campaignAddress: BASE_CAMPAIGN.campaignAddress,
+        campaignAddress: campaign.campaignAddress,
         recipientAddress: null,
-        covenantAddress: BASE_CAMPAIGN.covenantAddress,
-        escrowAddressStored: BASE_CAMPAIGN.escrowAddress,
+        covenantAddress: campaign.covenantAddress,
+        escrowAddressStored: campaign.escrowAddress,
       },
     });
+    expect(buildPayoutTxMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects build when payout was already processed', async () => {
+    const { buildCampaignPayoutHandler } = (await import('../routes/campaigns.routes')) as {
+      buildCampaignPayoutHandler: (req: any, res: any) => Promise<void>;
+    };
+
+    getCanonicalCampaignMock.mockResolvedValue({
+      canonicalId: 'camp-canonical',
+      campaign: createBaseCampaign('funded'),
+    });
+
+    const req = { params: { id: 'camp-slug' }, body: {} };
+    const res = createMockRes();
+
+    await buildCampaignPayoutHandler(req as any, res as any);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'payout-already-processed' });
+    expect(getUtxosForAddressMock).not.toHaveBeenCalled();
     expect(buildPayoutTxMock).not.toHaveBeenCalled();
   });
 

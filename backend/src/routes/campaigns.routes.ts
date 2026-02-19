@@ -526,7 +526,7 @@ export const confirmActivationHandler: Parameters<typeof router.post>[1] = async
   try {
     const resolvedCampaign = await resolveCampaignOr404(req, res);
     if (!resolvedCampaign) return;
-    const { campaign, canonicalId } = resolvedCampaign;
+    const { campaign } = resolvedCampaign;
 
     const txid = sanitizeTxid(req.body?.txid);
     const payerAddress =
@@ -622,7 +622,7 @@ export const activationStatusHandler: Parameters<typeof router.get>[1] = async (
   try {
     const resolvedCampaign = await resolveCampaignOr404(req, res);
     if (!resolvedCampaign) return;
-    const { campaign, canonicalId } = resolvedCampaign;
+    const { campaign } = resolvedCampaign;
 
     let verificationStatus = campaign.activationFeeVerificationStatus ?? 'none';
     let warning: string | undefined;
@@ -680,6 +680,10 @@ export const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = asy
     const resolvedCampaign = await resolveCampaignOr404(req, res);
     if (!resolvedCampaign) return;
     const { campaign, canonicalId } = resolvedCampaign;
+
+    if (campaign.status === 'funded' || campaign.status === 'paid_out') {
+      return res.status(400).json({ error: 'payout-already-processed' });
+    }
 
     if (process.env.NODE_ENV !== 'production') {
       console.debug(`[campaign] slug=${requestedId} canonicalId=${canonicalId}`);
@@ -808,19 +812,26 @@ router.post('/campaigns/:id/repair-escrow', async (req, res) => {
   }
 });
 
-router.post('/campaigns/:id/payout/confirm', async (req, res) => {
+export const confirmCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req, res) => {
   try {
     const resolvedCampaign = await resolveCampaignOr404(req, res);
     if (!resolvedCampaign) return;
-    const { campaign, canonicalId } = resolvedCampaign;
+    const { campaign } = resolvedCampaign;
 
     const txid = sanitizeTxid(req.body?.txid);
+
+    if (campaign.status !== 'funded') {
+      return res.status(400).json({ error: 'payout-not-allowed' });
+    }
+
     await service.markPayoutComplete(campaign.id, txid, TREASURY_ADDRESS);
 
     const updated = (await service.getCampaign(campaign.id)) as CampaignApiRecord | null;
     if (!updated) {
       return res.status(404).json({ error: 'campaign-not-found' });
     }
+
+    await sqliteUpsertCampaign(toStoredCampaignRecord(updated));
 
     const pledges = await getPledgesByCampaign(campaign.id);
     const totalPledged = pledges.reduce((total, pledge) => total + pledge.amount, 0);
@@ -833,7 +844,9 @@ router.post('/campaigns/:id/payout/confirm', async (req, res) => {
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
   }
-});
+};
+
+router.post('/campaigns/:id/payout/confirm', confirmCampaignPayoutHandler);
 
 router.get('/campaigns/:id/pledges', async (req, res) => {
   try {
