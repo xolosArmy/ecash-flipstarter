@@ -233,9 +233,9 @@ export const PledgeForm: React.FC<Props> = ({
       if (message.toLowerCase().includes('walletconnect')) {
         setUiError('WalletConnect request failed. Desconecta y vuelve a conectar.');
       } else {
-        const maybeApiError = (err as { response?: { data?: { error?: string; expectedEscrow?: string; campaignAddress?: string } } }).response?.data;
+        const maybeApiError = (err as { response?: { data?: { error?: string; canonicalEscrow?: string; campaignAddress?: string } } }).response?.data;
         if (maybeApiError?.error === 'escrow-address-mismatch') {
-          const detail = `Escrow mismatch: expected ${maybeApiError.expectedEscrow ?? 'n/a'} campaignAddress=${maybeApiError.campaignAddress ?? 'n/a'}`;
+          const detail = `Escrow mismatch: expected ${maybeApiError.canonicalEscrow ?? 'n/a'} campaignAddress=${maybeApiError.campaignAddress ?? 'n/a'}`;
           setEscrowMismatchBanner(detail);
           setUiError(detail);
         } else {

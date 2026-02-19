@@ -95,6 +95,23 @@ function toActivationFeeRequired(value: unknown): number {
   return ACTIVATION_FEE_XEC;
 }
 
+function alignEscrowFields(snapshot: StoredCampaign): StoredCampaign {
+  let escrowAddress: string;
+  try {
+    escrowAddress = resolveEscrowAddress(snapshot);
+  } catch {
+    return snapshot;
+  }
+
+  return {
+    ...snapshot,
+    escrowAddress,
+    covenantAddress: escrowAddress,
+    campaignAddress: escrowAddress,
+    recipientAddress: escrowAddress,
+  };
+}
+
 function normalizeSnapshot(snapshot: StoredCampaign): StoredCampaign {
   const activationFeeRequired = toActivationFeeRequired(snapshot.activationFeeRequired);
   const status = typeof snapshot.status === 'string' ? snapshot.status.toLowerCase() : '';
@@ -122,7 +139,7 @@ function normalizeSnapshot(snapshot: StoredCampaign): StoredCampaign {
     wcOfferId: snapshot.activation?.wcOfferId ?? null,
   };
 
-  return {
+  return alignEscrowFields({
     ...snapshot,
     slug: deriveCampaignSlug(snapshot),
     activation,
@@ -136,7 +153,7 @@ function normalizeSnapshot(snapshot: StoredCampaign): StoredCampaign {
     activationOfferOutputs: snapshot.activationOfferOutputs ?? null,
     activationTreasuryAddressUsed: snapshot.activationTreasuryAddressUsed ?? null,
     treasuryAddressUsed: snapshot.treasuryAddressUsed ?? null,
-  };
+  });
 }
 
 function normalizeActivationStatus(
@@ -449,9 +466,7 @@ export class CampaignService {
         ? payload.createdAt
         : new Date().toISOString(),
       status: campaign.status,
-      recipientAddress: typeof payload.recipientAddress === 'string'
-        ? payload.recipientAddress
-        : campaign.campaignAddress,
+      recipientAddress: campaign.campaignAddress,
       beneficiaryAddress: campaign.beneficiaryAddress,
       campaignAddress: campaign.campaignAddress,
       covenantAddress: campaign.covenantAddress,

@@ -417,6 +417,8 @@ export const CampaignDetail: React.FC = () => {
         const apiError = typeof response.data.error === 'string' ? response.data.error : message;
         const details = response.data.details as {
           missing?: string;
+          raised?: string;
+          goal?: string;
           escrowAddress?: string;
           campaignAddress?: string;
           covenantAddress?: string;
@@ -425,10 +427,10 @@ export const CampaignDetail: React.FC = () => {
         if (import.meta.env.DEV) console.debug('[payout/build] error details', details ?? response.data);
         setPayoutError(apiError);
         if (apiError === 'escrow-address-mismatch') {
-          setPayoutDiagnostic(`Escrow mismatch. expected=${response.data.expectedEscrow ?? 'n/a'} stored=${response.data.escrowAddressStored ?? 'n/a'}`);
+          setPayoutDiagnostic(`Campaign misconfigured: escrow mismatch. canonical=${response.data.canonicalEscrow ?? 'n/a'} stored=${response.data.escrowAddressStored ?? 'n/a'}`);
         } else if (details?.missing || details?.escrowAddress) {
           setPayoutDiagnostic(
-            `missing=${details.missing ?? 'n/a'} · escrow=${details.escrowAddress ?? 'n/a'}`,
+            `escrow=${details.escrowAddress ?? 'n/a'} · raised=${details.raised ?? 'n/a'} · goal=${details.goal ?? 'n/a'} · missing=${details.missing ?? 'n/a'}`,
           );
         }
       } else {

@@ -29,7 +29,10 @@ export function resolveEscrowAddress(campaign: EscrowAddressFields): string {
   if (direct) return direct;
 
   const covenantAddress = pickAddress(campaign.covenantAddress, 'covenantAddress');
-  if (covenantAddress) return covenantAddress;
+  if (covenantAddress) {
+    campaign.escrowAddress = covenantAddress;
+    return covenantAddress;
+  }
 
   const derived = deriveEscrowAddress(campaign);
   if (derived) return derived;
@@ -50,7 +53,7 @@ export function resolveEscrowAddress(campaign: EscrowAddressFields): string {
 export function buildEscrowMismatchDetails(campaign: EscrowAddressFields, expectedEscrow: string) {
   return {
     campaignId: campaign.id,
-    expectedEscrow,
+    canonicalEscrow: expectedEscrow,
     campaignAddress: campaign.campaignAddress ?? null,
     recipientAddress: campaign.recipientAddress ?? null,
     covenantAddress: campaign.covenantAddress ?? null,
@@ -61,7 +64,12 @@ export function buildEscrowMismatchDetails(campaign: EscrowAddressFields, expect
 export function validateEscrowConsistency(campaign: EscrowAddressFields): { ok: true; escrowAddress: string }
 | { ok: false; error: string; details: ReturnType<typeof buildEscrowMismatchDetails> } {
   const expectedEscrow = resolveEscrowAddress(campaign);
-  const candidates = [campaign.escrowAddress, campaign.covenantAddress]
+  const candidates = [
+    campaign.escrowAddress,
+    campaign.covenantAddress,
+    campaign.campaignAddress,
+    campaign.recipientAddress,
+  ]
     .map((entry) => pickAddress(entry, 'escrowAddress'))
     .filter((entry): entry is string => Boolean(entry));
 
@@ -123,13 +131,21 @@ function pickAddress(raw: unknown, field: string): string | null {
   }
 }
 
-export async function repairCampaignEscrowAddress(campaign: StoredCampaign): Promise<{ escrowAddress: string; source: string }> {
-  const fromChain = await tryResolveEscrowFromActivationTx(campaign);
+export async function repairEscrowAddressFromChain(campaign: EscrowAddressFields): Promise<string | null> {
+  return tryResolveEscrowFromActivationTx(campaign);
+}
+
+export async function repairCampaignEscrowAddress(
+  campaign: StoredCampaign,
+): Promise<{ escrowAddress: string; source: string; txidUsed: string | null }> {
+  const fromChain = await repairEscrowAddressFromChain(campaign);
   const escrowAddress = fromChain ?? resolveEscrowAddress(campaign);
   campaign.escrowAddress = escrowAddress;
   campaign.covenantAddress = escrowAddress;
   campaign.campaignAddress = escrowAddress;
-  return { escrowAddress, source: fromChain ? 'activation-tx' : 'resolved' };
+  campaign.recipientAddress = escrowAddress;
+  const txidUsed = String(campaign.activationFeeTxid ?? campaign.activation?.feeTxid ?? '').trim() || null;
+  return { escrowAddress, source: fromChain ? 'activation-tx' : 'resolved', txidUsed };
 }
 
 async function tryResolveEscrowFromActivationTx(campaign: EscrowAddressFields): Promise<string | null> {

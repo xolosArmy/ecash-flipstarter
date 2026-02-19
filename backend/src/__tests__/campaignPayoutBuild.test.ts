@@ -56,15 +56,16 @@ const BASE_CAMPAIGN = {
   goal: '1000',
   expirationTime: String(Date.now() + 86_400_000),
   beneficiaryAddress: 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk',
-  campaignAddress: 'ecash:qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqu08dsy2',
-  covenantAddress: 'ecash:qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqu08dsy2',
-  escrowAddress: 'ecash:qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqu08dsy2',
+  campaignAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+  covenantAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+  escrowAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
   status: 'active',
 };
 
 describe('buildCampaignPayoutHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    createOfferMock.mockReturnValue({ offerId: 'offer-123' });
     getCanonicalCampaignMock.mockResolvedValue({ canonicalId: 'camp-canonical', campaign: BASE_CAMPAIGN });
     listCampaignsMock.mockResolvedValue([BASE_CAMPAIGN]);
   });
