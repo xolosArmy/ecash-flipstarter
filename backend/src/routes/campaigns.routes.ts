@@ -694,20 +694,17 @@ const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req
     const raisedSats = campaignUtxos.reduce((acc, utxo) => acc + utxo.value, 0n);
 
     console.log(
-      `[payout/build] Iniciando build para ${campaignId}. Escrow: ${escrowAddress}. UTXOs: ${campaignUtxos.length}. Suma: ${raisedSats.toString()} sats. Meta: ${campaign.goal.toString()} sats.`,
+      `[payout/build] Campaña: ${campaignId} | Escrow: ${escrowAddress} | Total On-Chain: ${raisedSats} | Meta: ${campaign.goal}`,
     );
 
     if (raisedSats < BigInt(campaign.goal)) {
       return res.status(400).json({
-        error: 'insufficient-funds-on-chain',
-        message: 'La meta aún no se ha alcanzado en la red eCash.',
-        details: {
-          escrowAddress,
-          goalSats: campaign.goal.toString(),
-          currentSats: raisedSats.toString(),
-          missingSats: (BigInt(campaign.goal) - raisedSats).toString(),
-          utxoCount: campaignUtxos.length,
-        },
+        error: 'insufficient-funds',
+        details: 'La meta en cadena aún no se ha alcanzado.',
+        escrowAddress,
+        goal: campaign.goal.toString(),
+        raised: raisedSats.toString(),
+        utxoCount: campaignUtxos.length,
       });
     }
 
@@ -737,7 +734,7 @@ const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req
       await saveCampaignsToDisk(campaigns);
       console.log(`[payout/build] Estado de campaña ${campaignId} actualizado a 'funded' exitosamente.`);
     } catch (persistErr) {
-      console.error('[payout/build] Error en persistencia (no crítico para el build):', persistErr);
+      console.error('[payout/build] Error actualizando SQLite/JSON:', persistErr);
     }
 
     await service.setPayoutOffer(campaign.id, offer.offerId);
@@ -748,17 +745,13 @@ const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req
       treasuryCut: builtTx.treasuryCut.toString(),
       escrowAddress,
       wcOfferId: offer.offerId,
-      raisedSats: raisedSats.toString(),
+      raised: raisedSats.toString(),
     });
   } catch (err) {
-    console.error('[payout/build] Falla fatal en construcción:', err);
+    console.error('[payout/build] Fatal error:', err);
     const message = err instanceof Error ? err.message : String(err);
-    const statusCode = message.includes('funds') || message.includes('address') ? 400 : 500;
-
-    return res.status(statusCode).json({
-      error: statusCode === 400 ? 'validation-error' : 'internal-server-error',
-      message,
-    });
+    const statusCode = message.includes('address') || message.includes('funds') ? 400 : 500;
+    return res.status(statusCode).json({ error: 'payout-build-failed', message });
   }
 };
 
