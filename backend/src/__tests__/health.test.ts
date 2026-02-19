@@ -55,3 +55,20 @@ function createMockRes() {
     },
   };
 }
+
+
+describe('/api/version', () => {
+  it('returns build and runtime diagnostics', async () => {
+    const { versionHandler } = await import('../app');
+    const res = createMockRes();
+    process.env.GIT_COMMIT_HASH = 'abc1234';
+    process.env.name = 'pm2-process';
+    versionHandler({} as any, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      gitCommit: 'abc1234',
+      processName: 'pm2-process',
+      chronikUrl: 'https://chronik.example',
+    });
+  });
+});

@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import express from 'express';
 import cors from 'cors';
 import campaignsRouter from './routes/campaigns.routes';
@@ -54,6 +55,8 @@ export function createApp() {
   });
 
   app.get('/api/health', healthHandler);
+  app.get('/api/version', versionHandler);
+  app.get('/api/debug/version', versionHandler);
 
   // Rutas de la API
   app.use('/api', campaignsRouter);
@@ -119,3 +122,24 @@ export async function healthHandler(_req: any, res: any) {
 
 const app = createApp();
 export default app;
+
+function readGitCommitShortHash(): string | null {
+  const fromEnv = String(process.env.GIT_COMMIT_HASH ?? process.env.COMMIT_HASH ?? '').trim();
+  if (fromEnv) return fromEnv;
+  try {
+    return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString('utf8')
+      .trim();
+  } catch {
+    return null;
+  }
+}
+
+export function versionHandler(_req: any, res: any) {
+  const processName = String(process.env.pm_id ?? process.env.name ?? process.title ?? '').trim() || null;
+  res.json({
+    gitCommit: readGitCommitShortHash(),
+    processName,
+    chronikUrl: getEffectiveChronikBaseUrl(),
+  });
+}
