@@ -288,10 +288,10 @@ async function selectCampaignFundingUtxos(
   const utxos = (await getUtxosForAddress(escrowAddress)).filter(isSpendableXecUtxo);
   const total = utxos.reduce((acc, utxo) => acc + utxo.value, 0n);
   const normalizedAddress = normalizeChronikAddress(escrowAddress);
-  console.log(`[payout/build] chronikUrl=${getEffectiveChronikBaseUrl()}`);
-  console.log(`[payout/build] chronikPath=/address/${normalizedAddress}/utxos`);
+  console.log(`[PAYOUT-BUILD-DEBUG] campaignId=${campaign.id} escrowAddress=${escrowAddress}`);
+  console.log(`[PAYOUT-BUILD-DEBUG] chronikUrl=${getEffectiveChronikBaseUrl()} chronikPath=/address/${normalizedAddress}/utxos`);
   console.log(
-    `[payout/build] id=${campaign.id} escrow=${escrowAddress} utxoCount=${utxos.length} raisedSats=${total.toString()} goal=${String(campaign.goal)}`,
+    `[PAYOUT-BUILD-DEBUG] campaignId=${campaign.id} raisedSats=${total.toString()} utxoCount=${utxos.length} goal=${String(campaign.goal)}`,
   );
   return { escrowAddress, utxos, total };
 }
@@ -825,12 +825,19 @@ export const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = asy
       return res.status(400).json({ error: 'escrow-address-mismatch', ...mismatch });
     }
     if (err instanceof ChronikUnavailableError) {
+      console.log(
+        `[PAYOUT-BUILD-DEBUG] campaignId=${canonicalIdContext ?? 'unknown'} escrowAddress=${derivedEscrowAddressContext ?? 'unknown'} chronikUrl=${err.details.url} status=${String(err.details.status ?? 'unknown')} contentType=${err.details.contentType ?? 'unknown'}`,
+      );
       return res.status(503).json({
         error: 'chronik-unavailable',
         details: {
-          url: err.details.url,
+          chronikUrl: err.details.url,
           status: err.details.status ?? null,
           contentType: err.details.contentType ?? null,
+          bodyPreviewHex: err.details.bodyPreviewHex ?? null,
+          campaignId: canonicalIdContext ?? null,
+          escrowAddress: derivedEscrowAddressContext ?? null,
+          note: 'Chronik respondió protobuf o no-JSON; no se pudo calcular raisedSats',
         },
       });
     }

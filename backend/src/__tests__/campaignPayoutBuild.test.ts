@@ -112,10 +112,11 @@ describe('buildCampaignPayoutHandler', () => {
     const { ChronikUnavailableError } = await import('../blockchain/ecashClient');
 
     getUtxosForAddressMock.mockRejectedValue(
-      new ChronikUnavailableError('chronik-http-error', {
+      new ChronikUnavailableError('chronik-protobuf-mode', {
         url: 'https://chronik.xolosarmy.xyz/address/qq/utxos',
-        status: 404,
+        status: 200,
         contentType: 'application/x-protobuf',
+        bodyPreviewHex: '0a0b0c',
       }),
     );
 
@@ -128,9 +129,13 @@ describe('buildCampaignPayoutHandler', () => {
     expect(res.body).toEqual({
       error: 'chronik-unavailable',
       details: {
-        url: 'https://chronik.xolosarmy.xyz/address/qq/utxos',
-        status: 404,
+        chronikUrl: 'https://chronik.xolosarmy.xyz/address/qq/utxos',
+        status: 200,
         contentType: 'application/x-protobuf',
+        bodyPreviewHex: '0a0b0c',
+        campaignId: 'camp-canonical',
+        escrowAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+        note: 'Chronik respondió protobuf o no-JSON; no se pudo calcular raisedSats',
       },
     });
     expect(buildPayoutTxMock).not.toHaveBeenCalled();
