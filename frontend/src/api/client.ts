@@ -57,6 +57,8 @@ export interface CreateCampaignPayload {
 
 export interface CreatedCampaign {
   id: string;
+  slug?: string;
+  publicId?: string;
   name: string;
   goal: number;
   expiresAt: string;

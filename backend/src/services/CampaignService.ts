@@ -1041,6 +1041,7 @@ export class CampaignService {
 
     return {
       id: campaign.id,
+      slug: snapshot?.slug ?? deriveCampaignSlug({ id: campaign.id, createdAt: snapshot?.createdAt ?? new Date().toISOString() }),
       name: campaign.name,
       description: campaign.description,
       goal: campaign.goal.toString(),
