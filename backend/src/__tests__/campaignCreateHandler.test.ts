@@ -22,12 +22,12 @@ describe('createCampaignHandler', () => {
     vi.clearAllMocks();
   });
 
-  it('ignores client provided id and returns server generated id', async () => {
-    vi.spyOn(Date, 'now').mockReturnValue(1777777777777);
+  it('ignores client provided id and returns server persisted identifiers', async () => {
     const { createCampaignHandler } = await import('../routes/campaigns.routes');
 
     createCampaignMock.mockResolvedValue({
-      id: 'campaign-1777777777777',
+      id: 'canonical-campaign-id',
+      slug: 'campaign-1777777777777',
       name: 'Server campaign',
       status: 'pending_fee',
     });
@@ -45,11 +45,16 @@ describe('createCampaignHandler', () => {
     await createCampaignHandler(req, res);
 
     expect(createCampaignMock).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'campaign-1777777777777',
       name: 'Server campaign',
     }));
+    expect(createCampaignMock).not.toHaveBeenCalledWith(expect.objectContaining({
+      id: 'campaign-local-temp-id',
+    }));
     expect(res.statusCode).toBe(201);
-    expect(res.body.id).toBe('campaign-1777777777777');
+    expect(res.body).toMatchObject({
+      id: 'canonical-campaign-id',
+      slug: 'campaign-1777777777777',
+    });
   });
 });
 

@@ -386,14 +386,12 @@ export const createCampaignHandler: Parameters<typeof router.post>[1] = async (r
       req.body.beneficiaryAddress = validateAddress(req.body.beneficiaryAddress, 'beneficiaryAddress');
     }
 
-    // Server-side source of truth for campaign IDs.
-    const serverGeneratedId = `campaign-${Date.now()}`;
     const campaign = await service.createCampaign({
       ...(req.body ?? {}),
-      id: serverGeneratedId,
+      id: undefined,
     });
 
-    // Return canonical campaign payload (including the server-generated ID).
+    // Return canonical, persisted campaign payload (including public slug when available).
     return res.status(201).json(campaign);
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });

@@ -49,6 +49,15 @@ function parseStoredStep(value: string | null): WizardStep | null {
   return null;
 }
 
+
+export function resolveCampaignPublicRouteId(created: Pick<CreatedCampaign, 'id'> & { slug?: string; publicId?: string }): string {
+  const publicRouteId = created.slug || created.publicId || created.id;
+  if (!publicRouteId || !publicRouteId.trim()) {
+    throw new Error('El servidor no devolvió un identificador público de campaña válido');
+  }
+  return publicRouteId.trim();
+}
+
 export const CreateCampaignWizard: React.FC = () => {
   const [step, setStep] = useState<WizardStep>(1);
   const [campaign, setCampaign] = useState<CampaignSummary | null>(null);
@@ -228,13 +237,16 @@ export const CreateCampaignWizard: React.FC = () => {
         location: location.trim() || undefined,
       });
 
-      // Always trust the canonical ID returned by backend.
-      if (!response?.id) {
-        throw new Error('El servidor no devolvió un ID de campaña válido');
+      const publicRouteId = resolveCampaignPublicRouteId(response);
+      if (import.meta.env.DEV) {
+        console.info('[create-campaign] server returned', {
+          id: response.id,
+          slug: response.slug || response.publicId,
+        });
       }
 
       await handleCreatedCampaign(response);
-      navigate(`/campaigns/${response.id}`);
+      navigate(`/campaigns/${publicRouteId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo crear la campaña.');
     } finally {
