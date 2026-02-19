@@ -22,12 +22,32 @@ async function jsonFetch<T>(path: string, options: RequestInit = {}): Promise<T>
     throw err;
   }
   if (!res.ok) {
-    const error = await res.json().catch(() => ({}));
-    console.warn('Request failed', { url, status: res.status });
-    const apiError = new Error(error.error || `Request failed ${res.status}`);
-    (apiError as Error & { response?: { status: number; data: unknown } }).response = {
+    const text = await res.text().catch(() => '');
+    const data = (() => {
+      if (!text) return {};
+      try {
+        return JSON.parse(text);
+      } catch {
+        return { raw: text };
+      }
+    })();
+    console.error('HTTP request failed', {
+      url,
       status: res.status,
-      data: error,
+      message: typeof data === 'object' && data && 'error' in data ? String((data as { error?: unknown }).error ?? '') : `Request failed ${res.status}`,
+      data,
+      text,
+      headers: Object.fromEntries(res.headers.entries()),
+    });
+    const apiError = new Error(
+      typeof data === 'object' && data && 'error' in data
+        ? String((data as { error?: unknown }).error ?? `Request failed ${res.status}`)
+        : `Request failed ${res.status}`,
+    );
+    (apiError as Error & { response?: { status: number; data: unknown; text: string } }).response = {
+      status: res.status,
+      data,
+      text,
     };
     throw apiError;
   }
