@@ -681,81 +681,84 @@ router.get('/campaign/:id/activation/status', activationStatusHandler);
 
 const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req, res) => {
   try {
+    const campaignId = req.params.id;
     const campaign = await getCampaignOr404(req, res);
     if (!campaign) return;
-
-    if (!isActivationFeePaid(campaign)) {
-      return res.status(400).json({ error: 'activation-fee-unpaid' });
-    }
-
-    const { escrowAddress, campaignUtxos } = await selectCampaignFundingUtxos(campaign, 0n, PLEDGE_FEE_SATS);
-    const raisedSats = campaignUtxos.reduce((acc, utxo) => acc + utxo.value, 0n);
-    const goalSats = BigInt(campaign.goal);
-
-    console.log(
-      `[payout/build] Campaign=${campaign.id} Escrow=${escrowAddress} UTXOs=${campaignUtxos.length} Total=${raisedSats.toString()} Goal=${campaign.goal.toString()}`,
-    );
-
-    if (raisedSats < goalSats) {
-      return res.status(400).json({
-        error: 'insufficient-funds',
-        details: 'La meta on-chain aún no se ha alcanzado.',
-        escrowAddress,
-        goal: campaign.goal.toString(),
-        raised: raisedSats.toString(),
-        utxoCount: campaignUtxos.length,
-      });
-    }
 
     const destinationBeneficiary =
       typeof req.body?.destinationBeneficiary === 'string' && req.body.destinationBeneficiary.trim()
         ? validateAddress(req.body.destinationBeneficiary, 'destinationBeneficiary')
         : resolveCampaignBeneficiaryAddress(campaign);
 
-    const built = await buildPayoutTx({
+    const { escrowAddress, campaignUtxos } = await selectCampaignFundingUtxos(campaign, 0n, PLEDGE_FEE_SATS);
+    const raisedSats = campaignUtxos.reduce((acc, utxo) => acc + utxo.value, 0n);
+
+    console.log(
+      `[payout/build] Iniciando build para ${campaignId}. Escrow: ${escrowAddress}. UTXOs: ${campaignUtxos.length}. Suma: ${raisedSats.toString()} sats. Meta: ${campaign.goal.toString()} sats.`,
+    );
+
+    if (raisedSats < BigInt(campaign.goal)) {
+      return res.status(400).json({
+        error: 'insufficient-funds-on-chain',
+        message: 'La meta aún no se ha alcanzado en la red eCash.',
+        details: {
+          escrowAddress,
+          goalSats: campaign.goal.toString(),
+          currentSats: raisedSats.toString(),
+          missingSats: (BigInt(campaign.goal) - raisedSats).toString(),
+          utxoCount: campaignUtxos.length,
+        },
+      });
+    }
+
+    const builtTx = await buildPayoutTx({
       campaignUtxos,
       totalRaised: raisedSats,
       beneficiaryAddress: destinationBeneficiary,
       treasuryAddress: TREASURY_ADDRESS,
       fixedFee: PLEDGE_FEE_SATS,
+      dustLimit: 546n,
     });
 
-    const serialized = serializeBuiltTx(built);
+    const built = serializeBuiltTx(builtTx);
     const offer = walletConnectOfferStore.createOffer({
-      campaignId: campaign.id,
-      unsignedTxHex: serialized.unsignedTxHex || serialized.rawHex,
+      campaignId,
+      unsignedTxHex: built.unsignedTxHex || built.rawHex,
       amount: raisedSats.toString(),
       contributorAddress: destinationBeneficiary,
     });
 
     campaign.status = 'funded';
-    const storedCampaign = toStoredCampaignRecord(campaign);
-    await sqliteUpsertCampaign(storedCampaign);
-    const campaigns = (await service.listCampaigns()) as StoredCampaign[];
-    syncCampaignStoreFromDiskCampaigns(campaigns);
-    await saveCampaignsToDisk(campaigns);
+    try {
+      const storedCampaign = toStoredCampaignRecord(campaign);
+      await sqliteUpsertCampaign(storedCampaign);
+      const campaigns = (await service.listCampaigns()) as StoredCampaign[];
+      syncCampaignStoreFromDiskCampaigns(campaigns);
+      await saveCampaignsToDisk(campaigns);
+      console.log(`[payout/build] Estado de campaña ${campaignId} actualizado a 'funded' exitosamente.`);
+    } catch (persistErr) {
+      console.error('[payout/build] Error en persistencia (no crítico para el build):', persistErr);
+    }
 
     await service.setPayoutOffer(campaign.id, offer.offerId);
 
     return res.json({
-      ...serialized,
-      beneficiaryAmount: built.beneficiaryAmount.toString(),
-      treasuryCut: built.treasuryCut.toString(),
-      treasuryAddress: TREASURY_ADDRESS,
+      unsignedTxHex: built.unsignedTxHex || built.rawHex,
+      beneficiaryAmount: builtTx.beneficiaryAmount.toString(),
+      treasuryCut: builtTx.treasuryCut.toString(),
+      escrowAddress,
       wcOfferId: offer.offerId,
-      campaignId: campaign.id,
+      raisedSats: raisedSats.toString(),
     });
   } catch (err) {
+    console.error('[payout/build] Falla fatal en construcción:', err);
     const message = err instanceof Error ? err.message : String(err);
-    if (
-      message === 'insufficient-funds'
-      || message.includes('address')
-      || message.includes('required')
-      || message.includes('invalid')
-    ) {
-      return res.status(400).json({ error: 'validation-error', message });
-    }
-    return res.status(500).json({ error: 'internal-error', message });
+    const statusCode = message.includes('funds') || message.includes('address') ? 400 : 500;
+
+    return res.status(statusCode).json({
+      error: statusCode === 400 ? 'validation-error' : 'internal-server-error',
+      message,
+    });
   }
 };
 
