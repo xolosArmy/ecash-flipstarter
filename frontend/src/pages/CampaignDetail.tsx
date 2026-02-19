@@ -69,6 +69,7 @@ export const CampaignDetail: React.FC = () => {
   const [activationError, setActivationError] = useState('');
   const [activationMessage, setActivationMessage] = useState('');
   const [payoutError, setPayoutError] = useState('');
+  const [payoutDiagnostic, setPayoutDiagnostic] = useState<string | null>(null);
   const [payoutMessage, setPayoutMessage] = useState('');
   const [activating, setActivating] = useState(false);
   const [payingOut, setPayingOut] = useState(false);
@@ -354,6 +355,7 @@ export const CampaignDetail: React.FC = () => {
       return;
     }
     setPayoutError('');
+    setPayoutDiagnostic(null);
     setPayoutMessage('');
     setPayingOut(true);
     showToast('Construyendo payout...', 'info');
@@ -410,7 +412,22 @@ export const CampaignDetail: React.FC = () => {
       refreshCampaign();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'No se pudo finalizar el payout.';
-      setPayoutError(message);
+      const response = (err as Error & { response?: { status?: number; data?: any } }).response;
+      if (response?.status === 400 && response?.data) {
+        const apiError = typeof response.data.error === 'string' ? response.data.error : message;
+        const details = response.data.details as {
+          missing?: string;
+          escrowAddress?: string;
+        } | undefined;
+        setPayoutError(apiError);
+        if (details?.missing || details?.escrowAddress) {
+          setPayoutDiagnostic(
+            `missing=${details.missing ?? 'n/a'} · escrow=${details.escrowAddress ?? 'n/a'}`,
+          );
+        }
+      } else {
+        setPayoutError(message);
+      }
       showToast('No se pudo completar el payout', 'error');
     } finally {
       setPayingOut(false);
@@ -567,6 +584,7 @@ export const CampaignDetail: React.FC = () => {
           </button>
           {payoutMessage && <p>{payoutMessage}</p>}
           {payoutError && <p style={{ color: '#b00020' }}>{payoutError}</p>}
+          {payoutDiagnostic && <p style={{ color: '#92400e' }}>{payoutDiagnostic}</p>}
         </section>
       )}
       {campaign.status === 'paid_out' && <p>Esta campaña ya fue pagada.</p>}

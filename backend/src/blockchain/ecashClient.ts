@@ -16,6 +16,13 @@ const rpcPass = ecashConfig.rpcPassword;
 const effectiveChronikBaseUrl = CHRONIK_URL;
 const chronik = new ChronikClient([effectiveChronikBaseUrl]);
 
+export function isSpendableXecUtxo(utxo: Utxo): boolean {
+  return !utxo.token
+    && !utxo.slpToken
+    && !utxo.tokenStatus
+    && !utxo.plugins?.token;
+}
+
 export type TransactionOutput = {
   valueSats: bigint;
   scriptPubKey: string;

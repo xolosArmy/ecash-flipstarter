@@ -2,7 +2,13 @@ import { Router } from 'express';
 import { CampaignService } from '../services/CampaignService';
 import { validateAddress } from '../utils/validation';
 import { getPledgesByCampaign } from '../store/simplePledges';
-import { addressToScriptPubKey, getTransactionInfo, getUtxosForAddress } from '../blockchain/ecashClient';
+import {
+  addressToScriptPubKey,
+  getTransactionInfo,
+  getUtxosForAddress,
+  isSpendableXecUtxo,
+} from '../blockchain/ecashClient';
+import type { Utxo } from '../blockchain/types';
 import { buildPayoutTx } from '../blockchain/txBuilder';
 import { serializeBuiltTx } from './serialize';
 import { walletConnectOfferStore } from '../services/WalletConnectOfferStore';
@@ -280,18 +286,15 @@ function resolveCampaignBeneficiaryAddress(campaign: CampaignApiRecord): string 
 
 async function selectCampaignFundingUtxos(
   campaign: CampaignApiRecord,
-  minimumRaisedSats: bigint,
   feeSats: bigint,
-) {
+): Promise<{ escrowAddress: string; utxos: Utxo[]; total: bigint }> {
   const escrowAddress = resolveCampaignEscrowAddress(campaign);
-  const campaignUtxos = (await getUtxosForAddress(escrowAddress)).filter(
-    (utxo) => !utxo.token && !utxo.slpToken && !utxo.tokenStatus && !utxo.plugins?.token,
+  const utxos = (await getUtxosForAddress(escrowAddress)).filter(isSpendableXecUtxo);
+  const total = utxos.reduce((acc, utxo) => acc + utxo.value, 0n);
+  console.log(
+    `[escrow-check] campaign=${campaign.id} escrow=${escrowAddress} utxos=${utxos.length} total=${total} fee=${feeSats}`,
   );
-  const total = campaignUtxos.reduce((acc, utxo) => acc + utxo.value, 0n);
-  if (total < minimumRaisedSats + feeSats) {
-    throw new Error('insufficient-funds');
-  }
-  return { escrowAddress, campaignUtxos };
+  return { escrowAddress, utxos, total };
 }
 
 function toStoredCampaignRecord(campaign: CampaignApiRecord): StoredCampaign {
@@ -678,7 +681,7 @@ export const activationStatusHandler: Parameters<typeof router.get>[1] = async (
 router.get('/campaigns/:id/activation/status', activationStatusHandler);
 router.get('/campaign/:id/activation/status', activationStatusHandler);
 
-const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req, res) => {
+export const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req, res) => {
   try {
     const requestedId = req.params.id;
     const resolvedCampaign = await resolveCampaignOr404(req, res);
@@ -694,27 +697,29 @@ const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req
         ? validateAddress(req.body.destinationBeneficiary, 'destinationBeneficiary')
         : resolveCampaignBeneficiaryAddress(campaign);
 
-    const { escrowAddress, campaignUtxos } = await selectCampaignFundingUtxos(campaign, 0n, PLEDGE_FEE_SATS);
-    const raisedSats = campaignUtxos.reduce((acc, utxo) => acc + utxo.value, 0n);
+    const { escrowAddress, utxos: campaignUtxos, total } = await selectCampaignFundingUtxos(campaign, PLEDGE_FEE_SATS);
+    const goalSats = BigInt(campaign.goal);
 
     console.log(
-      `[payout/build] Campaña: ${canonicalId} (requested: ${requestedId}) | Escrow: ${escrowAddress} | Total On-Chain: ${raisedSats} | Meta: ${campaign.goal}`,
+      `[payout/build] Campaña: ${canonicalId} (requested: ${requestedId}) | Escrow: ${escrowAddress} | Total On-Chain: ${total} | Meta: ${campaign.goal}`,
     );
 
-    if (raisedSats < BigInt(campaign.goal)) {
+    if (total < goalSats) {
       return res.status(400).json({
-        error: 'insufficient-funds',
-        details: 'La meta en cadena aún no se ha alcanzado.',
-        escrowAddress,
-        goal: campaign.goal.toString(),
-        raised: raisedSats.toString(),
-        utxoCount: campaignUtxos.length,
+        error: 'insufficient-funds-on-chain',
+        details: {
+          escrowAddress,
+          goal: goalSats.toString(),
+          raised: total.toString(),
+          missing: (goalSats - total).toString(),
+          utxoCount: campaignUtxos.length,
+        },
       });
     }
 
     const builtTx = await buildPayoutTx({
       campaignUtxos,
-      totalRaised: raisedSats,
+      totalRaised: total,
       beneficiaryAddress: destinationBeneficiary,
       treasuryAddress: TREASURY_ADDRESS,
       fixedFee: PLEDGE_FEE_SATS,
@@ -725,7 +730,7 @@ const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req
     const offer = walletConnectOfferStore.createOffer({
       campaignId: canonicalId,
       unsignedTxHex: built.unsignedTxHex || built.rawHex,
-      amount: raisedSats.toString(),
+      amount: total.toString(),
       contributorAddress: destinationBeneficiary,
     });
 
@@ -741,7 +746,7 @@ const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req
       console.error('[payout/build] Error actualizando SQLite/JSON:', persistErr);
     }
 
-    await service.setPayoutOffer(campaign.id, offer.offerId);
+    await service.setPayoutOffer(canonicalId, offer.offerId);
 
     return res.json({
       unsignedTxHex: built.unsignedTxHex || built.rawHex,
@@ -749,13 +754,15 @@ const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req
       treasuryCut: builtTx.treasuryCut.toString(),
       escrowAddress,
       wcOfferId: offer.offerId,
-      raised: raisedSats.toString(),
+      raised: total.toString(),
     });
   } catch (err) {
     console.error('[payout/build] Fatal error:', err);
     const message = err instanceof Error ? err.message : String(err);
-    const statusCode = message.includes('address') || message.includes('funds') ? 400 : 500;
-    return res.status(statusCode).json({ error: 'payout-build-failed', message });
+    if (message.includes('destinationBeneficiary') || message.includes('beneficiaryAddress')) {
+      return res.status(400).json({ error: 'payout-build-failed', message });
+    }
+    return res.status(500).json({ error: 'payout-build-failed', message });
   }
 };
 
