@@ -5,11 +5,10 @@ import { getPledgesByCampaign } from '../store/simplePledges';
 import {
   addressToScriptPubKey,
   getTransactionInfo,
-  getUtxosForAddress,
+  fetchChronikUtxos,
   isSpendableXecUtxo,
   ChronikUnavailableError,
   getEffectiveChronikBaseUrl,
-  normalizeChronikAddress,
 } from '../blockchain/ecashClient';
 import type { Utxo } from '../blockchain/types';
 import { buildPayoutTx } from '../blockchain/txBuilder';
@@ -275,25 +274,49 @@ function resolveCampaignBeneficiaryAddress(campaign: CampaignApiRecord): string 
   return validateAddress(beneficiaryAddress || '', 'beneficiaryAddress');
 }
 
+type PayoutBuildDiagnostics = {
+  campaignId: string;
+  escrowAddress: string;
+  chronikUrl: string;
+  usedUrl?: string;
+  status?: number;
+  contentType?: string;
+  utxoCount?: number;
+  raisedSats?: string;
+  goal: string;
+  branch: 'json' | 'protobuf' | 'error';
+};
+
 async function selectCampaignFundingUtxos(
   campaign: CampaignApiRecord,
-  feeSats: bigint,
-): Promise<{ escrowAddress: string; utxos: Utxo[]; total: bigint }> {
+  _feeSats: bigint,
+): Promise<{ escrowAddress: string; utxos: Utxo[]; total: bigint; diagnostics: PayoutBuildDiagnostics }> {
   const escrowValidation = validateEscrowConsistency(campaign);
   if (!escrowValidation.ok) {
     const mismatch = escrowValidation.details;
     throw Object.assign(new Error('escrow-address-mismatch'), { mismatch });
   }
-  const escrowAddress = escrowValidation.escrowAddress;
-  const utxos = (await getUtxosForAddress(escrowAddress)).filter(isSpendableXecUtxo);
-  const total = utxos.reduce((acc, utxo) => acc + utxo.value, 0n);
-  const normalizedAddress = normalizeChronikAddress(escrowAddress);
-  console.log(`[PAYOUT-BUILD-DEBUG] campaignId=${campaign.id} escrowAddress=${escrowAddress}`);
-  console.log(`[PAYOUT-BUILD-DEBUG] chronikUrl=${getEffectiveChronikBaseUrl()} chronikPath=/address/${normalizedAddress}/utxos`);
-  console.log(
-    `[PAYOUT-BUILD-DEBUG] campaignId=${campaign.id} raisedSats=${total.toString()} utxoCount=${utxos.length} goal=${String(campaign.goal)}`,
-  );
-  return { escrowAddress, utxos, total };
+  const escrowAddress = campaign.covenantAddress || campaign.campaignAddress || escrowValidation.escrowAddress;
+  const chronikUrl = getEffectiveChronikBaseUrl();
+
+  const chronikResult = await fetchChronikUtxos(escrowAddress);
+  const spendableUtxos = chronikResult.utxos.filter(isSpendableXecUtxo);
+  const selectedUtxos = spendableUtxos.length > 0 ? spendableUtxos : chronikResult.utxos;
+  const total = selectedUtxos.reduce((acc, utxo) => acc + utxo.value, 0n);
+  const diagnostics: PayoutBuildDiagnostics = {
+    campaignId: campaign.id,
+    escrowAddress,
+    chronikUrl,
+    usedUrl: chronikResult.usedUrl,
+    status: chronikResult.status,
+    contentType: chronikResult.contentType,
+    utxoCount: chronikResult.utxos.length,
+    raisedSats: total.toString(),
+    goal: String(campaign.goal),
+    branch: chronikResult.branch,
+  };
+  console.log('[PAYOUT-BUILD]', JSON.stringify(diagnostics));
+  return { escrowAddress, utxos: selectedUtxos, total, diagnostics };
 }
 
 async function deriveScriptHashFromAddress(address?: string | null): Promise<string | null> {
@@ -747,26 +770,39 @@ export const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = asy
       selectedFunding = await selectCampaignFundingUtxos(campaign, PLEDGE_FEE_SATS);
     } catch (err) {
       if (err instanceof ChronikUnavailableError) {
+        console.log('[PAYOUT-BUILD]', JSON.stringify({
+          campaignId: canonicalId,
+          escrowAddress: campaign.covenantAddress || campaign.campaignAddress || null,
+          usedUrl: err.details.url,
+          status: err.details.status ?? null,
+          contentType: err.details.contentType ?? null,
+          utxoCount: null,
+          raisedSats: null,
+          goal: String(campaign.goal),
+          branch: 'error',
+        }));
         return res.status(503).json({
           error: 'chronik-unavailable',
-          details: err.message,
+          details: {
+            campaignId: canonicalId,
+            escrowAddress: campaign.covenantAddress || campaign.campaignAddress || null,
+            chronikUrl: getEffectiveChronikBaseUrl(),
+            triedUrl: err.details.url,
+            status: err.details.status ?? null,
+            contentType: err.details.contentType ?? null,
+            bodyPreviewHex: err.details.bodyPreviewHex ?? null,
+            branch: err.details.contentType?.toLowerCase().includes('protobuf') ? 'protobuf' : 'error',
+          },
         });
       }
       throw err;
     }
 
-    const { escrowAddress, utxos: campaignUtxos, total } = selectedFunding;
+    const { escrowAddress, utxos: campaignUtxos, total, diagnostics } = selectedFunding;
     totalPledgedContext = total;
     derivedEscrowAddressContext = escrowAddress;
     derivedScriptHashContext = await deriveScriptHashFromAddress(escrowAddress);
     const goalSats = BigInt(campaign.goal);
-
-    console.log('[PAYOUT]', {
-      campaignId: canonicalId,
-      escrowAddress,
-      raisedSats: total.toString(),
-      goal: campaign.goal,
-    });
 
     if (total < goalSats) {
       logPayoutBuildErrorContext({
@@ -780,9 +816,16 @@ export const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = asy
       return res.status(400).json({
         error: 'insufficient-funds',
         details: {
-          requiredSats: goalSats.toString(),
-          availableSats: total.toString(),
-          derivedEscrowAddress: escrowAddress,
+          campaignId: canonicalId,
+          escrowAddress,
+          chronikUrl: diagnostics.chronikUrl,
+          usedUrl: diagnostics.usedUrl ?? null,
+          status: diagnostics.status ?? null,
+          contentType: diagnostics.contentType ?? null,
+          utxoCount: diagnostics.utxoCount ?? null,
+          raisedSats: diagnostics.raisedSats ?? total.toString(),
+          goal: diagnostics.goal,
+          branch: diagnostics.branch,
           derivedScriptHash: derivedScriptHashContext,
         },
       });
@@ -845,19 +888,29 @@ export const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = asy
       return res.status(400).json({ error: 'escrow-address-mismatch', ...mismatch });
     }
     if (err instanceof ChronikUnavailableError) {
-      console.log(
-        `[PAYOUT-BUILD-DEBUG] campaignId=${canonicalIdContext ?? 'unknown'} escrowAddress=${derivedEscrowAddressContext ?? 'unknown'} chronikUrl=${err.details.url} status=${String(err.details.status ?? 'unknown')} contentType=${err.details.contentType ?? 'unknown'}`,
-      );
+      const branch = err.details.contentType?.toLowerCase().includes('protobuf') ? 'protobuf' : 'error';
+      console.log('[PAYOUT-BUILD]', JSON.stringify({
+        campaignId: canonicalIdContext ?? null,
+        escrowAddress: derivedEscrowAddressContext ?? null,
+        usedUrl: err.details.url,
+        status: err.details.status ?? null,
+        contentType: err.details.contentType ?? null,
+        utxoCount: null,
+        raisedSats: null,
+        goal: campaignContext?.goal ?? null,
+        branch,
+      }));
       return res.status(503).json({
         error: 'chronik-unavailable',
         details: {
-          chronikUrl: err.details.url,
+          campaignId: canonicalIdContext ?? null,
+          escrowAddress: derivedEscrowAddressContext ?? null,
+          chronikUrl: getEffectiveChronikBaseUrl(),
+          triedUrl: err.details.url,
           status: err.details.status ?? null,
           contentType: err.details.contentType ?? null,
           bodyPreviewHex: err.details.bodyPreviewHex ?? null,
-          campaignId: canonicalIdContext ?? null,
-          escrowAddress: derivedEscrowAddressContext ?? null,
-          note: 'Chronik respondió protobuf o no-JSON; no se pudo calcular raisedSats',
+          branch,
         },
       });
     }

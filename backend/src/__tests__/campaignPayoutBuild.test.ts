@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const getCanonicalCampaignMock = vi.fn();
 const listCampaignsMock = vi.fn().mockResolvedValue([]);
 const setPayoutOfferMock = vi.fn().mockResolvedValue(undefined);
-const getUtxosForAddressMock = vi.fn();
+const fetchChronikUtxosMock = vi.fn();
 const buildPayoutTxMock = vi.fn();
 const createOfferMock = vi.fn().mockReturnValue({ offerId: 'offer-123' });
 const sqliteUpsertCampaignMock = vi.fn().mockResolvedValue(undefined);
@@ -14,7 +14,7 @@ vi.mock('../blockchain/ecashClient', async () => {
   const actual = await vi.importActual<typeof import('../blockchain/ecashClient')>('../blockchain/ecashClient');
   return {
     ...actual,
-    getUtxosForAddress: getUtxosForAddressMock,
+    fetchChronikUtxos: fetchChronikUtxosMock,
     addressToScriptPubKey: vi.fn(),
     getTransactionInfo: vi.fn(),
   };
@@ -81,11 +81,17 @@ describe('buildCampaignPayoutHandler', () => {
     const campaign = createBaseCampaign();
     getCanonicalCampaignMock.mockResolvedValue({ canonicalId: 'camp-canonical', campaign });
 
-    getUtxosForAddressMock.mockResolvedValue([
-      { txid: 'a'.repeat(64), vout: 0, value: 600n, scriptPubKey: '76a914', token: { tokenId: '1' } },
-      { txid: 'b'.repeat(64), vout: 1, value: 300n, scriptPubKey: '76a914' },
-      { txid: 'c'.repeat(64), vout: 2, value: 100n, scriptPubKey: '76a914', tokenStatus: 'TOKEN_STATUS_NORMAL' },
-    ]);
+    fetchChronikUtxosMock.mockResolvedValue({
+      usedUrl: 'https://chronik.xolosarmy.xyz/address/qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk/utxos',
+      status: 200,
+      contentType: 'application/json',
+      branch: 'json',
+      utxos: [
+        { txid: 'a'.repeat(64), vout: 0, value: 600n, scriptPubKey: '76a914', token: { tokenId: '1' } },
+        { txid: 'b'.repeat(64), vout: 1, value: 300n, scriptPubKey: '76a914' },
+        { txid: 'c'.repeat(64), vout: 2, value: 100n, scriptPubKey: '76a914', tokenStatus: 'TOKEN_STATUS_NORMAL' },
+      ],
+    });
 
     const req = { params: { id: 'camp-slug' }, body: {} };
     const res = createMockRes();
@@ -96,9 +102,16 @@ describe('buildCampaignPayoutHandler', () => {
     expect(res.body).toEqual({
       error: 'insufficient-funds',
       details: {
-        requiredSats: '1000',
-        availableSats: '300',
-        derivedEscrowAddress: campaign.campaignAddress,
+        campaignId: 'camp-canonical',
+        escrowAddress: campaign.campaignAddress,
+        chronikUrl: 'https://chronik.xolosarmy.xyz',
+        usedUrl: 'https://chronik.xolosarmy.xyz/address/qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk/utxos',
+        status: 200,
+        contentType: 'application/json',
+        utxoCount: 3,
+        raisedSats: '300',
+        goal: '1000',
+        branch: 'json',
         derivedScriptHash: null,
       },
     });
@@ -111,7 +124,7 @@ describe('buildCampaignPayoutHandler', () => {
     };
     const { ChronikUnavailableError } = await import('../blockchain/ecashClient');
 
-    getUtxosForAddressMock.mockRejectedValue(
+    fetchChronikUtxosMock.mockRejectedValue(
       new ChronikUnavailableError('chronik-protobuf-mode', {
         url: 'https://chronik.xolosarmy.xyz/address/qq/utxos',
         status: 200,
@@ -129,13 +142,14 @@ describe('buildCampaignPayoutHandler', () => {
     expect(res.body).toEqual({
       error: 'chronik-unavailable',
       details: {
-        chronikUrl: 'https://chronik.xolosarmy.xyz/address/qq/utxos',
+        campaignId: 'camp-canonical',
+        escrowAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+        chronikUrl: 'https://chronik.xolosarmy.xyz',
+        triedUrl: 'https://chronik.xolosarmy.xyz/address/qq/utxos',
         status: 200,
         contentType: 'application/x-protobuf',
         bodyPreviewHex: '0a0b0c',
-        campaignId: 'camp-canonical',
-        escrowAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
-        note: 'Chronik respondió protobuf o no-JSON; no se pudo calcular raisedSats',
+        branch: 'protobuf',
       },
     });
     expect(buildPayoutTxMock).not.toHaveBeenCalled();
@@ -158,7 +172,7 @@ describe('buildCampaignPayoutHandler', () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.body).toEqual({ error: 'payout-already-processed' });
-    expect(getUtxosForAddressMock).not.toHaveBeenCalled();
+    expect(fetchChronikUtxosMock).not.toHaveBeenCalled();
     expect(buildPayoutTxMock).not.toHaveBeenCalled();
   });
 
@@ -167,9 +181,15 @@ describe('buildCampaignPayoutHandler', () => {
       buildCampaignPayoutHandler: (req: any, res: any) => Promise<void>;
     };
 
-    getUtxosForAddressMock.mockResolvedValue([
-      { txid: 'd'.repeat(64), vout: 0, value: 1500n, scriptPubKey: '76a914', slpToken: undefined },
-    ]);
+    fetchChronikUtxosMock.mockResolvedValue({
+      usedUrl: 'https://chronik.xolosarmy.xyz/address/qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk/utxos',
+      status: 200,
+      contentType: 'application/json',
+      branch: 'json',
+      utxos: [
+        { txid: 'd'.repeat(64), vout: 0, value: 1500n, scriptPubKey: '76a914', slpToken: undefined },
+      ],
+    });
     buildPayoutTxMock.mockResolvedValue({
       beneficiaryAmount: 1200n,
       treasuryCut: 300n,
