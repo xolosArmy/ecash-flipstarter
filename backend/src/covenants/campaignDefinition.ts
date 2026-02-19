@@ -13,6 +13,7 @@ export interface CampaignDefinition {
   beneficiaryAddress?: string;
   campaignAddress?: string;
   covenantAddress?: string;
+  escrowAddress?: string;
   status?:
     | 'draft'
     | 'created'

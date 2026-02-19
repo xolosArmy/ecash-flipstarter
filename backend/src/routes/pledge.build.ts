@@ -4,6 +4,7 @@ import { createWalletConnectPledgeOffer } from '../services/PledgeOfferService';
 import { getCampaignStatusById } from './campaigns.routes';
 import { CampaignService } from '../services/CampaignService';
 import { parsePledgeAmountSats, parsePledgeMessage } from './pledgePayload';
+import { buildEscrowMismatchDetails, validateEscrowConsistency } from '../services/escrowAddress';
 
 const router = Router();
 const campaignService = new CampaignService();
@@ -26,12 +27,16 @@ export const createPledgeBuildHandler = async (req: any, res: any) => {
       return res.status(400).json({ error: 'campaign-address-required' });
     }
     const campaign = await campaignService.getCampaign(canonicalId) as
-      | { campaignAddress?: string; covenantAddress?: string }
+      | { id?: string; campaignAddress?: string; covenantAddress?: string; escrowAddress?: string; recipientAddress?: string }
       | null;
-    const campaignAddress = campaign?.campaignAddress || campaign?.covenantAddress || '';
-    if (!campaignAddress) {
-      return res.status(400).json({ error: 'campaign-address-required' });
+    if (!campaign) {
+      return res.status(404).json({ error: 'campaign-not-found' });
     }
+    const escrow = validateEscrowConsistency({ id: canonicalId, ...campaign });
+    if (!escrow.ok) {
+      return res.status(400).json({ error: 'escrow-address-mismatch', ...buildEscrowMismatchDetails({ id: canonicalId, ...campaign }, escrow.details.expectedEscrow) });
+    }
+    const campaignAddress = escrow.escrowAddress;
 
     const contributorAddress = validateAddress(
       req.body.contributorAddress as string,
@@ -51,7 +56,7 @@ export const createPledgeBuildHandler = async (req: any, res: any) => {
     console.log(
       `[pledge.build] totals totalInputs=${totalInputs.toString()} amount=${amount.toString()} fee=${response.fee} change=${change.toString()}`,
     );
-    return res.json(response);
+    return res.json({ ...response, escrowAddress: campaignAddress });
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
   }

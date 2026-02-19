@@ -4,6 +4,7 @@ import { createWalletConnectPledgeOffer } from '../services/PledgeOfferService';
 import { getCampaignStatusById } from './campaigns.routes';
 import { CampaignService } from '../services/CampaignService';
 import { parsePledgeAmountSats, parsePledgeMessage } from './pledgePayload';
+import { buildEscrowMismatchDetails, validateEscrowConsistency } from '../services/escrowAddress';
 import { getPledgesByCampaign, updatePledgeTxid, type SimplePledge } from '../store/simplePledges';
 
 const router = Router();
@@ -24,12 +25,16 @@ export const createPledgeHandler = async (req: any, res: any) => {
       return res.status(400).json({ error: 'campaign-not-active' });
     }
     const campaign = await campaignService.getCampaign(canonicalId) as
-      | { campaignAddress?: string; covenantAddress?: string }
+      | { id?: string; campaignAddress?: string; covenantAddress?: string; escrowAddress?: string; recipientAddress?: string }
       | null;
-    const campaignAddress = campaign?.campaignAddress || campaign?.covenantAddress || '';
-    if (!campaignAddress) {
-      return res.status(400).json({ error: 'campaign-address-required' });
+    if (!campaign) {
+      return res.status(404).json({ error: 'campaign-not-found' });
     }
+    const escrow = validateEscrowConsistency({ id: canonicalId, ...campaign });
+    if (!escrow.ok) {
+      return res.status(400).json({ error: 'escrow-address-mismatch', ...buildEscrowMismatchDetails({ id: canonicalId, ...campaign }, escrow.details.expectedEscrow) });
+    }
+    const campaignAddress = escrow.escrowAddress;
 
     const amount = parsePledgeAmountSats(req.body);
     const message = parsePledgeMessage(req.body);

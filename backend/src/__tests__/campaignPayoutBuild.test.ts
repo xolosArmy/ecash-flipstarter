@@ -57,6 +57,8 @@ const BASE_CAMPAIGN = {
   expirationTime: String(Date.now() + 86_400_000),
   beneficiaryAddress: 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk',
   campaignAddress: 'ecash:qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqu08dsy2',
+  covenantAddress: 'ecash:qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqu08dsy2',
+  escrowAddress: 'ecash:qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqu08dsy2',
   status: 'active',
 };
 
@@ -92,6 +94,10 @@ describe('buildCampaignPayoutHandler', () => {
         raised: '300',
         missing: '700',
         utxoCount: 1,
+        campaignAddress: BASE_CAMPAIGN.campaignAddress,
+        recipientAddress: null,
+        covenantAddress: BASE_CAMPAIGN.covenantAddress,
+        escrowAddressStored: BASE_CAMPAIGN.escrowAddress,
       },
     });
     expect(buildPayoutTxMock).not.toHaveBeenCalled();

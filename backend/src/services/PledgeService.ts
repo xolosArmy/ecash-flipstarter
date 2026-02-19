@@ -1,8 +1,8 @@
 import { getUtxosForAddress } from '../blockchain/ecashClient';
 import { buildPledgeTx, type BuiltTx } from '../blockchain/txBuilder';
 import type { Utxo } from '../blockchain/types';
-import { validateAddress } from '../utils/validation';
 import { campaignStore, covenantIndexInstance } from './CampaignService';
+import { resolveEscrowAddress } from './escrowAddress';
 
 const MIN_PLEDGE_FEE_SATS = 500n;
 
@@ -23,7 +23,7 @@ export class PledgeService {
     if (campaignStatus && campaignStatus !== 'active') {
       throw new Error('campaign-not-active');
     }
-    const escrowAddress = resolveCampaignEscrowAddress(campaign);
+    const escrowAddress = resolveEscrowAddress(campaign as unknown as Record<string, unknown>);
 
     const contributorUtxos = await getUtxosForAddress(contributorAddress);
     // Only spend pure XEC UTXOs; token-bearing UTXOs must be excluded.
@@ -89,23 +89,6 @@ async function buildWithSelectedUtxos(args: {
     }
   }
   throw new Error('insufficient-funds');
-}
-
-function resolveCampaignEscrowAddress(campaign: unknown): string {
-  const maybeRecord = campaign as Record<string, unknown>;
-  const candidates: unknown[] = [
-    maybeRecord.campaignAddress,
-    maybeRecord.covenantAddress,
-    maybeRecord.address,
-    maybeRecord.recipient,
-    maybeRecord.recipientAddress,
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate === 'string' && candidate.trim()) {
-      return validateAddress(candidate.trim(), 'campaignAddress');
-    }
-  }
-  throw new Error('campaign-address-required');
 }
 
 function hasToken(utxo: Utxo): boolean {
