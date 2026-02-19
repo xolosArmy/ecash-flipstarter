@@ -380,7 +380,7 @@ router.get('/campaigns/:id', async (req, res) => {
   }
 });
 
-const createCampaign: Parameters<typeof router.post>[1] = async (req, res) => {
+export const createCampaignHandler: Parameters<typeof router.post>[1] = async (req, res) => {
   try {
     if (typeof req.body?.beneficiaryAddress === 'string' && req.body.beneficiaryAddress.trim()) {
       req.body.beneficiaryAddress = validateAddress(req.body.beneficiaryAddress, 'beneficiaryAddress');
@@ -400,9 +400,9 @@ const createCampaign: Parameters<typeof router.post>[1] = async (req, res) => {
   }
 };
 
-router.post('/campaign', createCampaign);
+router.post('/campaign', createCampaignHandler);
 
-router.post('/campaigns', createCampaign);
+router.post('/campaigns', createCampaignHandler);
 
 // Legacy endpoint: only allows ACTIVE when fee is paid.
 async function activateCampaign(req: any, res: any) {
