@@ -10,18 +10,22 @@ const campaignService = new CampaignService();
 
 export const createPledgeBuildHandler = async (req: any, res: any) => {
   try {
-    const status = await getCampaignStatusById(req.params.id);
+    const canonicalId = await campaignService.resolveCampaignId(req.params.id);
+    if (!canonicalId) {
+      return res.status(404).json({ error: 'campaign-not-found' });
+    }
+    const status = await getCampaignStatusById(canonicalId);
     if (!status) {
       return res.status(404).json({ error: 'campaign-not-found' });
     }
     if (status !== 'active') {
       return res.status(400).json({ error: 'campaign-not-active' });
     }
-    const ensured = await campaignService.ensureCampaignCovenant(req.params.id);
+    const ensured = await campaignService.ensureCampaignCovenant(canonicalId);
     if (!ensured.scriptHash || !ensured.scriptPubKey) {
       return res.status(400).json({ error: 'campaign-address-required' });
     }
-    const campaign = await campaignService.getCampaign(req.params.id) as
+    const campaign = await campaignService.getCampaign(canonicalId) as
       | { campaignAddress?: string; covenantAddress?: string }
       | null;
     const campaignAddress = campaign?.campaignAddress || campaign?.covenantAddress || '';
@@ -35,7 +39,7 @@ export const createPledgeBuildHandler = async (req: any, res: any) => {
     );
     const amount = parsePledgeAmountSats(req.body);
     const message = parsePledgeMessage(req.body);
-    const response = await createWalletConnectPledgeOffer(req.params.id, contributorAddress, amount, {
+    const response = await createWalletConnectPledgeOffer(canonicalId, contributorAddress, amount, {
       campaignAddress,
       message,
     });

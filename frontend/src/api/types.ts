@@ -9,6 +9,8 @@ export interface CovenantRef {
 
 export interface CampaignSummary {
   id: string;
+  slug?: string;
+  canonicalId?: string;
   name: string;
   goal: number;
   expiresAt: string;
