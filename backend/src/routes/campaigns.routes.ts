@@ -380,29 +380,28 @@ router.get('/campaigns/:id', async (req, res) => {
   }
 });
 
-router.post('/campaign', async (req, res) => {
+const createCampaign: Parameters<typeof router.post>[1] = async (req, res) => {
   try {
     if (typeof req.body?.beneficiaryAddress === 'string' && req.body.beneficiaryAddress.trim()) {
       req.body.beneficiaryAddress = validateAddress(req.body.beneficiaryAddress, 'beneficiaryAddress');
     }
-    const campaign = await service.createCampaign(req.body ?? {});
-    res.status(201).json(campaign);
-  } catch (err) {
-    res.status(400).json({ error: (err as Error).message });
-  }
-});
 
-router.post('/campaigns', async (req, res) => {
-  try {
-    if (typeof req.body?.beneficiaryAddress === 'string' && req.body.beneficiaryAddress.trim()) {
-      req.body.beneficiaryAddress = validateAddress(req.body.beneficiaryAddress, 'beneficiaryAddress');
-    }
-    const campaign = await service.createCampaign(req.body ?? {});
-    res.status(201).json(campaign);
+    // Server-side source of truth for campaign IDs.
+    const serverGeneratedId = `campaign-${Date.now()}`;
+    const campaign = await service.createCampaign({
+      ...(req.body ?? {}),
+      id: serverGeneratedId,
+    });
+
+    return res.status(201).json(campaign);
   } catch (err) {
-    res.status(400).json({ error: (err as Error).message });
+    return res.status(400).json({ error: (err as Error).message });
   }
-});
+};
+
+router.post('/campaign', createCampaign);
+
+router.post('/campaigns', createCampaign);
 
 // Legacy endpoint: only allows ACTIVE when fee is paid.
 async function activateCampaign(req: any, res: any) {

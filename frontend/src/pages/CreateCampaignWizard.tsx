@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   buildCampaignActivationTx,
   confirmCampaignActivationTx,
@@ -73,6 +73,7 @@ export const CreateCampaignWizard: React.FC = () => {
 
   const { signClient, topic, connected, connect, requestSignAndBroadcast, addresses } = useWalletConnect();
   const { showToast } = useToast();
+  const navigate = useNavigate();
 
   const shareUrl = useMemo(() => {
     if (!campaignId) return '';
@@ -226,7 +227,13 @@ export const CreateCampaignWizard: React.FC = () => {
         description: description.trim() || undefined,
         location: location.trim() || undefined,
       });
+
+      if (!created?.id) {
+        throw new Error('El servidor no devolvió un ID de campaña válido');
+      }
+
       await handleCreatedCampaign(created);
+      navigate(`/campaigns/${created.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo crear la campaña.');
     } finally {
