@@ -158,27 +158,7 @@ export async function getTransactionInfo(txid: string): Promise<TransactionInfo>
 
 async function getUtxosForAddressViaChronik(address: string): Promise<Utxo[]> {
   const normalizedAddress = normalizeChronikAddress(address);
-  const cleanBaseUrl = effectiveChronikBaseUrl.replace(/\/+$/, '');
-  const candidatePaths = [
-    `/address/${normalizedAddress}/utxos`,
-    `/v1/address/${normalizedAddress}/utxos`,
-  ];
-
-  let result: Awaited<ReturnType<typeof chronikGet>> | null = null;
-  for (const path of candidatePaths) {
-    const attempt = await chronikGet(path);
-    result = attempt;
-    if (attempt.status !== 404) {
-      break;
-    }
-  }
-
-  if (!result) {
-    throw new ChronikUnavailableError('chronik-http-error', {
-      url: `${cleanBaseUrl}${candidatePaths[0]}`,
-      hint: 'chronik-no-response',
-    });
-  }
+  const result = await chronikGet(`/address/${normalizedAddress}/utxos`);
 
   const contentType = result.contentType;
   console.log(

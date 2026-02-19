@@ -742,11 +742,31 @@ export const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = asy
         ? validateAddress(req.body.destinationBeneficiary, 'destinationBeneficiary')
         : resolveCampaignBeneficiaryAddress(campaign);
 
-    const { escrowAddress, utxos: campaignUtxos, total } = await selectCampaignFundingUtxos(campaign, PLEDGE_FEE_SATS);
+    let selectedFunding: Awaited<ReturnType<typeof selectCampaignFundingUtxos>>;
+    try {
+      selectedFunding = await selectCampaignFundingUtxos(campaign, PLEDGE_FEE_SATS);
+    } catch (err) {
+      if (err instanceof ChronikUnavailableError) {
+        return res.status(503).json({
+          error: 'chronik-unavailable',
+          details: err.message,
+        });
+      }
+      throw err;
+    }
+
+    const { escrowAddress, utxos: campaignUtxos, total } = selectedFunding;
     totalPledgedContext = total;
     derivedEscrowAddressContext = escrowAddress;
     derivedScriptHashContext = await deriveScriptHashFromAddress(escrowAddress);
     const goalSats = BigInt(campaign.goal);
+
+    console.log('[PAYOUT]', {
+      campaignId: canonicalId,
+      escrowAddress,
+      raisedSats: total.toString(),
+      goal: campaign.goal,
+    });
 
     if (total < goalSats) {
       logPayoutBuildErrorContext({
