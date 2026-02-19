@@ -8,7 +8,6 @@ import { ChronikClient, type ScriptType } from 'chronik-client';
 import type { BroadcastResult, Utxo } from './types';
 import cashaddr from 'ecashaddrjs';
 import { validateAddress } from '../utils/validation';
-import { parse as parseProtobuf } from 'protobufjs';
 
 const rpcUrl = ecashConfig.rpcUrl;
 const rpcUser = ecashConfig.rpcUsername;
@@ -17,34 +16,12 @@ const rpcPass = ecashConfig.rpcPassword;
 const effectiveChronikBaseUrl = CHRONIK_URL;
 const chronik = new ChronikClient([effectiveChronikBaseUrl]);
 
-const chronikUtxosProto = parseProtobuf(`
-syntax = "proto3";
-
-message OutPoint {
-  bytes txid = 1;
-  uint32 out_idx = 2;
-}
-
-message ScriptUtxo {
-  OutPoint outpoint = 1;
-  int32 block_height = 2;
-  bool is_coinbase = 3;
-  int64 sats = 4;
-  bool is_final = 5;
-  bytes token = 6;
-  bytes plugins = 8;
-}
-
-message ScriptUtxos {
-  repeated ScriptUtxo utxos = 1;
-  bytes output_script = 2;
-}
-`).root.lookupType('ScriptUtxos');
-
 export type ChronikUnavailableDetails = {
   url: string;
   status?: number;
   contentType?: string;
+  bodyPreviewHex?: string;
+  hint?: string;
 };
 
 export class ChronikUnavailableError extends Error {
@@ -182,64 +159,59 @@ export async function getTransactionInfo(txid: string): Promise<TransactionInfo>
 async function getUtxosForAddressViaChronik(address: string): Promise<Utxo[]> {
   const normalizedAddress = normalizeChronikAddress(address);
   const cleanBaseUrl = effectiveChronikBaseUrl.replace(/\/+$/, '');
-  const path = `/address/${normalizedAddress}/utxos`;
-  const requestUrl = `${cleanBaseUrl}${path}`;
-  console.log(`[chronik] baseUrl=${cleanBaseUrl}`);
-  console.log(`[chronik] utxosPath=${path}`);
+  const candidatePaths = [
+    `/address/${normalizedAddress}/utxos`,
+    `/v1/address/${normalizedAddress}/utxos`,
+  ];
 
-  let response: Response;
-  try {
-    response = await fetch(requestUrl);
-  } catch (err) {
-    throw new ChronikUnavailableError('chronik-network-error', {
-      url: requestUrl,
-      contentType: undefined,
+  let result: Awaited<ReturnType<typeof chronikGet>> | null = null;
+  for (const path of candidatePaths) {
+    const attempt = await chronikGet(path);
+    result = attempt;
+    if (attempt.status !== 404) {
+      break;
+    }
+  }
+
+  if (!result) {
+    throw new ChronikUnavailableError('chronik-http-error', {
+      url: `${cleanBaseUrl}${candidatePaths[0]}`,
+      hint: 'chronik-no-response',
     });
   }
 
-  const contentType = response.headers.get('content-type') ?? '';
-  console.log(`[chronik] contentType=${contentType || 'unknown'}`);
-  if (!response.ok) {
+  const contentType = result.contentType;
+  console.log(
+    `[chronik] url=${result.url} status=${String(result.status)} contentType=${contentType || 'unknown'}`,
+  );
+
+  if (result.status < 200 || result.status >= 300) {
     throw new ChronikUnavailableError('chronik-http-error', {
-      url: requestUrl,
-      status: response.status,
+      url: result.url,
+      status: result.status,
       contentType: contentType || undefined,
+      bodyPreviewHex: toBodyPreviewHex(result.raw),
     });
   }
 
   if (contentType.toLowerCase().includes('application/x-protobuf')) {
-    const raw = new Uint8Array(await response.arrayBuffer());
-    type DecodedChronikUtxos = {
-      utxos?: Array<{
-        outpoint?: { txid?: Uint8Array; outIdx?: number };
-        sats?: string | number | bigint;
-        token?: Uint8Array;
-        plugins?: Uint8Array;
-      }>;
-      outputScript?: Uint8Array;
-    };
-    let decoded: DecodedChronikUtxos;
-    try {
-      decoded = chronikUtxosProto.toObject(chronikUtxosProto.decode(raw), {
-        longs: String,
-        bytes: Array,
-      }) as DecodedChronikUtxos;
-    } catch (_err) {
-      throw new ChronikUnavailableError('chronik-decode-error', {
-        url: requestUrl,
-        status: response.status,
-        contentType: contentType || undefined,
-      });
-    }
-    const outputScript = bytesToHex(decoded.outputScript);
-    return (decoded.utxos ?? []).map((u) => ({
-      txid: bytesToHex(u.outpoint?.txid),
-      vout: typeof u.outpoint?.outIdx === 'number' ? u.outpoint.outIdx : 0,
-      value: toBigIntSats(u.sats),
-      scriptPubKey: outputScript,
-      token: u.token && u.token.length > 0 ? u.token : undefined,
-      plugins: u.plugins && u.plugins.length > 0 ? { token: u.plugins } : undefined,
-    }));
+    throw new ChronikUnavailableError('chronik-protobuf-mode', {
+      url: result.url,
+      status: result.status,
+      contentType: contentType || undefined,
+      bodyPreviewHex: toBodyPreviewHex(result.raw),
+      hint: 'chronik-protobuf-mode; backend expected json',
+    });
+  }
+
+  if (!contentType.toLowerCase().includes('application/json')) {
+    throw new ChronikUnavailableError('chronik-non-json-response', {
+      url: result.url,
+      status: result.status,
+      contentType: contentType || undefined,
+      bodyPreviewHex: toBodyPreviewHex(result.raw),
+      hint: 'chronik-non-json-response',
+    });
   }
 
   let payload: {
@@ -248,12 +220,13 @@ async function getUtxosForAddressViaChronik(address: string): Promise<Utxo[]> {
     output_script?: string;
   };
   try {
-    payload = await response.json();
+    payload = JSON.parse(result.raw.toString('utf8')) as typeof payload;
   } catch (_err) {
     throw new ChronikUnavailableError('chronik-json-parse-error', {
-      url: requestUrl,
-      status: response.status,
+      url: result.url,
+      status: result.status,
       contentType: contentType || undefined,
+      bodyPreviewHex: toBodyPreviewHex(result.raw),
     });
   }
 
@@ -268,6 +241,26 @@ async function getUtxosForAddressViaChronik(address: string): Promise<Utxo[]> {
     tokenStatus: u.tokenStatus,
     plugins: u.plugins as { token?: unknown; [key: string]: unknown } | undefined,
   }));
+}
+
+async function chronikGet(path: string): Promise<{ url: string; status: number; contentType: string; raw: Buffer }> {
+  const cleanBaseUrl = effectiveChronikBaseUrl.replace(/\/+$/, '');
+  const requestUrl = `${cleanBaseUrl}${path}`;
+  try {
+    const response = await fetch(requestUrl);
+    const raw = Buffer.from(await response.arrayBuffer());
+    return {
+      url: requestUrl,
+      status: response.status,
+      contentType: response.headers.get('content-type') ?? '',
+      raw,
+    };
+  } catch {
+    throw new ChronikUnavailableError('chronik-network-error', {
+      url: requestUrl,
+      hint: 'chronik-network-error',
+    });
+  }
 }
 
 async function getUtxosForScriptViaChronik(
@@ -521,12 +514,6 @@ function toBigIntSats(value: unknown): bigint {
   return 0n;
 }
 
-function bytesToHex(value: unknown): string {
-  if (value instanceof Uint8Array) {
-    return Buffer.from(value).toString('hex');
-  }
-  if (Array.isArray(value)) {
-    return Buffer.from(value).toString('hex');
-  }
-  return '';
+function toBodyPreviewHex(value: Buffer): string {
+  return value.subarray(0, 64).toString('hex');
 }
