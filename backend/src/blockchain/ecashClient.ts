@@ -8,6 +8,7 @@ import { ChronikClient, type ScriptType } from 'chronik-client';
 import type { BroadcastResult, Utxo } from './types';
 import cashaddr from 'ecashaddrjs';
 import { validateAddress } from '../utils/validation';
+import { parse as parseProtobuf } from 'protobufjs';
 
 const rpcUrl = ecashConfig.rpcUrl;
 const rpcUser = ecashConfig.rpcUsername;
@@ -15,6 +16,46 @@ const rpcPass = ecashConfig.rpcPassword;
 
 const effectiveChronikBaseUrl = CHRONIK_URL;
 const chronik = new ChronikClient([effectiveChronikBaseUrl]);
+
+const chronikUtxosProto = parseProtobuf(`
+syntax = "proto3";
+
+message OutPoint {
+  bytes txid = 1;
+  uint32 out_idx = 2;
+}
+
+message ScriptUtxo {
+  OutPoint outpoint = 1;
+  int32 block_height = 2;
+  bool is_coinbase = 3;
+  int64 sats = 4;
+  bool is_final = 5;
+  bytes token = 6;
+  bytes plugins = 8;
+}
+
+message ScriptUtxos {
+  repeated ScriptUtxo utxos = 1;
+  bytes output_script = 2;
+}
+`).root.lookupType('ScriptUtxos');
+
+export type ChronikUnavailableDetails = {
+  url: string;
+  status?: number;
+  contentType?: string;
+};
+
+export class ChronikUnavailableError extends Error {
+  details: ChronikUnavailableDetails;
+
+  constructor(message: string, details: ChronikUnavailableDetails) {
+    super(message);
+    this.name = 'ChronikUnavailableError';
+    this.details = details;
+  }
+}
 
 export function isSpendableXecUtxo(utxo: Utxo): boolean {
   return !utxo.token
@@ -39,10 +80,13 @@ export function getEffectiveChronikBaseUrl(): string {
   return effectiveChronikBaseUrl;
 }
 
-function normalizeChronikAddress(address: string): string {
+export function normalizeChronikAddress(address: string): string {
   const trimmed = address.trim();
   if (trimmed.toLowerCase().startsWith('ecash:')) {
     return trimmed.slice('ecash:'.length);
+  }
+  if (trimmed.toLowerCase().startsWith('bitcoincash:')) {
+    return trimmed.slice('bitcoincash:'.length);
   }
   return trimmed;
 }
@@ -137,23 +181,93 @@ export async function getTransactionInfo(txid: string): Promise<TransactionInfo>
 
 async function getUtxosForAddressViaChronik(address: string): Promise<Utxo[]> {
   const normalizedAddress = normalizeChronikAddress(address);
-  const scriptUtxos = await chronikRequest(
-    `address utxos for ${normalizedAddress}`,
-    () => chronik.address(normalizedAddress).utxos()
-  );
-  return scriptUtxos.utxos.map((u) => {
-    const chronikUtxo = u as unknown as Record<string, unknown>;
-    return {
-      txid: u.outpoint.txid,
-      vout: u.outpoint.outIdx,
-      value: u.sats,
-      scriptPubKey: scriptUtxos.outputScript,
-      token: chronikUtxo.token,
-      slpToken: chronikUtxo.slpToken,
-      tokenStatus: chronikUtxo.tokenStatus,
-      plugins: chronikUtxo.plugins as { token?: unknown; [key: string]: unknown } | undefined,
+  const cleanBaseUrl = effectiveChronikBaseUrl.replace(/\/+$/, '');
+  const path = `/address/${normalizedAddress}/utxos`;
+  const requestUrl = `${cleanBaseUrl}${path}`;
+  console.log(`[chronik] baseUrl=${cleanBaseUrl}`);
+  console.log(`[chronik] utxosPath=${path}`);
+
+  let response: Response;
+  try {
+    response = await fetch(requestUrl);
+  } catch (err) {
+    throw new ChronikUnavailableError('chronik-network-error', {
+      url: requestUrl,
+      contentType: undefined,
+    });
+  }
+
+  const contentType = response.headers.get('content-type') ?? '';
+  console.log(`[chronik] contentType=${contentType || 'unknown'}`);
+  if (!response.ok) {
+    throw new ChronikUnavailableError('chronik-http-error', {
+      url: requestUrl,
+      status: response.status,
+      contentType: contentType || undefined,
+    });
+  }
+
+  if (contentType.toLowerCase().includes('application/x-protobuf')) {
+    const raw = new Uint8Array(await response.arrayBuffer());
+    type DecodedChronikUtxos = {
+      utxos?: Array<{
+        outpoint?: { txid?: Uint8Array; outIdx?: number };
+        sats?: string | number | bigint;
+        token?: Uint8Array;
+        plugins?: Uint8Array;
+      }>;
+      outputScript?: Uint8Array;
     };
-  });
+    let decoded: DecodedChronikUtxos;
+    try {
+      decoded = chronikUtxosProto.toObject(chronikUtxosProto.decode(raw), {
+        longs: String,
+        bytes: Array,
+      }) as DecodedChronikUtxos;
+    } catch (_err) {
+      throw new ChronikUnavailableError('chronik-decode-error', {
+        url: requestUrl,
+        status: response.status,
+        contentType: contentType || undefined,
+      });
+    }
+    const outputScript = bytesToHex(decoded.outputScript);
+    return (decoded.utxos ?? []).map((u) => ({
+      txid: bytesToHex(u.outpoint?.txid),
+      vout: typeof u.outpoint?.outIdx === 'number' ? u.outpoint.outIdx : 0,
+      value: toBigIntSats(u.sats),
+      scriptPubKey: outputScript,
+      token: u.token && u.token.length > 0 ? u.token : undefined,
+      plugins: u.plugins && u.plugins.length > 0 ? { token: u.plugins } : undefined,
+    }));
+  }
+
+  let payload: {
+    utxos?: Array<Record<string, unknown>>;
+    outputScript?: string;
+    output_script?: string;
+  };
+  try {
+    payload = await response.json();
+  } catch (_err) {
+    throw new ChronikUnavailableError('chronik-json-parse-error', {
+      url: requestUrl,
+      status: response.status,
+      contentType: contentType || undefined,
+    });
+  }
+
+  const outputScript = payload.outputScript ?? payload.output_script ?? '';
+  return (payload.utxos ?? []).map((u) => ({
+    txid: String((u.outpoint as { txid?: string } | undefined)?.txid ?? ''),
+    vout: Number((u.outpoint as { outIdx?: number; out_idx?: number } | undefined)?.outIdx ?? (u.outpoint as { out_idx?: number } | undefined)?.out_idx ?? 0),
+    value: toBigIntSats(u.sats ?? u.value),
+    scriptPubKey: String(outputScript),
+    token: u.token,
+    slpToken: u.slpToken,
+    tokenStatus: u.tokenStatus,
+    plugins: u.plugins as { token?: unknown; [key: string]: unknown } | undefined,
+  }));
 }
 
 async function getUtxosForScriptViaChronik(
@@ -405,4 +519,14 @@ function toBigIntSats(value: unknown): bigint {
     }
   }
   return 0n;
+}
+
+function bytesToHex(value: unknown): string {
+  if (value instanceof Uint8Array) {
+    return Buffer.from(value).toString('hex');
+  }
+  if (Array.isArray(value)) {
+    return Buffer.from(value).toString('hex');
+  }
+  return '';
 }

@@ -105,6 +105,37 @@ describe('buildCampaignPayoutHandler', () => {
     expect(buildPayoutTxMock).not.toHaveBeenCalled();
   });
 
+  it('returns 503 chronik-unavailable when chronik lookup fails', async () => {
+    const { buildCampaignPayoutHandler } = (await import('../routes/campaigns.routes')) as {
+      buildCampaignPayoutHandler: (req: any, res: any) => Promise<void>;
+    };
+    const { ChronikUnavailableError } = await import('../blockchain/ecashClient');
+
+    getUtxosForAddressMock.mockRejectedValue(
+      new ChronikUnavailableError('chronik-http-error', {
+        url: 'https://chronik.xolosarmy.xyz/address/qq/utxos',
+        status: 404,
+        contentType: 'application/x-protobuf',
+      }),
+    );
+
+    const req = { params: { id: 'camp-slug' }, body: {} };
+    const res = createMockRes();
+
+    await buildCampaignPayoutHandler(req as any, res as any);
+
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toEqual({
+      error: 'chronik-unavailable',
+      details: {
+        url: 'https://chronik.xolosarmy.xyz/address/qq/utxos',
+        status: 404,
+        contentType: 'application/x-protobuf',
+      },
+    });
+    expect(buildPayoutTxMock).not.toHaveBeenCalled();
+  });
+
   it('rejects build when payout was already processed', async () => {
     const { buildCampaignPayoutHandler } = (await import('../routes/campaigns.routes')) as {
       buildCampaignPayoutHandler: (req: any, res: any) => Promise<void>;

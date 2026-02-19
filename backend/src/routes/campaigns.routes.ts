@@ -7,6 +7,9 @@ import {
   getTransactionInfo,
   getUtxosForAddress,
   isSpendableXecUtxo,
+  ChronikUnavailableError,
+  getEffectiveChronikBaseUrl,
+  normalizeChronikAddress,
 } from '../blockchain/ecashClient';
 import type { Utxo } from '../blockchain/types';
 import { buildPayoutTx } from '../blockchain/txBuilder';
@@ -284,8 +287,11 @@ async function selectCampaignFundingUtxos(
   const escrowAddress = escrowValidation.escrowAddress;
   const utxos = (await getUtxosForAddress(escrowAddress)).filter(isSpendableXecUtxo);
   const total = utxos.reduce((acc, utxo) => acc + utxo.value, 0n);
+  const normalizedAddress = normalizeChronikAddress(escrowAddress);
+  console.log(`[payout/build] chronikUrl=${getEffectiveChronikBaseUrl()}`);
+  console.log(`[payout/build] chronikPath=/address/${normalizedAddress}/utxos`);
   console.log(
-    `[payout/build] id=${campaign.id} escrow=${escrowAddress} utxos=${utxos.length} raised=${total.toString()} goal=${String(campaign.goal)}`,
+    `[payout/build] id=${campaign.id} escrow=${escrowAddress} utxoCount=${utxos.length} raisedSats=${total.toString()} goal=${String(campaign.goal)}`,
   );
   return { escrowAddress, utxos, total };
 }
@@ -817,6 +823,16 @@ export const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = asy
     }
     if (mismatch) {
       return res.status(400).json({ error: 'escrow-address-mismatch', ...mismatch });
+    }
+    if (err instanceof ChronikUnavailableError) {
+      return res.status(503).json({
+        error: 'chronik-unavailable',
+        details: {
+          url: err.details.url,
+          status: err.details.status ?? null,
+          contentType: err.details.contentType ?? null,
+        },
+      });
     }
     if (message.includes('destinationBeneficiary') || message.includes('beneficiaryAddress')) {
       return res.status(400).json({ error: 'payout-build-failed', details: { message } });
