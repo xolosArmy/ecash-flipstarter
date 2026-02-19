@@ -19,6 +19,7 @@ export type ActivationFeeVerificationStatus = 'none' | 'pending_verification' | 
 
 export type StoredCampaign = {
   id: string;
+  slug?: string;
   name: string;
   description?: string;
   goal: string | number | bigint;
@@ -96,6 +97,7 @@ export async function initializeDatabase(database?: Database): Promise<void> {
   await db.exec(`
     CREATE TABLE IF NOT EXISTS campaigns (
       id TEXT PRIMARY KEY,
+      slug TEXT,
       name TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
       goal TEXT NOT NULL,
@@ -165,6 +167,7 @@ async function ensureCampaignColumns(db: Database): Promise<void> {
 
   const requiredColumns: Array<{ name: string; sqlType: string; defaultSql?: string }> = [
     { name: 'name', sqlType: 'TEXT', defaultSql: "''" },
+    { name: 'slug', sqlType: 'TEXT' },
     { name: 'description', sqlType: 'TEXT', defaultSql: "''" },
     { name: 'goal', sqlType: 'TEXT', defaultSql: "'0'" },
     { name: 'expiresAt', sqlType: 'TEXT', defaultSql: "''" },
@@ -209,6 +212,7 @@ async function ensureCampaignColumns(db: Database): Promise<void> {
 
 type CampaignRow = {
   id: string;
+  slug: string | null;
   name: string;
   description: string | null;
   goal: string;
@@ -269,6 +273,7 @@ function mapRowToCampaign(row: CampaignRow): StoredCampaign {
   const expiresAt = row.expiresAt && row.expiresAt.trim() ? row.expiresAt : row.expirationTime ?? '';
   const campaign: StoredCampaign = {
     id: row.id,
+    slug: row.slug ?? undefined,
     name: row.name,
     description: row.description ?? '',
     goal: row.goal,
@@ -353,6 +358,7 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
       `
       INSERT OR REPLACE INTO campaigns (
         id,
+        slug,
         name,
         description,
         goal,
@@ -385,10 +391,11 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
         payout_paidAt,
         treasuryAddressUsed,
         expirationTime
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         campaign.id,
+        campaign.slug ?? null,
         campaign.name,
         campaign.description ?? '',
         goal,

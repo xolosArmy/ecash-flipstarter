@@ -24,6 +24,7 @@ type CampaignStatus =
 
 type CampaignApiRecord = {
   id: string;
+  slug?: string;
   name: string;
   description?: string;
   goal: string;
@@ -304,13 +305,14 @@ function toStoredCampaignRecord(campaign: CampaignApiRecord): StoredCampaign {
   };
 }
 
-async function getCampaignOr404(req: any, res: any): Promise<CampaignApiRecord | null> {
-  const campaign = (await service.getCampaign(req.params.id)) as CampaignApiRecord | null;
-  if (!campaign) {
+async function resolveCampaignOr404(req: any, res: any): Promise<{ canonicalId: string; campaign: CampaignApiRecord } | null> {
+  const resolved = await service.getCanonicalCampaign(req.params.id);
+  if (!resolved) {
     res.status(404).json({ error: 'campaign-not-found' });
     return null;
   }
-  return campaign;
+  req.params.id = resolved.canonicalId;
+  return { canonicalId: resolved.canonicalId, campaign: resolved.campaign as CampaignApiRecord };
 }
 
 // GET /api/campaigns
@@ -356,11 +358,11 @@ router.get('/campaigns/stats', getCampaignStats);
 
 router.get('/campaign/:id', async (req, res) => {
   try {
-    const campaign = await service.getCampaign(req.params.id);
-    if (!campaign) {
+    const resolved = await service.getCanonicalCampaign(req.params.id);
+    if (!resolved) {
       return res.status(404).json({ error: 'campaign-not-found' });
     }
-    return res.json(campaign);
+    return res.json({ ...resolved.campaign, canonicalId: resolved.canonicalId });
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
   }
@@ -368,11 +370,11 @@ router.get('/campaign/:id', async (req, res) => {
 
 router.get('/campaigns/:id', async (req, res) => {
   try {
-    const campaign = await service.getCampaign(req.params.id);
-    if (!campaign) {
+    const resolved = await service.getCanonicalCampaign(req.params.id);
+    if (!resolved) {
       return res.status(404).json({ error: 'campaign-not-found' });
     }
-    return res.json(campaign);
+    return res.json({ ...resolved.campaign, canonicalId: resolved.canonicalId });
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
   }
@@ -404,14 +406,12 @@ router.post('/campaigns', async (req, res) => {
 
 // Legacy endpoint: only allows ACTIVE when fee is paid.
 async function activateCampaign(req: any, res: any) {
-  const { id } = req.params;
   try {
-    const campaign = await service.getCampaign(id);
-    if (!campaign) {
-      return res.status(404).json({ error: 'Campaign not found' });
-    }
-    await service.updateCampaignStatus(id, 'active');
-    return res.json({ success: true, status: 'active' });
+    const resolvedCampaign = await resolveCampaignOr404(req, res);
+    if (!resolvedCampaign) return;
+    const { canonicalId } = resolvedCampaign;
+    await service.updateCampaignStatus(canonicalId, 'active');
+    return res.json({ success: true, status: 'active', canonicalId });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message === 'activation-fee-unpaid') {
@@ -422,14 +422,12 @@ async function activateCampaign(req: any, res: any) {
 }
 
 async function processCampaignPayout(req: any, res: any) {
-  const { id } = req.params;
   try {
-    const campaign = await service.getCampaign(id);
-    if (!campaign) {
-      return res.status(404).json({ error: 'Campaign not found' });
-    }
-    await service.updateCampaignStatus(id, 'funded');
-    return res.json({ success: true, status: 'funded' });
+    const resolvedCampaign = await resolveCampaignOr404(req, res);
+    if (!resolvedCampaign) return;
+    const { canonicalId } = resolvedCampaign;
+    await service.updateCampaignStatus(canonicalId, 'funded');
+    return res.json({ success: true, status: 'funded', canonicalId });
   } catch (_error) {
     return res.status(500).json({ error: 'Failed to process payout' });
   }
@@ -443,8 +441,9 @@ router.post('/campaigns/:id/payout', processCampaignPayout);
 // Dedicated implementation shared by activation aliases.
 export const buildActivationHandler: Parameters<typeof router.post>[1] = async (req, res) => {
   try {
-    const campaign = await getCampaignOr404(req, res);
-    if (!campaign) return;
+    const resolvedCampaign = await resolveCampaignOr404(req, res);
+    if (!resolvedCampaign) return;
+    const { campaign, canonicalId } = resolvedCampaign;
 
     if (isActivationFeePaid(campaign)) {
       return res.status(400).json({ error: 'activation-fee-already-paid' });
@@ -531,8 +530,9 @@ router.post('/campaigns/:id/activation/build', buildActivationHandler);
 
 export const confirmActivationHandler: Parameters<typeof router.post>[1] = async (req, res) => {
   try {
-    const campaign = await getCampaignOr404(req, res);
-    if (!campaign) return;
+    const resolvedCampaign = await resolveCampaignOr404(req, res);
+    if (!resolvedCampaign) return;
+    const { campaign, canonicalId } = resolvedCampaign;
 
     const txid = sanitizeTxid(req.body?.txid);
     const payerAddress =
@@ -551,7 +551,7 @@ export const confirmActivationHandler: Parameters<typeof router.post>[1] = async
       if (existingTxid !== txid) {
         return res.status(400).json({ error: 'activation-fee-already-verified' });
       }
-      return res.json(await toActivationResponse(campaign.id, campaign, undefined, txid));
+      return res.json(await toActivationResponse(canonicalId, campaign, undefined, txid));
     }
 
     await service.recordActivationFeeBroadcast(campaign.id, txid, {
@@ -582,7 +582,7 @@ export const confirmActivationHandler: Parameters<typeof router.post>[1] = async
         return res.status(404).json({ error: 'campaign-not-found' });
       }
       return res.json({
-        ...(await toActivationResponse(campaign.id, updatedInvalid, verification.error, txid)),
+        ...(await toActivationResponse(canonicalId, updatedInvalid, verification.error, txid)),
         message: 'Pago inválido: la transacción no cumple monto o dirección de treasury.',
       });
     }
@@ -604,7 +604,7 @@ export const confirmActivationHandler: Parameters<typeof router.post>[1] = async
       return res.status(404).json({ error: 'campaign-not-found' });
     }
     const response = await toActivationResponse(
-      campaign.id,
+      canonicalId,
       updated,
       verification.status === 'pending_verification' ? verification.warning : undefined,
       txid,
@@ -626,8 +626,9 @@ router.post('/campaigns/:id/activation/confirm', confirmActivationHandler);
 
 export const activationStatusHandler: Parameters<typeof router.get>[1] = async (req, res) => {
   try {
-    const campaign = await getCampaignOr404(req, res);
-    if (!campaign) return;
+    const resolvedCampaign = await resolveCampaignOr404(req, res);
+    if (!resolvedCampaign) return;
+    const { campaign, canonicalId } = resolvedCampaign;
 
     let verificationStatus = campaign.activationFeeVerificationStatus ?? 'none';
     let warning: string | undefined;
@@ -669,7 +670,7 @@ export const activationStatusHandler: Parameters<typeof router.get>[1] = async (
     if (!refreshed) {
       return res.status(404).json({ error: 'campaign-not-found' });
     }
-    const response = await toActivationResponse(refreshed.id, refreshed, warning, feeTxid ?? undefined);
+    const response = await toActivationResponse(canonicalId, refreshed, warning, feeTxid ?? undefined);
     return res.json(response);
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
@@ -681,9 +682,14 @@ router.get('/campaign/:id/activation/status', activationStatusHandler);
 
 const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req, res) => {
   try {
-    const campaignId = req.params.id;
-    const campaign = await getCampaignOr404(req, res);
-    if (!campaign) return;
+    const requestedId = req.params.id;
+    const resolvedCampaign = await resolveCampaignOr404(req, res);
+    if (!resolvedCampaign) return;
+    const { campaign, canonicalId } = resolvedCampaign;
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.debug(`[campaign] slug=${requestedId} canonicalId=${canonicalId}`);
+    }
 
     const destinationBeneficiary =
       typeof req.body?.destinationBeneficiary === 'string' && req.body.destinationBeneficiary.trim()
@@ -694,7 +700,7 @@ const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req
     const raisedSats = campaignUtxos.reduce((acc, utxo) => acc + utxo.value, 0n);
 
     console.log(
-      `[payout/build] Campaña: ${campaignId} | Escrow: ${escrowAddress} | Total On-Chain: ${raisedSats} | Meta: ${campaign.goal}`,
+      `[payout/build] Campaña: ${canonicalId} (requested: ${requestedId}) | Escrow: ${escrowAddress} | Total On-Chain: ${raisedSats} | Meta: ${campaign.goal}`,
     );
 
     if (raisedSats < BigInt(campaign.goal)) {
@@ -719,7 +725,7 @@ const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req
 
     const built = serializeBuiltTx(builtTx);
     const offer = walletConnectOfferStore.createOffer({
-      campaignId,
+      campaignId: canonicalId,
       unsignedTxHex: built.unsignedTxHex || built.rawHex,
       amount: raisedSats.toString(),
       contributorAddress: destinationBeneficiary,
@@ -732,7 +738,7 @@ const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req
       const campaigns = (await service.listCampaigns()) as StoredCampaign[];
       syncCampaignStoreFromDiskCampaigns(campaigns);
       await saveCampaignsToDisk(campaigns);
-      console.log(`[payout/build] Estado de campaña ${campaignId} actualizado a 'funded' exitosamente.`);
+      console.log(`[payout/build] Estado de campaña ${canonicalId} actualizado a 'funded' exitosamente.`);
     } catch (persistErr) {
       console.error('[payout/build] Error actualizando SQLite/JSON:', persistErr);
     }
@@ -759,8 +765,9 @@ router.post('/campaigns/:id/payout/build', buildCampaignPayoutHandler);
 
 router.post('/campaigns/:id/payout/confirm', async (req, res) => {
   try {
-    const campaign = await getCampaignOr404(req, res);
-    if (!campaign) return;
+    const resolvedCampaign = await resolveCampaignOr404(req, res);
+    if (!resolvedCampaign) return;
+    const { campaign, canonicalId } = resolvedCampaign;
 
     const txid = sanitizeTxid(req.body?.txid);
     await service.markPayoutComplete(campaign.id, txid, TREASURY_ADDRESS);
@@ -785,16 +792,17 @@ router.post('/campaigns/:id/payout/confirm', async (req, res) => {
 
 router.get('/campaigns/:id/pledges', async (req, res) => {
   try {
-    const campaign = await service.getCampaign(req.params.id);
-    if (!campaign) {
+    const resolved = await service.getCanonicalCampaign(req.params.id);
+    if (!resolved) {
       return res.status(404).json({ error: 'Campaign not found' });
     }
 
-    const pledges = await getPledgesByCampaign(req.params.id);
+    const pledges = await getPledgesByCampaign(resolved.canonicalId);
     const totalPledged = pledges.reduce((total, pledge) => total + pledge.amount, 0);
     return res.json({
       totalPledged,
       pledgeCount: pledges.length,
+      canonicalId: resolved.canonicalId,
       pledges: pledges.map((pledge) => ({
         txid: pledge.txid,
         contributorAddress: pledge.contributorAddress,
@@ -810,18 +818,19 @@ router.get('/campaigns/:id/pledges', async (req, res) => {
 
 router.get('/campaigns/:id/summary', async (req, res) => {
   try {
-    const campaign = (await service.getCampaign(req.params.id)) as CampaignApiRecord | null;
-    if (!campaign) {
+    const resolved = await service.getCanonicalCampaign(req.params.id);
+    if (!resolved) {
       return res.status(404).json({ error: 'Campaign not found' });
     }
 
-    const pledges = await getPledgesByCampaign(req.params.id);
+    const pledges = await getPledgesByCampaign(resolved.canonicalId);
     const totalPledged = pledges.reduce((total, pledge) => total + pledge.amount, 0);
-    const summary = toSummary(campaign, totalPledged);
+    const summary = toSummary(resolved.campaign as CampaignApiRecord, totalPledged);
 
     return res.json({
       ...summary,
       pledgeCount: pledges.length,
+      canonicalId: resolved.canonicalId,
     });
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
@@ -830,12 +839,12 @@ router.get('/campaigns/:id/summary', async (req, res) => {
 
 router.get('/campaign/:id/history', async (req, res) => {
   try {
-    const campaign = await service.getCampaign(req.params.id);
-    if (!campaign) {
+    const resolved = await service.getCanonicalCampaign(req.params.id);
+    if (!resolved) {
       return res.status(404).json({ error: 'Campaign not found' });
     }
 
-    const history = await service.getCampaignHistory(req.params.id);
+    const history = await service.getCampaignHistory(resolved.canonicalId);
     return res.json(history);
   } catch (_error) {
     return res.status(500).json({ error: 'Failed to fetch campaign history' });
@@ -844,24 +853,28 @@ router.get('/campaign/:id/history', async (req, res) => {
 
 router.get('/campaigns/:id/history', async (req, res) => {
   try {
-    const campaign = await service.getCampaign(req.params.id);
-    if (!campaign) {
+    const resolved = await service.getCanonicalCampaign(req.params.id);
+    if (!resolved) {
       return res.status(404).json({ error: 'Campaign not found' });
     }
 
-    const history = await service.getCampaignHistory(req.params.id);
+    const history = await service.getCampaignHistory(resolved.canonicalId);
     return res.json(history);
   } catch (_error) {
     return res.status(500).json({ error: 'Failed to fetch campaign history' });
   }
 });
 
-export async function getCampaignStatusById(campaignId: string): Promise<CampaignStatus | null> {
-  const campaign = (await service.getCampaign(campaignId)) as CampaignApiRecord | null;
+export async function getCampaignStatusById(campaignIdOrSlug: string): Promise<CampaignStatus | null> {
+  const canonicalId = await service.resolveCampaignId(campaignIdOrSlug);
+  if (!canonicalId) {
+    return null;
+  }
+  const campaign = (await service.getCampaign(canonicalId)) as CampaignApiRecord | null;
   if (!campaign) {
     return null;
   }
-  const totalPledged = await getTotalPledged(campaignId);
+  const totalPledged = await getTotalPledged(canonicalId);
   return deriveCampaignStatus(campaign, totalPledged);
 }
 

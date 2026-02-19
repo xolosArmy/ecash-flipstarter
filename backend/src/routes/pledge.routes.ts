@@ -12,14 +12,18 @@ const TXID_HEX_REGEX = /^[0-9a-fA-F]{64}$/;
 
 export const createPledgeHandler = async (req: any, res: any) => {
   try {
-    const status = await getCampaignStatusById(req.params.id);
+    const canonicalId = await campaignService.resolveCampaignId(req.params.id);
+    if (!canonicalId) {
+      return res.status(404).json({ error: 'campaign-not-found' });
+    }
+    const status = await getCampaignStatusById(canonicalId);
     if (!status) {
       return res.status(404).json({ error: 'campaign-not-found' });
     }
     if (status !== 'active') {
       return res.status(400).json({ error: 'campaign-not-active' });
     }
-    const campaign = await campaignService.getCampaign(req.params.id) as
+    const campaign = await campaignService.getCampaign(canonicalId) as
       | { campaignAddress?: string; covenantAddress?: string }
       | null;
     const campaignAddress = campaign?.campaignAddress || campaign?.covenantAddress || '';
@@ -33,7 +37,7 @@ export const createPledgeHandler = async (req: any, res: any) => {
       req.body.contributorAddress as string,
       'contributorAddress'
     );
-    const response = await createWalletConnectPledgeOffer(req.params.id, contributorAddress, amount, {
+    const response = await createWalletConnectPledgeOffer(canonicalId, contributorAddress, amount, {
       campaignAddress,
       message,
     });
@@ -72,7 +76,12 @@ function selectPledgeToConfirm(pledges: SimplePledge[], body: Record<string, unk
 
 export const confirmPledgeHandler = async (req: any, res: any) => {
   try {
-    const campaignId = String(req.params.id ?? '').trim();
+    const inputId = String(req.params.id ?? '').trim();
+    const canonicalId = await campaignService.resolveCampaignId(inputId);
+    if (!canonicalId) {
+      return res.status(404).json({ error: 'campaign-not-found' });
+    }
+    const campaignId = canonicalId;
     const status = await getCampaignStatusById(campaignId);
     if (!status) {
       return res.status(404).json({ error: 'campaign-not-found' });

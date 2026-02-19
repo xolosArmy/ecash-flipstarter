@@ -5,6 +5,7 @@ import {
   buildPayoutTx,
   confirmActivationTx,
   confirmPayoutTx,
+  fetchCampaign,
   fetchCampaignActivationStatus,
   fetchCampaignHistory,
   fetchCampaignPledges,
@@ -39,9 +40,28 @@ function requireEcashChainId(session: unknown): string {
   return chainId;
 }
 
+
+export function resolveMutationCampaignId(
+  slug: string,
+  canonicalId: string | null,
+  campaign: Pick<CampaignSummary, 'id'> | null,
+): { ok: true; canonicalId: string } | { ok: false; error: string } {
+  if (!canonicalId) {
+    return { ok: false, error: 'No se pudo resolver el campaignId canónico desde la URL actual.' };
+  }
+  if (campaign?.id && campaign.id !== canonicalId) {
+    return {
+      ok: false,
+      error: `Inconsistencia de campaña detectada (slug=${slug}, canonicalId=${canonicalId}, payload.id=${campaign.id}).`,
+    };
+  }
+  return { ok: true, canonicalId };
+}
+
 export const CampaignDetail: React.FC = () => {
   const { id } = useParams();
   const [campaign, setCampaign] = useState<CampaignSummary | null>(null);
+  const [canonicalId, setCanonicalId] = useState<string | null>(null);
   const [loadingCampaign, setLoadingCampaign] = useState(true);
   const [campaignError, setCampaignError] = useState('');
   const [payerAddress, setPayerAddress] = useState('');
@@ -93,15 +113,22 @@ export const CampaignDetail: React.FC = () => {
   const refreshCampaign = useCallback(() => {
     if (!id) return;
     setCampaignError('');
-    fetchCampaignSummary(id)
+    fetchCampaign(id)
+      .then((detail) => {
+        const nextCanonicalId = detail.canonicalId || detail.id;
+        setCanonicalId(nextCanonicalId);
+        if (import.meta.env.DEV) console.debug(`[campaign] slug=${id} canonicalId=${nextCanonicalId}`);
+        return fetchCampaignSummary(nextCanonicalId);
+      })
       .then((summary) => setCampaign(summary))
       .catch(() => {
         setCampaign(null);
         setCampaignError('No se pudo cargar la campaña.');
       });
-    loadMessages(id);
-    loadHistory(id);
-  }, [id, loadHistory, loadMessages]);
+    const targetId = canonicalId || id;
+    loadMessages(targetId);
+    loadHistory(targetId);
+  }, [canonicalId, id, loadHistory, loadMessages]);
 
   useEffect(() => {
     if (!id) {
@@ -112,7 +139,13 @@ export const CampaignDetail: React.FC = () => {
     }
     setLoadingCampaign(true);
     setCampaignError('');
-    fetchCampaignSummary(id)
+    fetchCampaign(id)
+      .then((detail) => {
+        const nextCanonicalId = detail.canonicalId || detail.id;
+        setCanonicalId(nextCanonicalId);
+        if (import.meta.env.DEV) console.debug(`[campaign] slug=${id} canonicalId=${nextCanonicalId}`);
+        return fetchCampaignSummary(nextCanonicalId);
+      })
       .then((summary) => {
         setCampaign(summary);
         setLoadingCampaign(false);
@@ -122,9 +155,10 @@ export const CampaignDetail: React.FC = () => {
         setCampaignError('No se pudo cargar la campaña.');
         setLoadingCampaign(false);
       });
-    loadMessages(id);
-    loadHistory(id);
-  }, [id, loadHistory, loadMessages]);
+    const targetId = canonicalId || id;
+    loadMessages(targetId);
+    loadHistory(targetId);
+  }, [canonicalId, id, loadHistory, loadMessages]);
 
   useEffect(() => {
     if (!id) return undefined;
@@ -136,7 +170,7 @@ export const CampaignDetail: React.FC = () => {
         setCampaignError('');
         return;
       }
-      fetchCampaignSummary(id)
+      fetchCampaignSummary(canonicalId || id)
         .then((summary) => {
           setCampaign(summary);
           setCampaignError('');
@@ -150,7 +184,7 @@ export const CampaignDetail: React.FC = () => {
     return () => {
       window.removeEventListener('campaign:summary:refresh', onSummaryRefresh as EventListener);
     };
-  }, [id]);
+  }, [canonicalId, id]);
 
   useEffect(() => {
     if (payerAddress.trim()) return;
@@ -166,17 +200,17 @@ export const CampaignDetail: React.FC = () => {
 
     const interval = window.setInterval(async () => {
       try {
-        const activation = await fetchCampaignActivationStatus(id);
+        const activation = await fetchCampaignActivationStatus(canonicalId || id);
         if (import.meta.env.DEV) {
           console.debug('[ActivationFee] polling status tick', activation);
         }
         if (activation.status === 'active') {
-          const refreshed = await fetchCampaignSummary(id);
+          const refreshed = await fetchCampaignSummary(canonicalId || id);
           setCampaign(refreshed);
           setActivationMessage('Pago verificado on-chain. Campaña activada.');
           window.dispatchEvent(
             new CustomEvent('campaign:summary:refresh', {
-              detail: { campaignId: id, summary: refreshed },
+              detail: { campaignId: canonicalId || id, summary: refreshed },
             }),
           );
           window.dispatchEvent(new Event('campaigns:refresh'));
@@ -184,7 +218,7 @@ export const CampaignDetail: React.FC = () => {
           return;
         }
         if (shouldStopActivationPolling(activation)) {
-          const refreshed = await fetchCampaignSummary(id);
+          const refreshed = await fetchCampaignSummary(canonicalId || id);
           setCampaign(refreshed);
           setActivationError('Pago inválido (monto/dirección). Reintenta.');
           window.clearInterval(interval);
@@ -197,13 +231,18 @@ export const CampaignDetail: React.FC = () => {
     return () => {
       window.clearInterval(interval);
     };
-  }, [campaign?.activation?.feeTxid, campaign?.activationFeeTxid, campaign?.status, id]);
+  }, [campaign?.activation?.feeTxid, campaign?.activationFeeTxid, campaign?.status, canonicalId, id]);
 
   const description = campaign?.description ?? '';
   const renderedDescription = useMemo(() => parseLimitedMarkdown(description), [description]);
 
   const activateCampaign = async () => {
     if (!id || activating) return;
+    const idCheck = resolveMutationCampaignId(id, canonicalId, campaign);
+    if (!idCheck.ok) {
+      setActivationError(idCheck.error);
+      return;
+    }
     setActivationError('');
     setActivationMessage('');
     setActivating(true);
@@ -231,8 +270,8 @@ export const CampaignDetail: React.FC = () => {
       setPayerAddress(activeAddress);
 
       setActivationMessage('Construyendo pago de activación...');
-      const built = await buildActivationTx(id, activeAddress);
-      localStorage.setItem(`tonalli:activationOfferId:${id}`, built.wcOfferId);
+      const built = await buildActivationTx(idCheck.canonicalId, activeAddress);
+      localStorage.setItem(`tonalli:activationOfferId:${idCheck.canonicalId}`, built.wcOfferId);
       if (built.mode !== 'intent') {
         throw new Error('activation-mode-unsupported');
       }
@@ -261,15 +300,15 @@ export const CampaignDetail: React.FC = () => {
         console.debug('[ActivationFee] broadcast txid', txid);
       }
 
-      const summary = await confirmActivationTx(id, txid, activeAddress);
+      const summary = await confirmActivationTx(idCheck.canonicalId, txid, activeAddress);
       if (import.meta.env.DEV) {
         console.debug('[ActivationFee] confirm response', summary);
       }
-      const refreshed = await fetchCampaignSummary(id);
+      const refreshed = await fetchCampaignSummary(idCheck.canonicalId);
       setCampaign(refreshed);
       window.dispatchEvent(
         new CustomEvent('campaign:summary:refresh', {
-          detail: { campaignId: id, summary: refreshed },
+          detail: { campaignId: idCheck.canonicalId, summary: refreshed },
         }),
       );
       window.dispatchEvent(new Event('campaigns:refresh'));
@@ -306,6 +345,11 @@ export const CampaignDetail: React.FC = () => {
 
   const payoutCampaign = async () => {
     if (!id || payingOut) return;
+    const idCheck = resolveMutationCampaignId(id, canonicalId, campaign);
+    if (!idCheck.ok) {
+      setPayoutError(idCheck.error);
+      return;
+    }
     setPayoutError('');
     setPayoutMessage('');
     setPayingOut(true);
@@ -323,7 +367,8 @@ export const CampaignDetail: React.FC = () => {
         activeSession = await connect();
       }
 
-      const { unsignedTxHex, wcOfferId } = await buildPayoutTx(id);
+      if (import.meta.env.DEV) console.debug(`[payout/build] using canonicalId=${idCheck.canonicalId} from slug=${id}`);
+      const { unsignedTxHex, wcOfferId } = await buildPayoutTx(idCheck.canonicalId);
       setPayoutMessage('Esperando confirmación en Tonalli...');
       let txid: string | null = null;
 
@@ -336,7 +381,7 @@ export const CampaignDetail: React.FC = () => {
         txid = result.txid;
       } else {
         console.warn('[Payout][WC] Missing unsignedTxHex, falling back to legacy WalletConnect request', {
-          campaignId: id,
+          campaignId: idCheck.canonicalId,
           offerId: wcOfferId,
         });
         const ecashNs = activeSession?.namespaces?.ecash;
@@ -349,11 +394,11 @@ export const CampaignDetail: React.FC = () => {
       if (!txid) {
         throw new Error('Tonalli returned an invalid txid.');
       }
-      const summary = await confirmPayoutTx(id, txid);
+      const summary = await confirmPayoutTx(idCheck.canonicalId, txid);
       setCampaign(summary);
       window.dispatchEvent(
         new CustomEvent('campaign:summary:refresh', {
-          detail: { campaignId: id, summary },
+          detail: { campaignId: idCheck.canonicalId, summary },
         }),
       );
       window.dispatchEvent(new Event('campaigns:refresh'));
@@ -406,6 +451,9 @@ export const CampaignDetail: React.FC = () => {
       <h1>{campaign.name}</h1>
       <SecurityBanner />
       <p>Estado: <StatusBadge status={campaign.status} /></p>
+      {campaign.id !== (canonicalId || campaign.id) && (
+        <p style={{ color: '#b00020' }}>Inconsistencia detectada entre URL y payload. Bloqueando acciones mutables.</p>
+      )}
       {campaign.status === 'pending_fee' && (
         <p style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, background: '#fef3c7', color: '#92400e' }}>
           Pendiente de pago
@@ -522,7 +570,7 @@ export const CampaignDetail: React.FC = () => {
       <WalletConnectModal />
       {campaign.status === 'active' ? (
         <PledgeForm
-          campaignId={id}
+          campaignId={canonicalId || id}
           campaignAddress={campaign.covenant?.campaignAddress || campaign.campaignAddress}
           onBroadcastSuccess={refreshCampaign}
         />

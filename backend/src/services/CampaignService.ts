@@ -12,6 +12,7 @@ import {
 import { getCampaignById, listCampaigns as listCampaignsFromSqlite } from '../db/SQLiteStore';
 import { getDb } from '../store/db';
 import { ACTIVATION_FEE_SATS, ACTIVATION_FEE_XEC } from '../config/constants';
+import { deriveCampaignSlug, resolveCampaignIdFromSnapshots } from './campaignIdResolver';
 
 // In-memory cache used by CovenantIndex and pledge services.
 const campaigns = new Map<string, CampaignDefinition>();
@@ -121,6 +122,7 @@ function normalizeSnapshot(snapshot: StoredCampaign): StoredCampaign {
 
   return {
     ...snapshot,
+    slug: deriveCampaignSlug(snapshot),
     activation,
     activationFeeRequired,
     activationFeePaid,
@@ -167,6 +169,7 @@ function toStoredCampaign(definition: CampaignDefinition, prior?: StoredCampaign
 
   return {
     id: definition.id,
+    slug: priorNormalized?.slug ?? deriveCampaignSlug({ id: definition.id, createdAt: priorNormalized?.createdAt ?? new Date().toISOString() }),
     name: definition.name,
     description: definition.description,
     goal: definition.goal.toString(),
@@ -424,6 +427,14 @@ export class CampaignService {
 
     const snapshot: StoredCampaign = normalizeSnapshot({
       id,
+      slug: typeof payload.slug === 'string' && payload.slug.trim()
+        ? payload.slug.trim()
+        : deriveCampaignSlug({
+          id,
+          createdAt: typeof payload.createdAt === 'string' && payload.createdAt.trim()
+            ? payload.createdAt
+            : new Date().toISOString(),
+        }),
       name: campaign.name,
       description: campaign.description,
       goal: campaign.goal.toString(),
@@ -511,6 +522,39 @@ export class CampaignService {
     });
 
     return this.serializeCampaign(campaign, snapshot, covenantRef, 0);
+  }
+
+
+  async resolveCampaignId(input: string): Promise<string | null> {
+    const candidate = String(input ?? '').trim();
+    if (!candidate) {
+      return null;
+    }
+
+    if (campaigns.has(candidate)) {
+      return candidate;
+    }
+
+    const records = await listCampaignsFromSqlite();
+    const resolved = resolveCampaignIdFromSnapshots(candidate, records);
+    if (resolved) {
+      return resolved;
+    }
+
+    const fromCacheSnapshots = Array.from(campaignSnapshots.values());
+    return resolveCampaignIdFromSnapshots(candidate, fromCacheSnapshots);
+  }
+
+  async getCanonicalCampaign(input: string) {
+    const canonicalId = await this.resolveCampaignId(input);
+    if (!canonicalId) {
+      return null;
+    }
+    const campaign = await this.getCampaign(canonicalId);
+    if (!campaign) {
+      return null;
+    }
+    return { canonicalId, campaign };
   }
 
   async getCampaign(id: string) {
