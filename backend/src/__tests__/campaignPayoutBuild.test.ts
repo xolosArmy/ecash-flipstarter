@@ -73,7 +73,7 @@ describe('buildCampaignPayoutHandler', () => {
     listCampaignsMock.mockResolvedValue([campaign]);
   });
 
-  it('returns 400 insufficient-funds-on-chain with structured details', async () => {
+  it('returns 400 insufficient-funds with structured details', async () => {
     const { buildCampaignPayoutHandler } = (await import('../routes/campaigns.routes')) as {
       buildCampaignPayoutHandler: (req: any, res: any) => Promise<void>;
     };
@@ -94,17 +94,12 @@ describe('buildCampaignPayoutHandler', () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.body).toEqual({
-      error: 'insufficient-funds-on-chain',
+      error: 'insufficient-funds',
       details: {
-        escrowAddress: campaign.campaignAddress,
-        goal: '1000',
-        raised: '300',
-        missing: '700',
-        utxoCount: 1,
-        campaignAddress: campaign.campaignAddress,
-        recipientAddress: null,
-        covenantAddress: campaign.covenantAddress,
-        escrowAddressStored: campaign.escrowAddress,
+        requiredSats: '1000',
+        availableSats: '300',
+        derivedEscrowAddress: campaign.campaignAddress,
+        derivedScriptHash: null,
       },
     });
     expect(buildPayoutTxMock).not.toHaveBeenCalled();

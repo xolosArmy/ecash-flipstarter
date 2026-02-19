@@ -290,6 +290,40 @@ async function selectCampaignFundingUtxos(
   return { escrowAddress, utxos, total };
 }
 
+async function deriveScriptHashFromAddress(address?: string | null): Promise<string | null> {
+  if (!address) return null;
+  try {
+    const scriptPubKey = await addressToScriptPubKey(address);
+    const normalized = scriptPubKey.toLowerCase();
+    if (normalized.startsWith('a914') && normalized.endsWith('87') && normalized.length === 46) {
+      return normalized.slice(4, -2);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function logPayoutBuildErrorContext(args: {
+  campaign: CampaignApiRecord;
+  canonicalId: string;
+  totalPledged?: bigint;
+  derivedEscrowAddress?: string | null;
+  derivedScriptHash?: string | null;
+  error: string;
+}) {
+  console.error('[payout/build]', {
+    campaignId: args.campaign.id,
+    canonicalId: args.canonicalId,
+    status: args.campaign.status,
+    goalSats: args.campaign.goal,
+    totalPledged: args.totalPledged?.toString(),
+    derivedEscrowAddress: args.derivedEscrowAddress ?? null,
+    derivedScriptHash: args.derivedScriptHash ?? null,
+    error: args.error,
+  });
+}
+
 function toStoredCampaignRecord(campaign: CampaignApiRecord): StoredCampaign {
   const expirationMs = Number(campaign.expirationTime);
   const fallbackExpiry = Number.isFinite(expirationMs) ? new Date(expirationMs).toISOString() : new Date(0).toISOString();
@@ -675,13 +709,21 @@ router.get('/campaigns/:id/activation/status', activationStatusHandler);
 router.get('/campaign/:id/activation/status', activationStatusHandler);
 
 export const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req, res) => {
+  let campaignContext: CampaignApiRecord | null = null;
+  let canonicalIdContext: string | null = null;
+  let totalPledgedContext: bigint | undefined;
+  let derivedEscrowAddressContext: string | null = null;
+  let derivedScriptHashContext: string | null = null;
   try {
     const requestedId = req.params.id;
     const resolvedCampaign = await resolveCampaignOr404(req, res);
     if (!resolvedCampaign) return;
     const { campaign, canonicalId } = resolvedCampaign;
+    campaignContext = campaign;
+    canonicalIdContext = canonicalId;
 
     if (campaign.status === 'funded' || campaign.status === 'paid_out') {
+      logPayoutBuildErrorContext({ campaign, canonicalId, error: 'payout-already-processed' });
       return res.status(400).json({ error: 'payout-already-processed' });
     }
 
@@ -695,21 +737,27 @@ export const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = asy
         : resolveCampaignBeneficiaryAddress(campaign);
 
     const { escrowAddress, utxos: campaignUtxos, total } = await selectCampaignFundingUtxos(campaign, PLEDGE_FEE_SATS);
+    totalPledgedContext = total;
+    derivedEscrowAddressContext = escrowAddress;
+    derivedScriptHashContext = await deriveScriptHashFromAddress(escrowAddress);
     const goalSats = BigInt(campaign.goal);
 
     if (total < goalSats) {
+      logPayoutBuildErrorContext({
+        campaign,
+        canonicalId,
+        totalPledged: total,
+        derivedEscrowAddress: escrowAddress,
+        derivedScriptHash: derivedScriptHashContext,
+        error: 'insufficient-funds',
+      });
       return res.status(400).json({
-        error: 'insufficient-funds-on-chain',
+        error: 'insufficient-funds',
         details: {
-          escrowAddress,
-          goal: goalSats.toString(),
-          raised: total.toString(),
-          missing: (goalSats - total).toString(),
-          utxoCount: campaignUtxos.length,
-          campaignAddress: campaign.campaignAddress ?? null,
-          recipientAddress: campaign.recipientAddress ?? null,
-          covenantAddress: campaign.covenantAddress ?? null,
-          escrowAddressStored: campaign.escrowAddress ?? null,
+          requiredSats: goalSats.toString(),
+          availableSats: total.toString(),
+          derivedEscrowAddress: escrowAddress,
+          derivedScriptHash: derivedScriptHashContext,
         },
       });
     }
@@ -757,13 +805,23 @@ export const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = asy
     console.error('[payout/build] Fatal error:', err);
     const message = err instanceof Error ? err.message : String(err);
     const mismatch = (err as Error & { mismatch?: unknown }).mismatch as ReturnType<typeof buildEscrowMismatchDetails> | undefined;
+    if (campaignContext && canonicalIdContext) {
+      logPayoutBuildErrorContext({
+        campaign: campaignContext,
+        canonicalId: canonicalIdContext,
+        totalPledged: totalPledgedContext,
+        derivedEscrowAddress: derivedEscrowAddressContext,
+        derivedScriptHash: derivedScriptHashContext,
+        error: mismatch ? 'escrow-address-mismatch' : 'payout-build-failed',
+      });
+    }
     if (mismatch) {
       return res.status(400).json({ error: 'escrow-address-mismatch', ...mismatch });
     }
     if (message.includes('destinationBeneficiary') || message.includes('beneficiaryAddress')) {
-      return res.status(400).json({ error: 'payout-build-failed', message });
+      return res.status(400).json({ error: 'payout-build-failed', details: { message } });
     }
-    return res.status(500).json({ error: 'payout-build-failed', message });
+    return res.status(400).json({ error: 'payout-build-failed', details: { message } });
   }
 };
 

@@ -413,8 +413,10 @@ export const CampaignDetail: React.FC = () => {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'No se pudo finalizar el payout.';
       const response = (err as Error & { response?: { status?: number; data?: any } }).response;
+      let toastErrorCode: string | null = null;
       if (response?.status === 400 && response?.data) {
         const apiError = typeof response.data.error === 'string' ? response.data.error : message;
+        toastErrorCode = typeof response.data.error === 'string' ? response.data.error : null;
         const details = response.data.details as {
           missing?: string;
           raised?: string;
@@ -434,9 +436,12 @@ export const CampaignDetail: React.FC = () => {
           );
         }
       } else {
+        if (response?.data && typeof response.data.error === 'string') {
+          toastErrorCode = response.data.error;
+        }
         setPayoutError(message);
       }
-      showToast('No se pudo completar el payout', 'error');
+      showToast(toastErrorCode ? `Error: ${toastErrorCode}` : 'No se pudo completar el payout', 'error');
     } finally {
       setPayingOut(false);
     }
