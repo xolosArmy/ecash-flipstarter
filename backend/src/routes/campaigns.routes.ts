@@ -16,6 +16,7 @@ import { ACTIVATION_FEE_SATS, ACTIVATION_FEE_XEC, TREASURY_ADDRESS } from '../co
 import { saveCampaignsToDisk, type StoredCampaign } from '../store/campaignPersistence';
 import { upsertCampaign as sqliteUpsertCampaign } from '../db/SQLiteStore';
 import { syncCampaignStoreFromDiskCampaigns } from '../services/CampaignService';
+import { buildEscrowMismatchDetails, repairCampaignEscrowAddress, validateEscrowConsistency } from '../services/escrowAddress';
 
 type CampaignStatus =
   | 'draft'
@@ -39,6 +40,7 @@ type CampaignApiRecord = {
   recipientAddress?: string;
   campaignAddress?: string;
   covenantAddress?: string;
+  escrowAddress?: string;
   status?: CampaignStatus;
   progress?: number;
   activation?: {
@@ -265,20 +267,6 @@ async function toActivationResponse(campaignId: string, campaign: CampaignApiRec
   };
 }
 
-function resolveCampaignEscrowAddress(campaign: CampaignApiRecord): string {
-  const candidate =
-    campaign.campaignAddress
-    || campaign.covenantAddress
-    || campaign.recipientAddress
-    || campaign.beneficiaryAddress;
-
-  if (!candidate) {
-    throw new Error('campaign-address-required');
-  }
-
-  return validateAddress(candidate, 'campaignAddress');
-}
-
 function resolveCampaignBeneficiaryAddress(campaign: CampaignApiRecord): string {
   const beneficiaryAddress = campaign.beneficiaryAddress || campaign.recipientAddress;
   return validateAddress(beneficiaryAddress || '', 'beneficiaryAddress');
@@ -288,7 +276,12 @@ async function selectCampaignFundingUtxos(
   campaign: CampaignApiRecord,
   feeSats: bigint,
 ): Promise<{ escrowAddress: string; utxos: Utxo[]; total: bigint }> {
-  const escrowAddress = resolveCampaignEscrowAddress(campaign);
+  const escrowValidation = validateEscrowConsistency(campaign);
+  if (!escrowValidation.ok) {
+    const mismatch = escrowValidation.details;
+    throw Object.assign(new Error('escrow-address-mismatch'), { mismatch });
+  }
+  const escrowAddress = escrowValidation.escrowAddress;
   const utxos = (await getUtxosForAddress(escrowAddress)).filter(isSpendableXecUtxo);
   const total = utxos.reduce((acc, utxo) => acc + utxo.value, 0n);
   console.log(
@@ -713,6 +706,10 @@ export const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = asy
           raised: total.toString(),
           missing: (goalSats - total).toString(),
           utxoCount: campaignUtxos.length,
+          campaignAddress: campaign.campaignAddress ?? null,
+          recipientAddress: campaign.recipientAddress ?? null,
+          covenantAddress: campaign.covenantAddress ?? null,
+          escrowAddressStored: campaign.escrowAddress ?? null,
         },
       });
     }
@@ -759,6 +756,10 @@ export const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = asy
   } catch (err) {
     console.error('[payout/build] Fatal error:', err);
     const message = err instanceof Error ? err.message : String(err);
+    const mismatch = (err as Error & { mismatch?: unknown }).mismatch as ReturnType<typeof buildEscrowMismatchDetails> | undefined;
+    if (mismatch) {
+      return res.status(400).json({ error: 'escrow-address-mismatch', ...mismatch });
+    }
     if (message.includes('destinationBeneficiary') || message.includes('beneficiaryAddress')) {
       return res.status(400).json({ error: 'payout-build-failed', message });
     }
@@ -767,6 +768,30 @@ export const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = asy
 };
 
 router.post('/campaigns/:id/payout/build', buildCampaignPayoutHandler);
+
+router.post('/campaigns/:id/repair-escrow', async (req, res) => {
+  try {
+    const token = String(req.headers['x-admin-token'] ?? req.body?.adminToken ?? '').trim();
+    const expected = String(process.env.CAMPAIGN_ADMIN_TOKEN ?? '').trim();
+    if (!expected || token !== expected) {
+      return res.status(401).json({ error: 'unauthorized' });
+    }
+    const resolvedCampaign = await resolveCampaignOr404(req, res);
+    if (!resolvedCampaign) return;
+    const storedCampaign = toStoredCampaignRecord(resolvedCampaign.campaign);
+    const repaired = await repairCampaignEscrowAddress(storedCampaign);
+    resolvedCampaign.campaign.escrowAddress = repaired.escrowAddress;
+    resolvedCampaign.campaign.campaignAddress = repaired.escrowAddress;
+    resolvedCampaign.campaign.covenantAddress = repaired.escrowAddress;
+    await sqliteUpsertCampaign(storedCampaign);
+    const campaigns = (await service.listCampaigns()) as StoredCampaign[];
+    syncCampaignStoreFromDiskCampaigns(campaigns);
+    await saveCampaignsToDisk(campaigns);
+    return res.json({ ok: true, campaignId: resolvedCampaign.canonicalId, ...repaired });
+  } catch (err) {
+    return res.status(400).json({ error: (err as Error).message });
+  }
+});
 
 router.post('/campaigns/:id/payout/confirm', async (req, res) => {
   try {

@@ -13,6 +13,7 @@ import { getCampaignById, listCampaigns as listCampaignsFromSqlite } from '../db
 import { getDb } from '../store/db';
 import { ACTIVATION_FEE_SATS, ACTIVATION_FEE_XEC } from '../config/constants';
 import { deriveCampaignSlug, resolveCampaignIdFromSnapshots } from './campaignIdResolver';
+import { resolveEscrowAddress } from './escrowAddress';
 
 // In-memory cache used by CovenantIndex and pledge services.
 const campaigns = new Map<string, CampaignDefinition>();
@@ -76,6 +77,7 @@ function toCampaignDefinition(snapshot: StoredCampaign): CampaignDefinition {
     beneficiaryAddress: snapshot.beneficiaryAddress ?? undefined,
     campaignAddress: snapshot.campaignAddress ?? undefined,
     covenantAddress: snapshot.covenantAddress ?? undefined,
+    escrowAddress: snapshot.escrowAddress ?? snapshot.covenantAddress ?? snapshot.campaignAddress ?? undefined,
     status: snapshot.status ?? undefined,
   };
 }
@@ -180,6 +182,7 @@ function toStoredCampaign(definition: CampaignDefinition, prior?: StoredCampaign
     beneficiaryAddress: definition.beneficiaryAddress,
     campaignAddress: definition.campaignAddress,
     covenantAddress: definition.covenantAddress,
+    escrowAddress: definition.covenantAddress ?? definition.campaignAddress,
     beneficiaryPubKey: definition.beneficiaryPubKey,
     location: priorNormalized?.location,
     activation: priorNormalized?.activation ?? {
@@ -238,6 +241,7 @@ export function syncCampaignStoreFromDiskCampaigns(diskCampaigns: StoredCampaign
     campaign.covenantAddress = ensured.campaignAddress;
     snapshot.campaignAddress = ensured.campaignAddress;
     snapshot.covenantAddress = ensured.campaignAddress;
+    snapshot.escrowAddress = ensured.campaignAddress;
     campaigns.set(campaign.id, campaign);
     campaignSnapshots.set(campaign.id, snapshot);
 
@@ -344,12 +348,14 @@ export class CampaignService {
       || campaign.campaignAddress !== nextAddress
       || campaign.covenantAddress !== nextAddress
       || snapshot.campaignAddress !== nextAddress
-      || snapshot.covenantAddress !== nextAddress;
+      || snapshot.covenantAddress !== nextAddress
+      || snapshot.escrowAddress !== nextAddress;
 
     campaign.campaignAddress = nextAddress;
     campaign.covenantAddress = nextAddress;
     snapshot.campaignAddress = nextAddress;
     snapshot.covenantAddress = nextAddress;
+    snapshot.escrowAddress = nextAddress;
     covenant.scriptHash = ensured.scriptHash;
     covenant.scriptPubKey = ensured.scriptPubKey;
     return changed;
@@ -1050,6 +1056,7 @@ export class CampaignService {
       createdAt: snapshot?.createdAt,
       status: campaign.status,
       recipientAddress: snapshot?.recipientAddress,
+      escrowAddress: snapshot?.escrowAddress ?? resolveEscrowAddress({ ...campaign, ...snapshot }),
       beneficiaryAddress: campaign.beneficiaryAddress,
       campaignAddress: campaign.campaignAddress,
       covenantAddress: campaign.covenantAddress,

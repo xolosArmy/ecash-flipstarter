@@ -30,6 +30,7 @@ export type StoredCampaign = {
   beneficiaryAddress?: string;
   campaignAddress?: string;
   covenantAddress?: string;
+  escrowAddress?: string;
   beneficiaryPubKey?: string;
   location?: {
     latitude: number;
@@ -108,6 +109,7 @@ export async function initializeDatabase(database?: Database): Promise<void> {
       beneficiaryAddress TEXT,
       campaignAddress TEXT,
       covenantAddress TEXT,
+      escrowAddress TEXT,
       beneficiaryPubKey TEXT,
       location_lat REAL,
       location_lng REAL,
@@ -187,6 +189,7 @@ async function ensureCampaignColumns(db: Database): Promise<void> {
     { name: 'beneficiaryAddress', sqlType: 'TEXT' },
     { name: 'campaignAddress', sqlType: 'TEXT' },
     { name: 'covenantAddress', sqlType: 'TEXT' },
+    { name: 'escrowAddress', sqlType: 'TEXT' },
     { name: 'beneficiaryPubKey', sqlType: 'TEXT' },
     { name: 'location_lat', sqlType: 'REAL' },
     { name: 'location_lng', sqlType: 'REAL' },
@@ -233,6 +236,7 @@ type CampaignRow = {
   beneficiaryAddress: string | null;
   campaignAddress: string | null;
   covenantAddress: string | null;
+  escrowAddress: string | null;
   beneficiaryPubKey: string | null;
   location_lat: number | null;
   location_lng: number | null;
@@ -307,6 +311,7 @@ function mapRowToCampaign(row: CampaignRow): StoredCampaign {
     beneficiaryAddress: row.beneficiaryAddress ?? undefined,
     campaignAddress: row.campaignAddress ?? undefined,
     covenantAddress: row.covenantAddress ?? undefined,
+    escrowAddress: row.escrowAddress ?? undefined,
     beneficiaryPubKey: row.beneficiaryPubKey ?? undefined,
     activation: {
       feeSats: row.activation_feeSats ?? String(ACTIVATION_FEE_XEC * 100),
@@ -392,6 +397,7 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
         beneficiaryAddress,
         campaignAddress,
         covenantAddress,
+        escrowAddress,
         beneficiaryPubKey,
         location_lat,
         location_lng,
@@ -414,7 +420,7 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
         payout_paidAt,
         treasuryAddressUsed,
         expirationTime
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         campaign.id,
@@ -431,6 +437,7 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
         campaign.beneficiaryAddress ?? null,
         campaign.campaignAddress ?? null,
         campaign.covenantAddress ?? null,
+        campaign.escrowAddress ?? null,
         campaign.beneficiaryPubKey ?? null,
         campaign.location?.latitude ?? null,
         campaign.location?.longitude ?? null,

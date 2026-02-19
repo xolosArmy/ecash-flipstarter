@@ -28,6 +28,7 @@ export interface CampaignSummary {
   beneficiaryAddress?: string;
   campaignAddress?: string;
   covenantAddress?: string;
+  escrowAddress?: string;
   description?: string;
   location?: string;
   activation?: {
@@ -81,6 +82,7 @@ export interface BuiltTxResponse {
   fee?: string;
   mode?: 'tx' | 'intent';
   outputs?: Array<{ address: string; valueSats: number }>;
+  escrowAddress?: string;
   userPrompt?: string;
   wcOfferId?: string;
   offerId?: string;

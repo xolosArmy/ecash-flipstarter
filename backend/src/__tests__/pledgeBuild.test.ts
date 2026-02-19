@@ -10,9 +10,12 @@ vi.mock('../routes/campaigns.routes', () => ({
 
 vi.mock('../services/CampaignService', () => ({
   CampaignService: vi.fn().mockImplementation(() => ({
+    resolveCampaignId: vi.fn(async (id: string) => id),
     ensureCampaignCovenant: ensureCampaignCovenantMock,
     getCampaign: vi.fn(async () => ({
       campaignAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+      escrowAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+      covenantAddress: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
     })),
   })),
 }));
@@ -81,6 +84,7 @@ describe('createPledgeBuildHandler', () => {
     expect(res.body.outputs).toEqual([
       { address: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk', valueSats: 1234 },
     ]);
+    expect(res.body.escrowAddress).toBe('ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk');
     expect(res.body.inputsUsed).toBeUndefined();
     expect(res.body.outpoints).toBeUndefined();
     expect(createWalletConnectPledgeOfferMock).toHaveBeenCalledWith(

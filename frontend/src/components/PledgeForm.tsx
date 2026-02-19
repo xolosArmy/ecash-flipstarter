@@ -74,6 +74,7 @@ export const PledgeForm: React.FC<Props> = ({
   const [uiError, setUiError] = useState('');
   const [amountError, setAmountError] = useState('');
   const [apiCampaignAddress, setApiCampaignAddress] = useState('');
+  const [escrowMismatchBanner, setEscrowMismatchBanner] = useState('');
 
   const {
     connected,
@@ -163,6 +164,7 @@ export const PledgeForm: React.FC<Props> = ({
     setLoading(true);
     setStatusMessage('Creando pledge...');
     setUiError('');
+    setEscrowMismatchBanner('');
     setBroadcastResult('');
 
     try {
@@ -180,7 +182,10 @@ export const PledgeForm: React.FC<Props> = ({
         throw new Error('El backend no devolvió wcOfferId/offerId para WalletConnect.');
       }
 
-      const fallbackCampaignAddress = apiCampaignAddress || campaignAddress || '';
+      const fallbackCampaignAddress = built.escrowAddress || apiCampaignAddress || campaignAddress || '';
+      if (import.meta.env.DEV && built.escrowAddress) {
+        console.debug('[pledge/build] escrowAddress', built.escrowAddress);
+      }
       const outputs = built.outputs?.length
         ? built.outputs.map((output) => ({
             address: output.address,
@@ -228,7 +233,14 @@ export const PledgeForm: React.FC<Props> = ({
       if (message.toLowerCase().includes('walletconnect')) {
         setUiError('WalletConnect request failed. Desconecta y vuelve a conectar.');
       } else {
-        setUiError(formatPledgeError(err));
+        const maybeApiError = (err as { response?: { data?: { error?: string; expectedEscrow?: string; campaignAddress?: string } } }).response?.data;
+        if (maybeApiError?.error === 'escrow-address-mismatch') {
+          const detail = `Escrow mismatch: expected ${maybeApiError.expectedEscrow ?? 'n/a'} campaignAddress=${maybeApiError.campaignAddress ?? 'n/a'}`;
+          setEscrowMismatchBanner(detail);
+          setUiError(detail);
+        } else {
+          setUiError(formatPledgeError(err));
+        }
       }
       setStatusMessage('');
     } finally {
@@ -242,6 +254,7 @@ export const PledgeForm: React.FC<Props> = ({
       await navigator.clipboard.writeText(contributorAddressFull);
       setStatusMessage('Dirección completa copiada.');
       setUiError('');
+    setEscrowMismatchBanner('');
     } catch {
       setUiError('No se pudo copiar la dirección.');
     }
@@ -255,6 +268,9 @@ export const PledgeForm: React.FC<Props> = ({
   return (
     <div style={{ border: '1px solid #eee', padding: 12, borderRadius: 8 }}>
       <h4>Pledge</h4>
+      {escrowMismatchBanner && (
+        <p style={{ color: '#b00020', fontWeight: 600 }}>{escrowMismatchBanner}</p>
+      )}
       {apiCampaignAddress && (
         <p style={{ marginTop: 0 }}>
           Campaign address: <code>{apiCampaignAddress}</code>

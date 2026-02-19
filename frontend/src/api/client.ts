@@ -207,6 +207,7 @@ export interface CampaignPayoutBuildResponse {
   beneficiaryAmount: string;
   treasuryCut: string;
   wcOfferId: string;
+  escrowAddress?: string;
 }
 
 export async function buildPayoutTx(campaignId: string): Promise<CampaignPayoutBuildResponse> {

@@ -418,9 +418,15 @@ export const CampaignDetail: React.FC = () => {
         const details = response.data.details as {
           missing?: string;
           escrowAddress?: string;
+          campaignAddress?: string;
+          covenantAddress?: string;
+          escrowAddressStored?: string;
         } | undefined;
+        if (import.meta.env.DEV) console.debug('[payout/build] error details', details ?? response.data);
         setPayoutError(apiError);
-        if (details?.missing || details?.escrowAddress) {
+        if (apiError === 'escrow-address-mismatch') {
+          setPayoutDiagnostic(`Escrow mismatch. expected=${response.data.expectedEscrow ?? 'n/a'} stored=${response.data.escrowAddressStored ?? 'n/a'}`);
+        } else if (details?.missing || details?.escrowAddress) {
           setPayoutDiagnostic(
             `missing=${details.missing ?? 'n/a'} · escrow=${details.escrowAddress ?? 'n/a'}`,
           );
