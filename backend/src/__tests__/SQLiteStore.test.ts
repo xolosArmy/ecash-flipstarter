@@ -159,6 +159,22 @@ describe('SQLiteStore', () => {
     expect(migrated?.activationFeePaid).toBe(false);
   });
 
+
+  it('derives and persists slug when missing during upsert', async () => {
+    const db = await openDatabase(dbPath);
+    await initializeDatabase(db);
+
+    await upsertCampaign({
+      ...SAMPLE_CAMPAIGN,
+      id: 'pledge-repair-1771265990458-26507',
+      slug: undefined,
+      createdAt: '2026-02-16T18:19:50.475Z',
+    }, db);
+
+    const campaign = await getCampaignById('pledge-repair-1771265990458-26507', db);
+    expect(campaign?.slug).toBe('campaign-1771505990475');
+  });
+
   it('deletes campaign by id', async () => {
     const db = await openDatabase(dbPath);
     await initializeDatabase(db);
