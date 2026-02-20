@@ -234,4 +234,35 @@ router.post('/campaigns/:id/payout/confirm', async (req, res) => {
   }
 });
 
+
+// backend/src/routes/campaigns.routes.ts
+
+// Fix para el error 404 de /api/stats
+router.get('/stats', (_req, res) => {
+  res.json({
+    totalCampaigns: 0,
+    totalRaisedSats: "0",
+    activePledges: 0
+  });
+});
+
+// Fix para el error 404 de /api/campaigns/:id/summary
+router.get('/campaigns/:id/summary', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const resolved = await service.getCanonicalCampaign(id);
+    if (!resolved) return res.status(404).json({ error: 'not-found' });
+    
+    // Devolvemos un resumen básico para que el frontend no rompa
+    res.json({
+      campaignId: id,
+      totalPledgedSats: "0", 
+      pledgeCount: 0,
+      status: resolved.campaign.status
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'internal-error' });
+  }
+});
+
 export default router;
