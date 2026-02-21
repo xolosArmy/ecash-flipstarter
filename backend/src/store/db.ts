@@ -5,10 +5,11 @@ let dbInstance: Database | null = null;
 
 export async function getDb(): Promise<Database> {
   if (dbInstance) return dbInstance;
-  
+
   dbInstance = await openDatabase();
   await initializeDatabase(dbInstance);
-  
+
+  // Aseguramos que la tabla exista con todas las columnas necesarias para el historial
   await dbInstance.exec(`
     CREATE TABLE IF NOT EXISTS pledges (
       pledgeId TEXT PRIMARY KEY,
@@ -21,6 +22,6 @@ export async function getDb(): Promise<Database> {
       message TEXT
     );
   `);
-  
+
   return dbInstance;
 }
