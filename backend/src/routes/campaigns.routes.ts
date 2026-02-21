@@ -6,7 +6,6 @@ import { buildPayoutTx } from '../blockchain/txBuilder';
 import { serializeBuiltTx } from './serialize';
 import { walletConnectOfferStore } from '../services/WalletConnectOfferStore';
 import { TREASURY_ADDRESS } from '../config/constants';
-import { upsertCampaign } from '../db/SQLiteStore';
 
 const router = Router();
 const service = new CampaignService();
@@ -17,7 +16,6 @@ export const getCampaignStatusById = async (id: string) => {
   return resolved?.campaign?.status;
 };
 
-// Rutas Estadísticas e Historial
 router.get('/stats', async (_req, res) => {
   try {
     const campaigns = await service.listCampaigns();
@@ -41,7 +39,6 @@ router.get('/campaigns/:id/summary', async (req, res) => {
 router.get('/campaigns/:id/history', async (req, res) => {
   try {
     const data = await pledgeService.listPledges(req.params.id);
-    // Mapeamos al formato que espera el AuditLog del frontend
     res.json(data.map((p: any) => ({
       id: p.pledgeId,
       type: 'pledge',
