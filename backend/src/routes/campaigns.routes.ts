@@ -74,7 +74,13 @@ router.post('/campaigns/:id/payout/build', async (req, res) => {
     const target = resolved?.campaign;
     if (!target) return res.status(404).json({ error: 'not-found' });
 
-    const escrowAddress = target.covenantAddress || target.campaignAddress;
+    // === EL FIX ESTÁ AQUÍ ABAJO ===
+    const escrowAddress = target.covenantAddress || target.campaignAddress || '';
+    if (!escrowAddress) return res.status(400).json({ error: 'no-escrow-address' });
+
+    const beneficiaryAddress = target.beneficiaryAddress || '';
+    if (!beneficiaryAddress) return res.status(400).json({ error: 'no-beneficiary-address' });
+
     const utxos = await getUtxosForAddress(escrowAddress);
     const campaignUtxos = utxos.filter((u: any) => !u.token);
     const raisedSats = campaignUtxos.reduce((acc: bigint, u: any) => acc + BigInt(u.value || 0), 0n);
@@ -82,14 +88,14 @@ router.post('/campaigns/:id/payout/build', async (req, res) => {
     console.log(`[PAYOUT] Escrow: ${escrowAddress} | Detectado: ${raisedSats} sats`);
 
     const builtTx = await buildPayoutTx({
-      campaignUtxos, totalRaised: raisedSats, beneficiaryAddress: target.beneficiaryAddress,
+      campaignUtxos, totalRaised: raisedSats, beneficiaryAddress,
       treasuryAddress: TREASURY_ADDRESS, fixedFee: 500n, dustLimit: 546n,
     });
 
     const built = serializeBuiltTx(builtTx);
     const offer = walletConnectOfferStore.createOffer({
       campaignId: target.id, unsignedTxHex: built.unsignedTxHex || built.rawHex,
-      amount: raisedSats.toString(), contributorAddress: target.beneficiaryAddress,
+      amount: raisedSats.toString(), contributorAddress: beneficiaryAddress,
     });
 
     res.json({ unsignedTxHex: built.unsignedTxHex || built.rawHex, wcOfferId: offer.offerId, raised: raisedSats.toString() });
