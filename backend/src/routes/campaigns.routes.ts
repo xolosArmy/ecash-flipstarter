@@ -42,25 +42,25 @@ router.get('/campaigns', async (_req, res) => {
 });
 
 router.get('/campaigns/:id', async (req, res) => {
-  const id = String(req.params.id === 'undefined' ? TARGET_ID : req.params.id);
+  const id = (req.params.id === 'undefined' ? TARGET_ID : req.params.id) as string;
   const resolved = await service.getCanonicalCampaign(id);
   res.json(resolved?.campaign || (await service.listCampaigns())[0]);
 });
 
 router.get('/campaigns/:id/summary', async (req, res) => {
-  const id = String(req.params.id === 'undefined' ? TARGET_ID : req.params.id);
+  const id = (req.params.id === 'undefined' ? TARGET_ID : req.params.id) as string;
   try { res.json(await pledgeService.getCampaignSummary(id)); } 
   catch (e) { res.json({ campaignId: id, totalPledgedSats: "0", pledgeCount: 0, status: 'active' }); }
 });
 
 router.get('/campaigns/:id/pledges', async (req, res) => {
-  const id = String(req.params.id === 'undefined' ? TARGET_ID : req.params.id);
+  const id = (req.params.id === 'undefined' ? TARGET_ID : req.params.id) as string;
   try { res.json(await pledgeService.listPledges(id)); } 
   catch (e) { res.json([]); }
 });
 
 router.get('/campaigns/:id/history', async (req, res) => {
-  const id = String(req.params.id === 'undefined' ? TARGET_ID : req.params.id);
+  const id = (req.params.id === 'undefined' ? TARGET_ID : req.params.id) as string;
   try {
     const data = await pledgeService.listPledges(id);
     res.json(Array.isArray(data) ? data.map((p: any) => ({ ...p, type: 'pledge' })) : []);
@@ -69,7 +69,7 @@ router.get('/campaigns/:id/history', async (req, res) => {
 
 router.post('/campaigns/:id/payout/build', async (req, res) => {
   try {
-    const id = String(req.params.id === 'undefined' ? TARGET_ID : req.params.id);
+    const id = (req.params.id === 'undefined' ? TARGET_ID : req.params.id) as string;
     const resolved = await service.getCanonicalCampaign(id);
     const target = resolved?.campaign;
     if (!target) return res.status(404).json({ error: 'not-found' });
