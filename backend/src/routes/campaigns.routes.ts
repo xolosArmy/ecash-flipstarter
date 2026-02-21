@@ -13,6 +13,12 @@ const service = new CampaignService();
 const pledgeService = new PledgeService();
 const TARGET_ID = "campaign-1771509371636";
 
+// === AQUÍ ESTÁ LA FUNCIÓN QUE FALTABA ===
+export const getCampaignStatusById = async (id: string) => {
+  const resolved = await service.getCanonicalCampaign(id);
+  return resolved?.campaign?.status;
+};
+
 const initDB = async () => {
   try {
     const campaignData = {
@@ -74,7 +80,6 @@ router.post('/campaigns/:id/payout/build', async (req, res) => {
     const target = resolved?.campaign;
     if (!target) return res.status(404).json({ error: 'not-found' });
 
-    // === EL FIX ESTÁ AQUÍ ABAJO ===
     const escrowAddress = target.covenantAddress || target.campaignAddress || '';
     if (!escrowAddress) return res.status(400).json({ error: 'no-escrow-address' });
 
