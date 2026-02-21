@@ -105,11 +105,11 @@ function alignEscrowFields(snapshot: StoredCampaign): StoredCampaign {
 
   return {
     ...snapshot,
-    // Canonical escrow/covenant destination for pledges. Do not overwrite
-    // recipientAddress (beneficiary payout target).
+    // Canonical escrow destination for pledges. Do not overwrite
+    // recipientAddress/beneficiaryAddress payout targets.
     escrowAddress,
-    covenantAddress: escrowAddress,
-    campaignAddress: escrowAddress,
+    covenantAddress: snapshot.covenantAddress ?? escrowAddress,
+    campaignAddress: snapshot.campaignAddress ?? snapshot.covenantAddress ?? escrowAddress,
   };
 }
 
@@ -371,6 +371,7 @@ export class CampaignService {
 
     campaign.campaignAddress = nextAddress;
     campaign.covenantAddress = nextAddress;
+    campaign.escrowAddress = nextAddress;
     snapshot.campaignAddress = nextAddress;
     snapshot.covenantAddress = nextAddress;
     snapshot.escrowAddress = nextAddress;
@@ -448,6 +449,7 @@ export class CampaignService {
     });
     campaign.campaignAddress = ensuredInitialCovenant.campaignAddress;
     campaign.covenantAddress = ensuredInitialCovenant.campaignAddress;
+    campaign.escrowAddress = ensuredInitialCovenant.campaignAddress;
 
     const snapshot: StoredCampaign = normalizeSnapshot({
       id,
@@ -475,6 +477,7 @@ export class CampaignService {
       beneficiaryAddress: campaign.beneficiaryAddress,
       campaignAddress: campaign.campaignAddress,
       covenantAddress: campaign.covenantAddress,
+      escrowAddress: campaign.escrowAddress,
       beneficiaryPubKey: campaign.beneficiaryPubKey,
       activation: {
         feeSats:
@@ -1076,7 +1079,7 @@ export class CampaignService {
       createdAt: snapshot?.createdAt,
       status: campaign.status,
       recipientAddress: snapshot?.recipientAddress,
-      escrowAddress: snapshot?.escrowAddress ?? resolveEscrowAddress({ ...campaign, ...snapshot }),
+      escrowAddress: snapshot?.escrowAddress ?? snapshot?.covenantAddress ?? campaign.escrowAddress ?? campaign.covenantAddress ?? campaign.campaignAddress,
       beneficiaryAddress: campaign.beneficiaryAddress,
       campaignAddress: campaign.campaignAddress,
       covenantAddress: campaign.covenantAddress,
