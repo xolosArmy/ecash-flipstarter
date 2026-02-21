@@ -13,7 +13,6 @@ const service = new CampaignService();
 const pledgeService = new PledgeService();
 const TARGET_ID = "campaign-1771509371636";
 
-// === AQUÍ ESTÁ LA FUNCIÓN QUE FALTABA ===
 export const getCampaignStatusById = async (id: string) => {
   const resolved = await service.getCanonicalCampaign(id);
   return resolved?.campaign?.status;
@@ -30,7 +29,6 @@ const initDB = async () => {
       expirationTime: "1776880800000"
     };
     await upsertCampaign(campaignData as any);
-    console.log("[DB] Campaña XolosArmy sincronizada.");
   } catch (e) {}
 };
 initDB();
@@ -47,7 +45,6 @@ router.get('/campaigns', async (_req, res) => {
   res.json(await service.listCampaigns());
 });
 
-// === RUTA POST PARA QUE NO SALGA 404 ===
 router.post('/campaigns', async (req, res) => {
   try {
     const srv = service as any;
@@ -104,8 +101,6 @@ router.post('/campaigns/:id/payout/build', async (req, res) => {
     const campaignUtxos = utxos.filter((u: any) => !u.token);
     const raisedSats = campaignUtxos.reduce((acc: bigint, u: any) => acc + BigInt(u.value || 0), 0n);
     
-    console.log(`[PAYOUT] Escrow: ${escrowAddress} | Detectado: ${raisedSats} sats`);
-
     const builtTx = await buildPayoutTx({
       campaignUtxos, totalRaised: raisedSats, beneficiaryAddress,
       treasuryAddress: TREASURY_ADDRESS, fixedFee: 500n, dustLimit: 546n,
