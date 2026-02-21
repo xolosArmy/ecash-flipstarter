@@ -140,10 +140,10 @@ export async function repairCampaignEscrowAddress(
 ): Promise<{ escrowAddress: string; source: string; txidUsed: string | null }> {
   const fromChain = await repairEscrowAddressFromChain(campaign);
   const escrowAddress = fromChain ?? resolveEscrowAddress(campaign);
+  // Canonical escrow for pledges; keep recipient/beneficiary untouched for payout.
   campaign.escrowAddress = escrowAddress;
   campaign.covenantAddress = escrowAddress;
   campaign.campaignAddress = escrowAddress;
-  campaign.recipientAddress = escrowAddress;
   const txidUsed = String(campaign.activationFeeTxid ?? campaign.activation?.feeTxid ?? '').trim() || null;
   return { escrowAddress, source: fromChain ? 'activation-tx' : 'resolved', txidUsed };
 }

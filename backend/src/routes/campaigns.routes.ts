@@ -14,6 +14,7 @@ import { serializeBuiltTx } from './serialize';
 import { walletConnectOfferStore } from '../services/WalletConnectOfferStore';
 import { TREASURY_ADDRESS } from '../config/constants';
 import { getPledgesByCampaign } from '../store/simplePledges';
+import { resolveEscrowAddress } from '../services/escrowAddress';
 
 const router = Router();
 const service = new CampaignService();
@@ -226,7 +227,14 @@ export const buildCampaignPayoutHandler = async (req: any, res: any) => {
     const campaign = resolved?.campaign;
     if (!campaign || !resolved) return res.status(404).json({ error: 'not-found' });
 
-    const escrowAddress = campaign.escrowAddress || campaign.covenantAddress || campaign.campaignAddress;
+    let escrowAddress = campaign.escrowAddress || campaign.covenantAddress;
+    if (!escrowAddress) {
+      try {
+        escrowAddress = resolveEscrowAddress({ ...campaign, campaignAddress: undefined, recipientAddress: undefined });
+      } catch {
+        escrowAddress = undefined;
+      }
+    }
 
     if (!escrowAddress) {
       return res.status(400).json({ error: 'missing-escrow-address' });
@@ -261,16 +269,15 @@ export const buildCampaignPayoutHandler = async (req: any, res: any) => {
     const goalSats = BigInt(campaign.goal || 0);
 
     if (raisedSats < goalSats) {
+      const missing = goalSats - raisedSats;
       return res.status(400).json({
-        error: 'insufficient-funds',
+        error: 'insufficient-funds-on-chain',
         details: {
-          campaignId: resolved.canonicalId,
           escrowAddress,
-          chronikUrl: getEffectiveChronikBaseUrl(),
-          usedUrl: `${getEffectiveChronikBaseUrl()}/address/${escrowAddress.replace(/^ecash:/, '')}/utxos`,
-          utxoCount: utxos.length,
-          raisedSats: raisedSats.toString(),
-          goalSats: goalSats.toString(),
+          goal: goalSats.toString(),
+          raised: raisedSats.toString(),
+          missing: missing.toString(),
+          utxoCount: campaignUtxos.length,
         },
       });
     }

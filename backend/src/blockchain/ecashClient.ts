@@ -180,13 +180,14 @@ export async function fetchChronikUtxos(address: string): Promise<ChronikUtxoFet
   if (primaryResult.status === 404) {
     const fallbackResult = await chronikGet(fallbackPath);
     if (fallbackResult.status === 404) {
-      throw new ChronikUnavailableError('chronik-address-utxos-not-found', {
+      // Chronik returns 404 for addresses without history. Treat it as empty UTXOs.
+      return {
+        utxos: [],
         usedUrl: fallbackResult.url,
-        triedUrls: [primaryResult.url, fallbackResult.url],
         status: fallbackResult.status,
-        contentType: fallbackResult.contentType || undefined,
-        bodyPreviewHex: toBodyPreviewHex(fallbackResult.raw),
-      });
+        contentType: fallbackResult.contentType || '',
+        branch: 'json',
+      };
     }
     return parseChronikUtxoResponse(fallbackResult, [primaryResult.url, fallbackResult.url]);
   }

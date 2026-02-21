@@ -105,10 +105,11 @@ function alignEscrowFields(snapshot: StoredCampaign): StoredCampaign {
 
   return {
     ...snapshot,
+    // Canonical escrow/covenant destination for pledges. Do not overwrite
+    // recipientAddress (beneficiary payout target).
     escrowAddress,
     covenantAddress: escrowAddress,
     campaignAddress: escrowAddress,
-    recipientAddress: escrowAddress,
   };
 }
 
@@ -195,11 +196,11 @@ function toStoredCampaign(definition: CampaignDefinition, prior?: StoredCampaign
     expiresAt: priorNormalized?.expiresAt ?? toIsoFromExpiration(definition.expirationTime),
     createdAt: priorNormalized?.createdAt ?? new Date().toISOString(),
     status: definition.status,
-    recipientAddress: priorNormalized?.recipientAddress ?? definition.campaignAddress,
+    recipientAddress: priorNormalized?.recipientAddress ?? definition.beneficiaryAddress,
     beneficiaryAddress: definition.beneficiaryAddress,
     campaignAddress: definition.campaignAddress,
     covenantAddress: definition.covenantAddress,
-    escrowAddress: definition.covenantAddress ?? definition.campaignAddress,
+    escrowAddress: definition.escrowAddress ?? definition.covenantAddress ?? definition.campaignAddress,
     beneficiaryPubKey: definition.beneficiaryPubKey,
     location: priorNormalized?.location,
     activation: priorNormalized?.activation ?? {
@@ -466,7 +467,11 @@ export class CampaignService {
         ? payload.createdAt
         : new Date().toISOString(),
       status: campaign.status,
-      recipientAddress: campaign.campaignAddress,
+      // recipientAddress is the beneficiary payout destination, distinct from escrow.
+      recipientAddress:
+        typeof payload.recipientAddress === 'string' && payload.recipientAddress.trim()
+          ? payload.recipientAddress
+          : campaign.beneficiaryAddress,
       beneficiaryAddress: campaign.beneficiaryAddress,
       campaignAddress: campaign.campaignAddress,
       covenantAddress: campaign.covenantAddress,
