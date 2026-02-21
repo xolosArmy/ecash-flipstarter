@@ -73,26 +73,57 @@ router.get('/campaigns/:id/history', async (req, res) => {
   } catch (e) { res.json([]); }
 });
 
-router.post('/campaigns/:id/payout/build', async (req, res) => {
+export const buildCampaignPayoutHandler = async (req: any, res: any) => {
   try {
     const resolved = await service.getCanonicalCampaign(req.params.id);
-    const target = resolved?.campaign;
-    if (!target) return res.status(404).json({ error: 'not-found' });
-    const escrowAddress = target.covenantAddress || target.campaignAddress || '';
+    const campaign = resolved?.campaign;
+    if (!campaign) return res.status(404).json({ error: 'not-found' });
+
+    const escrowAddress =
+      campaign.escrowAddress ||
+      campaign.covenantAddress ||
+      campaign.campaignAddress;
+
+    if (!escrowAddress) {
+      return res.status(400).json({
+        error: 'missing-escrow-address',
+        message: 'Campaign has no persisted escrow address.'
+      });
+    }
+
+    console.log('[PAYOUT]', {
+      campaignId: campaign.id,
+      escrowAddressUsed: escrowAddress
+    });
+
     const utxos = await getUtxosForAddress(escrowAddress);
     const campaignUtxos = utxos.filter((u: any) => !u.token);
     const raisedSats = campaignUtxos.reduce((acc: bigint, u: any) => acc + BigInt(u.value || 0), 0n);
     const builtTx = await buildPayoutTx({
-      campaignUtxos, totalRaised: raisedSats, beneficiaryAddress: target.beneficiaryAddress || '',
-      treasuryAddress: TREASURY_ADDRESS, fixedFee: 500n, dustLimit: 546n,
+      campaignUtxos,
+      totalRaised: raisedSats,
+      beneficiaryAddress: campaign.beneficiaryAddress || '',
+      treasuryAddress: TREASURY_ADDRESS,
+      fixedFee: 500n,
+      dustLimit: 546n,
     });
     const built = serializeBuiltTx(builtTx);
     const offer = walletConnectOfferStore.createOffer({
-      campaignId: target.id, unsignedTxHex: built.unsignedTxHex || built.rawHex,
-      amount: raisedSats.toString(), contributorAddress: target.beneficiaryAddress || '',
+      campaignId: campaign.id,
+      unsignedTxHex: built.unsignedTxHex || built.rawHex,
+      amount: raisedSats.toString(),
+      contributorAddress: campaign.beneficiaryAddress || '',
     });
-    res.json({ unsignedTxHex: built.unsignedTxHex || built.rawHex, wcOfferId: offer.offerId, raised: raisedSats.toString() });
-  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
-});
+    return res.json({
+      unsignedTxHex: built.unsignedTxHex || built.rawHex,
+      wcOfferId: offer.offerId,
+      raised: raisedSats.toString(),
+    });
+  } catch (err) {
+    return res.status(400).json({ error: (err as Error).message });
+  }
+};
+
+router.post('/campaigns/:id/payout/build', buildCampaignPayoutHandler);
 
 export default router;
