@@ -299,6 +299,7 @@ function deriveExpirationTime(expiresAt: string, explicit?: string | null): stri
 function mapRowToCampaign(row: CampaignRow): StoredCampaign {
   const expiresAt = row.expiresAt && row.expiresAt.trim() ? row.expiresAt : row.expirationTime ?? '';
   const canonicalEscrow = row.escrowAddress ?? row.covenantAddress ?? row.campaignAddress ?? row.recipientAddress;
+  const recipientAddress = row.recipientAddress ?? row.beneficiaryAddress ?? undefined;
   const campaign: StoredCampaign = {
     id: row.id,
     slug: row.slug ?? undefined,
@@ -308,7 +309,7 @@ function mapRowToCampaign(row: CampaignRow): StoredCampaign {
     expiresAt,
     createdAt: row.createdAt ?? new Date(0).toISOString(),
     status: row.status ?? undefined,
-    recipientAddress: canonicalEscrow ?? row.recipientAddress ?? undefined,
+    recipientAddress,
     beneficiaryAddress: row.beneficiaryAddress ?? undefined,
     campaignAddress: canonicalEscrow ?? row.campaignAddress ?? undefined,
     covenantAddress: canonicalEscrow ?? row.covenantAddress ?? undefined,

@@ -23,6 +23,7 @@ export interface CampaignSummary {
   beneficiaryAddress?: string;
   campaignAddress?: string;
   covenantAddress?: string;
+  escrowAddress?: string;
   covenant?: {
     campaignAddress?: string;
   };

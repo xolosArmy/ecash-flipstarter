@@ -33,10 +33,10 @@ function normalizeEscrowCampaign(campaign: StoredCampaign): StoredCampaign {
 
   return {
     ...campaign,
+    // Canonical escrow address for funding. recipientAddress must remain beneficiary/payout target.
     escrowAddress,
     covenantAddress: escrowAddress,
     campaignAddress: escrowAddress,
-    recipientAddress: escrowAddress,
   };
 }
 

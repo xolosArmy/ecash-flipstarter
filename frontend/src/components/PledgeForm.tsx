@@ -8,7 +8,7 @@ import { ExplorerLink } from './ExplorerLink';
 
 interface Props {
   campaignId: string;
-  campaignAddress?: string;
+  escrowAddress?: string;
   onBuiltTx?: (tx: BuiltTxResponse) => void;
   onBroadcastSuccess?: () => void;
 }
@@ -61,7 +61,7 @@ function formatPledgeError(err: unknown): string {
 
 export const PledgeForm: React.FC<Props> = ({
   campaignId,
-  campaignAddress,
+  escrowAddress,
   onBuiltTx,
   onBroadcastSuccess,
 }) => {
@@ -73,8 +73,9 @@ export const PledgeForm: React.FC<Props> = ({
   const [statusMessage, setStatusMessage] = useState('');
   const [uiError, setUiError] = useState('');
   const [amountError, setAmountError] = useState('');
-  const [apiCampaignAddress, setApiCampaignAddress] = useState('');
+  const [apiEscrowAddress, setApiEscrowAddress] = useState('');
   const [escrowMismatchBanner, setEscrowMismatchBanner] = useState('');
+  const [invalidEscrowCampaign, setInvalidEscrowCampaign] = useState(false);
 
   const {
     connected,
@@ -95,19 +96,24 @@ export const PledgeForm: React.FC<Props> = ({
   }, [connected, addresses, contributorAddressFull]);
 
   useEffect(() => {
-    if (campaignAddress?.trim()) {
-      setApiCampaignAddress(normalizeEcashAddress(campaignAddress));
+    if (escrowAddress?.trim()) {
+      setApiEscrowAddress(normalizeEcashAddress(escrowAddress));
+      setInvalidEscrowCampaign(false);
       return;
     }
     fetchCampaign(campaignId)
       .then((campaign) => {
-        const fromApi = campaign.covenant?.campaignAddress || campaign.campaignAddress || '';
-        setApiCampaignAddress(fromApi ? normalizeEcashAddress(fromApi) : '');
+        const fromApi = campaign.escrowAddress || '';
+        const normalizedEscrow = fromApi ? normalizeEcashAddress(fromApi) : '';
+        const normalizedBeneficiary = campaign.beneficiaryAddress ? normalizeEcashAddress(campaign.beneficiaryAddress) : '';
+        setApiEscrowAddress(normalizedEscrow);
+        setInvalidEscrowCampaign(Boolean(normalizedEscrow && normalizedBeneficiary && normalizedEscrow === normalizedBeneficiary));
       })
       .catch(() => {
-        setApiCampaignAddress('');
+        setApiEscrowAddress('');
+        setInvalidEscrowCampaign(false);
       });
-  }, [campaignAddress, campaignId]);
+  }, [escrowAddress, campaignId]);
 
   const hasWalletConnectSession = connected && Boolean(topic);
 
@@ -160,6 +166,19 @@ export const PledgeForm: React.FC<Props> = ({
       return;
     }
 
+    if (invalidEscrowCampaign) {
+      setUiError('Esta campaña fue creada con un escrow inválido; crea una nueva campaña.');
+      setStatusMessage('');
+      return;
+    }
+
+    const normalizedEscrow = normalizeEcashAddress(apiEscrowAddress || escrowAddress || '');
+    if (!normalizedEscrow) {
+      setUiError('Esta campaña fue creada con un escrow inválido; crea una nueva campaña.');
+      setStatusMessage('');
+      return;
+    }
+
     setAmountError('');
     setLoading(true);
     setStatusMessage('Creando pledge...');
@@ -182,7 +201,7 @@ export const PledgeForm: React.FC<Props> = ({
         throw new Error('El backend no devolvió wcOfferId/offerId para WalletConnect.');
       }
 
-      const fallbackCampaignAddress = built.escrowAddress || apiCampaignAddress || campaignAddress || '';
+      const canonicalEscrowAddress = built.escrowAddress || apiEscrowAddress || '';
       if (import.meta.env.DEV && built.escrowAddress) {
         console.debug('[pledge/build] escrowAddress', built.escrowAddress);
       }
@@ -192,9 +211,9 @@ export const PledgeForm: React.FC<Props> = ({
             valueSats: normalizeOutputValueSats(output.valueSats),
           }))
         : (() => {
-            const normalizedCampaign = normalizeEcashAddress(fallbackCampaignAddress);
+            const normalizedCampaign = normalizeEcashAddress(canonicalEscrowAddress);
             if (!normalizedCampaign) {
-              throw new Error('No se pudo resolver campaignAddress para construir outputs de intent.');
+              throw new Error('Esta campaña fue creada con un escrow inválido; crea una nueva campaña.');
             }
             return [
               {
@@ -271,9 +290,12 @@ export const PledgeForm: React.FC<Props> = ({
       {escrowMismatchBanner && (
         <p style={{ color: '#b00020', fontWeight: 600 }}>{escrowMismatchBanner}</p>
       )}
-      {apiCampaignAddress && (
+      {invalidEscrowCampaign && (
+        <p style={{ color: '#b00020', fontWeight: 600 }}>Esta campaña fue creada con un escrow inválido; crea una nueva campaña.</p>
+      )}
+      {apiEscrowAddress && (
         <p style={{ marginTop: 0 }}>
-          Campaign address: <code>{apiCampaignAddress}</code>
+          Escrow address: <code>{apiEscrowAddress}</code>
         </p>
       )}
       <form onSubmit={submit}>
@@ -316,7 +338,7 @@ export const PledgeForm: React.FC<Props> = ({
           />
           {amountError && <p style={{ color: '#b00020', margin: '6px 0 0' }}>{amountError}</p>}
         </div>
-        <button type="submit" disabled={loading || !hasWalletConnectSession}>
+        <button type="submit" disabled={loading || !hasWalletConnectSession || invalidEscrowCampaign}>
           {loading ? 'Procesando...' : 'Donar'}
         </button>
         {!hasWalletConnectSession && (

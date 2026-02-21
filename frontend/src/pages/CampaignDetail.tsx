@@ -606,7 +606,7 @@ export const CampaignDetail: React.FC = () => {
         canonicalId ? (
           <PledgeForm
             campaignId={canonicalId}
-            campaignAddress={campaign.covenant?.campaignAddress || campaign.campaignAddress}
+            escrowAddress={campaign.escrowAddress}
             onBroadcastSuccess={refreshCampaign}
           />
         ) : (
