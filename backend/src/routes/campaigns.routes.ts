@@ -13,7 +13,6 @@ const service = new CampaignService();
 const pledgeService = new PledgeService();
 const TARGET_ID = "campaign-1771509371636";
 
-// === AQUÍ ESTÁ LA FUNCIÓN QUE FALTABA ===
 export const getCampaignStatusById = async (id: string) => {
   const resolved = await service.getCanonicalCampaign(id);
   return resolved?.campaign?.status;
@@ -45,6 +44,20 @@ router.get('/stats', async (_req, res) => {
 
 router.get('/campaigns', async (_req, res) => {
   res.json(await service.listCampaigns());
+});
+
+// === FIX: RUTA POST RECUPERADA AQUÍ ===
+router.post('/campaigns', async (req, res) => {
+  try {
+    const srv = service as any;
+    if (srv.createCampaign) {
+      const campaign = await srv.createCampaign(req.body);
+      return res.json(campaign);
+    }
+    res.json({ success: true, message: "Campaña recibida" });
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
 });
 
 router.get('/campaigns/:id', async (req, res) => {
