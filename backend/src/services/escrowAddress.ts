@@ -29,20 +29,13 @@ export function resolveEscrowAddress(campaign: EscrowAddressFields): string {
   if (direct) return direct;
 
   const covenantAddress = pickAddress(campaign.covenantAddress, 'covenantAddress');
-  if (covenantAddress) {
-    campaign.escrowAddress = covenantAddress;
-    return covenantAddress;
-  }
+  if (covenantAddress) return covenantAddress;
 
-  const derived = deriveEscrowAddress(campaign);
-  if (derived) return derived;
-
-  const legacy = pickAddress(campaign.campaignAddress ?? campaign.recipientAddress, 'campaignAddress');
+  const legacy = pickAddress(campaign.campaignAddress, 'campaignAddress');
   if (legacy) {
-    console.warn('[escrow] using legacy campaign/recipient address fallback', {
+    console.warn('[escrow] using legacy campaignAddress fallback', {
       campaignId: campaign.id,
       campaignAddress: campaign.campaignAddress,
-      recipientAddress: campaign.recipientAddress,
     });
     return legacy;
   }
@@ -143,7 +136,6 @@ export async function repairCampaignEscrowAddress(
   // Canonical escrow for pledges; keep recipient/beneficiary untouched for payout.
   campaign.escrowAddress = escrowAddress;
   campaign.covenantAddress = escrowAddress;
-  campaign.campaignAddress = escrowAddress;
   const txidUsed = String(campaign.activationFeeTxid ?? campaign.activation?.feeTxid ?? '').trim() || null;
   return { escrowAddress, source: fromChain ? 'activation-tx' : 'resolved', txidUsed };
 }

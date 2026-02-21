@@ -4,6 +4,15 @@ export const ecashConfig = {
   rpcUrl: process.env.ECASH_RPC_URL || process.env.E_CASH_RPC_URL || 'http://localhost:8332',
 };
 
+
+function parseBooleanEnv(raw: string | undefined): boolean | null {
+  if (raw === undefined) return null;
+  const normalized = raw.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return null;
+}
+
 const hasRpcEnv =
   !!(process.env.ECASH_RPC_URL || process.env.E_CASH_RPC_URL) ||
   !!(process.env.ECASH_RPC_USER || process.env.E_CASH_RPC_USER) ||
@@ -12,7 +21,9 @@ const hasRpcEnv =
 export const ECASH_BACKEND = (
   process.env.E_CASH_BACKEND || (hasRpcEnv ? 'rpc' : 'chronik')
 ).toLowerCase();
-export const USE_CHRONIK = ECASH_BACKEND === 'chronik';
+const useChronikOverride = parseBooleanEnv(process.env.USE_CHRONIK);
+
+export const USE_CHRONIK = useChronikOverride ?? (ECASH_BACKEND === 'chronik');
 export const USE_MOCK = ECASH_BACKEND === 'mock';
 
 export function normalizeChronikBaseUrl(value: string): string {

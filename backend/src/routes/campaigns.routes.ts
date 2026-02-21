@@ -228,20 +228,12 @@ export const buildCampaignPayoutHandler = async (req: any, res: any) => {
     const campaign = resolved?.campaign;
     if (!campaign || !resolved) return res.status(404).json({ error: 'not-found' });
 
-    let escrowAddress = campaign.escrowAddress || campaign.covenantAddress;
-    if (!escrowAddress) {
-      try {
-        escrowAddress = resolveEscrowAddress({ ...campaign, campaignAddress: undefined, recipientAddress: undefined });
-      } catch {
-        escrowAddress = undefined;
-      }
-    }
-
-    if (!escrowAddress) {
+    let escrowAddress: string;
+    try {
+      escrowAddress = resolveEscrowAddress(campaign);
+    } catch {
       return res.status(400).json({ error: 'missing-escrow-address' });
     }
-
-    console.log('[PAYOUT]', { campaignId: campaign.id, escrowAddressUsed: escrowAddress });
 
     if (campaign.status === 'funded' || campaign.status === 'paid_out') {
       return res.status(400).json({ error: 'payout-already-processed' });
@@ -269,15 +261,38 @@ export const buildCampaignPayoutHandler = async (req: any, res: any) => {
     const raisedSats = campaignUtxos.reduce((acc: bigint, u: any) => acc + BigInt(u.value || 0), 0n);
     const goalSats = BigInt(campaign.goal || 0);
 
+    console.info('[PAYOUT_BUILD]', {
+      campaignId: campaign.id,
+      escrowAddressUsed: escrowAddress,
+      goal: goalSats.toString(),
+      raisedSats: raisedSats.toString(),
+      utxoCount: campaignUtxos.length,
+    });
+
+    if (campaignUtxos.length === 0) {
+      return res.status(400).json({
+        error: 'chronik-address-utxos-not-found',
+        details: {
+          campaignId: campaign.id,
+          escrowAddressUsed: escrowAddress,
+          goal: goalSats.toString(),
+          raisedSats: raisedSats.toString(),
+          utxoCount: 0,
+          chronikUrl: getEffectiveChronikBaseUrl(),
+        },
+      });
+    }
+
     if (raisedSats < goalSats) {
       const missing = goalSats - raisedSats;
       return res.status(400).json({
         error: 'insufficient-funds-on-chain',
         details: {
-          escrowAddress,
+          campaignId: campaign.id,
+          escrowAddressUsed: escrowAddress,
           goal: goalSats.toString(),
-          raised: raisedSats.toString(),
-          missing: missing.toString(),
+          raisedSats: raisedSats.toString(),
+          missingSats: missing.toString(),
           utxoCount: campaignUtxos.length,
         },
       });
@@ -326,44 +341,57 @@ async function getUtxosForAddressSafe(address?: string | null) {
 }
 
 export const debugEscrowHandler = async (req: any, res: any) => {
+  const campaignId = String(req.params.campaignId || req.params.id || '').trim();
+
   try {
-    const { id } = req.params;
-    const campaign = await getCampaignById(id);
+    const campaign = await getCampaignById(campaignId);
 
     if (!campaign) {
       return res.status(404).json({ error: 'campaign-not-found' });
     }
 
-    const escrowAddress =
-      campaign.escrowAddress
-      || campaign.covenantAddress
-      || campaign.campaignAddress
-      || null;
+    const escrowAddressUsed = (() => {
+      try {
+        return resolveEscrowAddress(campaign);
+      } catch {
+        return campaign.escrowAddress || campaign.covenantAddress || campaign.campaignAddress || null;
+      }
+    })();
+    const utxos = await getUtxosForAddressSafe(escrowAddressUsed);
 
-    const beneficiary = campaign.recipientAddress || campaign.beneficiaryAddress || null;
-
-    const utxos = await getUtxosForAddressSafe(escrowAddress);
-
-    const raised = utxos.reduce((sum, u) => {
+    const raisedSats = utxos.reduce((sum, u) => {
       const candidate = u as { value?: unknown; sats?: unknown };
       return sum + Number(candidate.value || candidate.sats || 0);
     }, 0);
 
     return res.json({
-      campaignId: id,
-      status: campaign.status,
-      goal: campaign.goal,
-      beneficiaryAddress: beneficiary,
-      escrowAddress,
-      escrowEqualsBeneficiary: escrowAddress === beneficiary,
-      utxoCount: utxos.length,
-      raised,
-      chronikUrl: process.env.CHRONIK_URL,
-      utxos,
+      campaignId,
+      recipientAddress: campaign.recipientAddress ?? null,
+      beneficiaryAddress: campaign.beneficiaryAddress ?? null,
+      campaignAddress: campaign.campaignAddress ?? null,
+      covenantAddress: campaign.covenantAddress ?? null,
+      escrowAddress: campaign.escrowAddress ?? null,
+      escrowAddressUsed,
+      chronikUrl: getEffectiveChronikBaseUrl(),
+      utxosCount: utxos.length,
+      raisedSats,
     });
   } catch (err) {
     console.error('[debug/escrow]', err);
-    return res.status(500).json({ error: 'debug-escrow-failed' });
+    return res.status(200).json({
+      campaignId,
+      recipientAddress: null,
+      beneficiaryAddress: null,
+      campaignAddress: null,
+      covenantAddress: null,
+      escrowAddress: null,
+      escrowAddressUsed: null,
+      chronikUrl: getEffectiveChronikBaseUrl(),
+      utxosCount: 0,
+      raisedSats: 0,
+      error: 'debug-escrow-failed',
+      message: err instanceof Error ? err.message : String(err),
+    });
   }
 };
 
@@ -396,6 +424,6 @@ router.post('/campaigns/:id/activation/confirm', confirmActivationHandler);
 router.get('/campaigns/:id/activation/status', activationStatusHandler);
 router.post('/campaigns/:id/payout/build', buildCampaignPayoutHandler);
 router.post('/campaigns/:id/payout/confirm', confirmCampaignPayoutHandler);
-router.get('/debug/escrow/:id', debugEscrowHandler);
+router.get('/debug/escrow/:campaignId', debugEscrowHandler);
 
 export default router;
