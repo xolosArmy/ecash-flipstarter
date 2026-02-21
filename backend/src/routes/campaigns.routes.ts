@@ -15,6 +15,7 @@ import { walletConnectOfferStore } from '../services/WalletConnectOfferStore';
 import { TREASURY_ADDRESS } from '../config/constants';
 import { getPledgesByCampaign } from '../store/simplePledges';
 import { resolveEscrowAddress } from '../services/escrowAddress';
+import { getCampaignById } from '../db/SQLiteStore';
 
 const router = Router();
 const service = new CampaignService();
@@ -308,6 +309,64 @@ export const buildCampaignPayoutHandler = async (req: any, res: any) => {
   }
 };
 
+async function getUtxosForAddressSafe(address?: string | null) {
+  if (!address) return [];
+  try {
+    return await getUtxosForAddress(address);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (
+      message.includes('address-utxos-not-found')
+      || message.includes('utxos-not-found')
+    ) {
+      return [];
+    }
+    throw err;
+  }
+}
+
+export const debugEscrowHandler = async (req: any, res: any) => {
+  try {
+    const { id } = req.params;
+    const campaign = await getCampaignById(id);
+
+    if (!campaign) {
+      return res.status(404).json({ error: 'campaign-not-found' });
+    }
+
+    const escrowAddress =
+      campaign.escrowAddress
+      || campaign.covenantAddress
+      || campaign.campaignAddress
+      || null;
+
+    const beneficiary = campaign.recipientAddress || campaign.beneficiaryAddress || null;
+
+    const utxos = await getUtxosForAddressSafe(escrowAddress);
+
+    const raised = utxos.reduce((sum, u) => {
+      const candidate = u as { value?: unknown; sats?: unknown };
+      return sum + Number(candidate.value || candidate.sats || 0);
+    }, 0);
+
+    return res.json({
+      campaignId: id,
+      status: campaign.status,
+      goal: campaign.goal,
+      beneficiaryAddress: beneficiary,
+      escrowAddress,
+      escrowEqualsBeneficiary: escrowAddress === beneficiary,
+      utxoCount: utxos.length,
+      raised,
+      chronikUrl: process.env.CHRONIK_URL,
+      utxos,
+    });
+  } catch (err) {
+    console.error('[debug/escrow]', err);
+    return res.status(500).json({ error: 'debug-escrow-failed' });
+  }
+};
+
 export const confirmCampaignPayoutHandler = async (req: any, res: any) => {
   try {
     const txid = String(req.body?.txid || '').trim().toLowerCase();
@@ -337,5 +396,6 @@ router.post('/campaigns/:id/activation/confirm', confirmActivationHandler);
 router.get('/campaigns/:id/activation/status', activationStatusHandler);
 router.post('/campaigns/:id/payout/build', buildCampaignPayoutHandler);
 router.post('/campaigns/:id/payout/confirm', confirmCampaignPayoutHandler);
+router.get('/debug/escrow/:id', debugEscrowHandler);
 
 export default router;
