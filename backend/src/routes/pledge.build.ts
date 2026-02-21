@@ -4,7 +4,6 @@ import { createWalletConnectPledgeOffer } from '../services/PledgeOfferService';
 import { getCampaignStatusById } from './campaigns.routes';
 import { CampaignService } from '../services/CampaignService';
 import { parsePledgeAmountSats, parsePledgeMessage } from './pledgePayload';
-import { buildEscrowMismatchDetails, validateEscrowConsistency } from '../services/escrowAddress';
 
 const router = Router();
 const campaignService = new CampaignService();
@@ -32,11 +31,16 @@ export const createPledgeBuildHandler = async (req: any, res: any) => {
     if (!campaign) {
       return res.status(404).json({ error: 'campaign-not-found' });
     }
-    const escrow = validateEscrowConsistency({ id: canonicalId, ...campaign });
-    if (!escrow.ok) {
-      return res.status(400).json({ error: 'escrow-address-mismatch', ...buildEscrowMismatchDetails({ id: canonicalId, ...campaign }, escrow.details.canonicalEscrow) });
+    const campaignAddress =
+      campaign.escrowAddress ||
+      campaign.covenantAddress ||
+      campaign.campaignAddress;
+    if (!campaignAddress) {
+      return res.status(400).json({
+        error: 'missing-escrow-address',
+        message: 'Campaign has no persisted escrow address.'
+      });
     }
-    const campaignAddress = escrow.escrowAddress;
 
     const contributorAddress = validateAddress(
       req.body.contributorAddress as string,
