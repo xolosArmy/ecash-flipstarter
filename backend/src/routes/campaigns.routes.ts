@@ -6,127 +6,80 @@ import { buildPayoutTx } from '../blockchain/txBuilder';
 import { serializeBuiltTx } from './serialize';
 import { walletConnectOfferStore } from '../services/WalletConnectOfferStore';
 import { TREASURY_ADDRESS } from '../config/constants';
-import { upsertCampaign, openDatabase } from '../db/SQLiteStore';
+import { upsertCampaign } from '../db/SQLiteStore';
 
 const router = Router();
 const service = new CampaignService();
 const pledgeService = new PledgeService();
 
-// Función auxiliar para obtener estado
 export const getCampaignStatusById = async (id: string) => {
   const resolved = await service.getCanonicalCampaign(id);
   return resolved?.campaign?.status;
 };
 
-// Sincronización inicial (Solo asegura que existan, no sobreescribe todo)
-const initDB = async () => {
-  try {
-    const db = await openDatabase();
-    // Intentamos cargar campañas existentes desde el archivo JSON si la DB está vacía
-    await service.listCampaigns(); 
-    console.log("[DB] Sistema de campañas listo.");
-  } catch (e) {
-    console.error("[DB] Error en inicialización:", e);
-  }
-};
-initDB();
-
+// Rutas Estadísticas e Historial
 router.get('/stats', async (_req, res) => {
   try {
     const campaigns = await service.listCampaigns();
     const pledges = await pledgeService.listAllPledges();
     res.json({ 
       totalCampaigns: campaigns.length, 
-      totalRaisedSats: "0", 
-      activePledges: Array.isArray(pledges) ? pledges.length : 0 
+      totalRaisedSats: pledges.reduce((acc: number, p: any) => acc + (p.amount || 0), 0).toString(), 
+      activePledges: pledges.length 
     });
-  } catch (e) { 
-    res.json({ totalCampaigns: 0, totalRaisedSats: "0", activePledges: 0 }); 
-  }
+  } catch (e) { res.json({ totalCampaigns: 0, totalRaisedSats: "0", activePledges: 0 }); }
 });
 
-// Obtener TODAS las campañas
 router.get('/campaigns', async (_req, res) => {
-  try {
-    const camps = await service.listCampaigns();
-    res.json(camps);
-  } catch(e) {
-    res.status(500).json({ error: "Error al listar campañas" });
-  }
-});
-
-router.post('/campaigns', async (req, res) => {
-  try {
-    const srv = service as any;
-    const campaign = await srv.createCampaign(req.body);
-    res.json(campaign);
-  } catch (err) {
-    res.status(400).json({ error: (err as Error).message });
-  }
-});
-
-router.get('/campaigns/:id', async (req, res) => {
-  try {
-    const id = req.params.id;
-    const resolved = await service.getCanonicalCampaign(id);
-    if (!resolved) return res.status(404).json({ error: "Campaña no encontrada" });
-    res.json(resolved.campaign);
-  } catch (e) {
-    res.status(404).json({ error: "Error al buscar campaña" });
-  }
+  res.json(await service.listCampaigns());
 });
 
 router.get('/campaigns/:id/summary', async (req, res) => {
-  try {
-    res.json(await pledgeService.getCampaignSummary(req.params.id));
-  } catch (e) {
-    res.json({ campaignId: req.params.id, totalPledgedSats: "0", pledgeCount: 0, status: 'unknown' });
-  }
+  res.json(await pledgeService.getCampaignSummary(req.params.id));
 });
 
 router.get('/campaigns/:id/history', async (req, res) => {
   try {
     const data = await pledgeService.listPledges(req.params.id);
-    res.json(Array.isArray(data) ? data.map((p: any) => ({ ...p, type: 'pledge' })) : []);
+    // Mapeamos al formato que espera el AuditLog del frontend
+    res.json(data.map((p: any) => ({
+      id: p.pledgeId,
+      type: 'pledge',
+      timestamp: p.timestamp,
+      payload: {
+        contributorAddress: p.contributorAddress,
+        amount: p.amount,
+        txid: p.txid,
+        message: p.message
+      }
+    })));
   } catch (e) { res.json([]); }
+});
+
+router.get('/campaigns/:id', async (req, res) => {
+  const resolved = await service.getCanonicalCampaign(req.params.id);
+  res.json(resolved?.campaign || (await service.listCampaigns())[0]);
 });
 
 router.post('/campaigns/:id/payout/build', async (req, res) => {
   try {
-    const id = req.params.id;
-    const resolved = await service.getCanonicalCampaign(id);
+    const resolved = await service.getCanonicalCampaign(req.params.id);
     const target = resolved?.campaign;
     if (!target) return res.status(404).json({ error: 'not-found' });
-
     const escrowAddress = target.covenantAddress || target.campaignAddress || '';
-    const beneficiaryAddress = target.beneficiaryAddress || '';
-
     const utxos = await getUtxosForAddress(escrowAddress);
     const campaignUtxos = utxos.filter((u: any) => !u.token);
     const raisedSats = campaignUtxos.reduce((acc: bigint, u: any) => acc + BigInt(u.value || 0), 0n);
-    
     const builtTx = await buildPayoutTx({
-      campaignUtxos, 
-      totalRaised: raisedSats, 
-      beneficiaryAddress,
-      treasuryAddress: TREASURY_ADDRESS, 
-      fixedFee: 500n, 
-      dustLimit: 546n,
+      campaignUtxos, totalRaised: raisedSats, beneficiaryAddress: target.beneficiaryAddress || '',
+      treasuryAddress: TREASURY_ADDRESS, fixedFee: 500n, dustLimit: 546n,
     });
-
     const built = serializeBuiltTx(builtTx);
     const offer = walletConnectOfferStore.createOffer({
-      campaignId: target.id, 
-      unsignedTxHex: built.unsignedTxHex || built.rawHex,
-      amount: raisedSats.toString(), 
-      contributorAddress: beneficiaryAddress,
+      campaignId: target.id, unsignedTxHex: built.unsignedTxHex || built.rawHex,
+      amount: raisedSats.toString(), contributorAddress: target.beneficiaryAddress || '',
     });
-
-    res.json({ 
-      unsignedTxHex: built.unsignedTxHex || built.rawHex, 
-      wcOfferId: offer.offerId, 
-      raised: raisedSats.toString() 
-    });
+    res.json({ unsignedTxHex: built.unsignedTxHex || built.rawHex, wcOfferId: offer.offerId, raised: raisedSats.toString() });
   } catch (err) { res.status(400).json({ error: (err as Error).message }); }
 });
 
