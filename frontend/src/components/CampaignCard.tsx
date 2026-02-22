@@ -10,6 +10,10 @@ interface Props {
 }
 
 export const CampaignCard: React.FC<Props> = ({ campaign }) => {
+  // Blindaje: evita /campaigns/undefined si llega algún item roto
+  const campaignKey = (campaign as any).id ?? (campaign as any).slug;
+  const detailUrl = campaignKey ? `/campaigns/${campaignKey}` : undefined;
+
   const percent =
     campaign.goal > 0 ? Math.min(100, Math.round((campaign.totalPledged / campaign.goal) * 100)) : 0;
   const hasConfirmedActivation = Boolean(
@@ -40,7 +44,11 @@ export const CampaignCard: React.FC<Props> = ({ campaign }) => {
           Activación confirmada
         </p>
       )}
-      <Link to={`/campaigns/${campaign.id}`}>Ver detalles</Link>
+      {detailUrl ? (
+        <Link to={detailUrl}>Ver detalles</Link>
+      ) : (
+        <span style={{ opacity: 0.6 }}>Sin ID (registro inválido)</span>
+      )}
     </div>
   );
 };
