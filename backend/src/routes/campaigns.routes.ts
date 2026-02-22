@@ -21,29 +21,20 @@ const router = Router();
 const service = new CampaignService();
 const pledgeService = new PledgeService();
 
-// Normalizador: evita slugs "undefined" y alinea direcciones sin usar recipientAddress como fallback
+// Normalizador: evita slugs "undefined" y alinea direcciones
 function normalizeCampaign(c: any) {
   // Fuente de verdad para "la dirección del lock"
-  const canonicalAddress = c?.covenantAddress || c?.campaignAddress || c?.escrowAddress;
+  const canonicalAddress = c?.covenantAddress || c?.campaignAddress || c?.escrowAddress || c?.recipientAddress;
 
   // slug estable (si no existe o viene roto, usamos el id)
   const stableSlug = c?.slug && c.slug !== 'undefined' ? c.slug : c?.id;
 
-  // Garantiza que siempre exista un id usable por la UI
-  // (si por alguna razón el storage guardó id vacío pero sí hay slug)
-  const stableId = c?.id || stableSlug;
-
   return {
     ...c,
-    id: stableId,
     slug: stableSlug,
-    ...(canonicalAddress
-      ? {
-          campaignAddress: canonicalAddress,
-          covenantAddress: canonicalAddress,
-          escrowAddress: canonicalAddress,
-        }
-      : {}),
+    campaignAddress: canonicalAddress,
+    covenantAddress: canonicalAddress,
+    escrowAddress: canonicalAddress,
   };
 }
 
@@ -95,7 +86,7 @@ export const createCampaignHandler = async (req: any, res: any) => {
 router.get('/campaigns/:id', async (req, res) => {
   try {
     const resolved = await service.getCanonicalCampaign(req.params.id);
-    if (!resolved) return res.status(404).json({ error: 'not-found' });
+    if (!resolved?.campaign) return res.status(404).json({ error: 'not-found' });
     res.json(normalizeCampaign(resolved.campaign));
   } catch (_e) {
     res.status(404).json({ error: 'error-fetching' });

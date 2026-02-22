@@ -30,7 +30,12 @@ export const Home: React.FC = () => {
     setLoading(true);
     setError(null);
     fetchCampaigns()
-      .then((data) => Promise.all(data.map((campaign) => fetchCampaignSummary(campaign.id))))
+      .then((data) => {
+        const validCampaignKeys = data
+          .map((campaign) => campaign.id || campaign.slug)
+          .filter((campaignKey): campaignKey is string => Boolean(campaignKey));
+        return Promise.all(validCampaignKeys.map((campaignKey) => fetchCampaignSummary(campaignKey)));
+      })
       .then((summaries) => setCampaigns(summaries))
       .catch((err) => {
         setError(err instanceof Error ? err.message : 'Failed to load campaigns');
