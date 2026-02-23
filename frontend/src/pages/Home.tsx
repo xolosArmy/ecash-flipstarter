@@ -32,8 +32,10 @@ export const Home: React.FC = () => {
     fetchCampaigns()
       .then(async (data) => {
         const validCampaigns = (data || []).filter((campaign) => {
-          const hasValidId = Boolean(campaign?.id && campaign.id !== 'undefined');
-          const hasValidSlug = Boolean(campaign?.slug && campaign.slug !== 'undefined');
+          const rawId = campaign?.id?.toString().trim();
+          const rawSlug = campaign?.slug?.toString().trim();
+          const hasValidId = Boolean(rawId && rawId !== 'undefined' && rawId !== 'null');
+          const hasValidSlug = Boolean(rawSlug && rawSlug !== 'undefined' && rawSlug !== 'null');
           if (!hasValidId && !hasValidSlug) {
             console.warn('Skipping invalid campaign record without id/slug', campaign);
             return false;
@@ -43,21 +45,20 @@ export const Home: React.FC = () => {
 
         const summaries = await Promise.all(
           validCampaigns.map(async (campaign) => {
-            const idOrSlug = campaign.id || campaign.slug;
-            if (!idOrSlug) {
-              console.warn('Skipping campaign summary fetch with undefined id/slug', campaign);
-              return null;
-            }
+            const idOrSlug = (campaign.id || campaign.slug) as string;
             const summary = await fetchCampaignSummary(idOrSlug);
             return {
               ...summary,
-              id: summary?.id || idOrSlug,
-              slug: summary?.slug || campaign.slug || campaign.id || idOrSlug,
+              id: summary.id || idOrSlug,
+              slug: summary.slug || campaign.slug || idOrSlug,
             };
           }),
         );
 
-        return summaries.filter((summary): summary is CampaignSummaryResponse => Boolean(summary?.id && summary.id !== 'undefined'));
+        return summaries.filter((summary): summary is CampaignSummaryResponse => {
+          const rawId = summary?.id?.toString().trim();
+          return Boolean(rawId && rawId !== 'undefined' && rawId !== 'null');
+        });
       })
       .then((summaries) => setCampaigns(summaries))
       .catch((err) => {

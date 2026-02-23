@@ -63,7 +63,13 @@ export async function fetchCampaign(id: string): Promise<CampaignDetail> {
 }
 
 export async function fetchCampaignSummary(id: string): Promise<CampaignSummaryResponse> {
-  return jsonFetch<CampaignSummaryResponse>(`/campaigns/${id}/summary`);
+  // Guard against malformed identifiers so callers do not trigger /campaigns/undefined/... requests.
+  const raw = (id ?? '').toString().trim();
+  if (!raw || raw === 'undefined' || raw === 'null') {
+    throw new Error(`Invalid campaign id for summary: "${raw}"`);
+  }
+  const safe = encodeURIComponent(raw);
+  return jsonFetch<CampaignSummaryResponse>(`/campaigns/${safe}/summary`);
 }
 
 export interface CreateCampaignPayload {
