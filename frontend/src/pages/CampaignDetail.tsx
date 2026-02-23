@@ -332,7 +332,7 @@ export const CampaignDetail: React.FC = () => {
       refreshCampaign();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'No se pudo activar la campaña.';
-      const lower = message.toLowerCase();
+      const lower = String(message || '').toLowerCase();
       if (lower.includes('insufficient') || lower.includes('funds')) {
         setActivationError('Fondos insuficientes para pagar fee + comisión');
       } else if (lower.includes('fee too low') || lower.includes('mempool')) {
@@ -641,7 +641,7 @@ export const CampaignDetail: React.FC = () => {
                 <header>
                   {(() => {
                     const ev = (log?.event ?? '').toString();
-                    const evLower = ev ? ev.toLowerCase() : '';
+                    const evLower = String(ev || '').toLowerCase();
                     const evLabel = ev || 'unknown';
                     return (
                       <span className={`audit-badge badge-${evLower || 'unknown'}`}>

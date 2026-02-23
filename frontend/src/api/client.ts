@@ -340,19 +340,29 @@ export interface CampaignPledgesResponse {
 export async function fetchCampaignPledges(campaignId: string): Promise<CampaignPledgesResponse> {
   const raw = (campaignId ?? '').toString().trim();
   if (!raw || raw === 'undefined' || raw === 'null') {
-    throw new Error(`Invalid campaign id for pledges: "${raw}"`);
+    return { totalPledged: 0, pledgeCount: 0, pledges: [] };
   }
 
   const safe = encodeURIComponent(raw);
-  const response = await jsonFetch<CampaignPledgesResponse | CampaignPledgesResponse['pledges']>(`/campaigns/${safe}/pledges`);
+
+  let response: CampaignPledgesResponse | CampaignPledgesResponse['pledges'];
+  try {
+    response = await jsonFetch<CampaignPledgesResponse | CampaignPledgesResponse['pledges']>(`/campaigns/${safe}/pledges`);
+  } catch (error) {
+    const message = error instanceof Error ? String(error.message || '') : '';
+    if (message.includes('HTTP 404')) {
+      return { totalPledged: 0, pledgeCount: 0, pledges: [] };
+    }
+    throw error;
+  }
 
   if (Array.isArray(response)) {
     const pledges = response.map((pledge) => ({
-      txid: pledge.txid ?? null,
-      contributorAddress: pledge.contributorAddress ?? '',
-      amount: Number(pledge.amount || 0),
-      timestamp: pledge.timestamp ?? new Date(0).toISOString(),
-      message: pledge.message,
+      txid: pledge?.txid ?? null,
+      contributorAddress: pledge?.contributorAddress ?? '',
+      amount: Number(pledge?.amount || 0),
+      timestamp: pledge?.timestamp ?? new Date(0).toISOString(),
+      message: pledge?.message,
     }));
 
     return {
@@ -362,7 +372,18 @@ export async function fetchCampaignPledges(campaignId: string): Promise<Campaign
     };
   }
 
-  return response;
+  const pledges = Array.isArray(response?.pledges) ? response.pledges : [];
+  return {
+    totalPledged: Number(response?.totalPledged || pledges.reduce((sum, pledge) => sum + Number(pledge?.amount || 0), 0)),
+    pledgeCount: Number(response?.pledgeCount || pledges.length),
+    pledges: pledges.map((pledge) => ({
+      txid: pledge?.txid ?? null,
+      contributorAddress: pledge?.contributorAddress ?? '',
+      amount: Number(pledge?.amount || 0),
+      timestamp: pledge?.timestamp ?? new Date(0).toISOString(),
+      message: pledge?.message,
+    })),
+  };
 }
 
 export async function fetchGlobalStats(): Promise<GlobalStats> {
