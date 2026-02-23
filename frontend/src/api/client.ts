@@ -338,7 +338,31 @@ export interface CampaignPledgesResponse {
 }
 
 export async function fetchCampaignPledges(campaignId: string): Promise<CampaignPledgesResponse> {
-  return jsonFetch<CampaignPledgesResponse>(`/campaigns/${campaignId}/pledges`);
+  const raw = (campaignId ?? '').toString().trim();
+  if (!raw || raw === 'undefined' || raw === 'null') {
+    throw new Error(`Invalid campaign id for pledges: "${raw}"`);
+  }
+
+  const safe = encodeURIComponent(raw);
+  const response = await jsonFetch<CampaignPledgesResponse | CampaignPledgesResponse['pledges']>(`/campaigns/${safe}/pledges`);
+
+  if (Array.isArray(response)) {
+    const pledges = response.map((pledge) => ({
+      txid: pledge.txid ?? null,
+      contributorAddress: pledge.contributorAddress ?? '',
+      amount: Number(pledge.amount || 0),
+      timestamp: pledge.timestamp ?? new Date(0).toISOString(),
+      message: pledge.message,
+    }));
+
+    return {
+      totalPledged: pledges.reduce((sum, pledge) => sum + pledge.amount, 0),
+      pledgeCount: pledges.length,
+      pledges,
+    };
+  }
+
+  return response;
 }
 
 export async function fetchGlobalStats(): Promise<GlobalStats> {

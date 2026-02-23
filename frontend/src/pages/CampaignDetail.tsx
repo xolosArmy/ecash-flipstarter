@@ -89,10 +89,11 @@ export const CampaignDetail: React.FC = () => {
   const loadMessages = useCallback((campaignId: string) => {
     fetchCampaignPledges(campaignId)
       .then((response) => {
-        const nextMessages = response.pledges
-          .filter((pledge) => typeof pledge.message === 'string' && pledge.message.trim())
+        const pledges = Array.isArray(response?.pledges) ? response.pledges : [];
+        const nextMessages = pledges
+          .filter((pledge) => typeof pledge?.message === 'string' && pledge.message.trim())
           .map((pledge) => ({
-            amount: pledge.amount,
+            amount: Number(pledge.amount || 0),
             timestamp: pledge.timestamp,
             message: pledge.message!.trim(),
           }))
@@ -638,9 +639,16 @@ export const CampaignDetail: React.FC = () => {
               <div className="audit-dot" />
               <div className="audit-content">
                 <header>
-                  <span className={`audit-badge badge-${log.event.toLowerCase()}`}>
-                    {log.event}
-                  </span>
+                  {(() => {
+                    const ev = (log?.event ?? '').toString();
+                    const evLower = ev ? ev.toLowerCase() : '';
+                    const evLabel = ev || 'unknown';
+                    return (
+                      <span className={`audit-badge badge-${evLower || 'unknown'}`}>
+                        {evLabel}
+                      </span>
+                    );
+                  })()}
                   <time>{new Date(log.timestamp).toLocaleString()}</time>
                 </header>
                 <pre className="audit-details">
