@@ -21,17 +21,16 @@ const router = Router();
 const service = new CampaignService();
 const pledgeService = new PledgeService();
 
-// Normalizador: evita slugs "undefined" y alinea direcciones
 function normalizeCampaign(c: any) {
-  // Fuente de verdad para "la dirección del lock"
   const canonicalAddress = c?.covenantAddress || c?.campaignAddress || c?.escrowAddress || c?.recipientAddress;
 
-  // slug estable (si no existe o viene roto, usamos el id)
-  const stableSlug = c?.slug && c.slug !== 'undefined' ? c.slug : c?.id;
+  const safeId = c?.id && c.id !== 'undefined' ? c.id : undefined;
+  const safeSlug = c?.slug && c.slug !== 'undefined' ? c.slug : undefined;
 
   return {
     ...c,
-    slug: stableSlug,
+    id: safeId || safeSlug,
+    slug: safeSlug || safeId || c?.id,
     campaignAddress: canonicalAddress,
     covenantAddress: canonicalAddress,
     escrowAddress: canonicalAddress,

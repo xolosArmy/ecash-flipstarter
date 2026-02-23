@@ -10,8 +10,15 @@ interface Props {
 }
 
 export const CampaignCard: React.FC<Props> = ({ campaign }) => {
-  const campaignKey = campaign.id || campaign.slug;
-  const detailUrl = campaignKey ? `/campaigns/${campaignKey}` : '#';
+  const idOrSlug = campaign.id || campaign.slug;
+
+  if (!idOrSlug) {
+    return (
+      <div style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12, marginBottom: 12, opacity: 0.7 }}>
+        Registro inválido: sin ID
+      </div>
+    );
+  }
 
   const percent =
     campaign.goal > 0 ? Math.min(100, Math.round((campaign.totalPledged / campaign.goal) * 100)) : 0;
@@ -43,11 +50,7 @@ export const CampaignCard: React.FC<Props> = ({ campaign }) => {
           Activación confirmada
         </p>
       )}
-      {campaignKey ? (
-        <Link to={detailUrl}>Ver detalles</Link>
-      ) : (
-        <span style={{ opacity: 0.6 }}>Sin ID (registro inválido)</span>
-      )}
+      <Link to={`/campaigns/${idOrSlug}`}>Ver detalles</Link>
     </div>
   );
 };

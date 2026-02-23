@@ -30,11 +30,34 @@ export const Home: React.FC = () => {
     setLoading(true);
     setError(null);
     fetchCampaigns()
-      .then((data) => {
-        const validCampaignKeys = data
-          .map((campaign) => campaign.id || campaign.slug)
-          .filter((campaignKey): campaignKey is string => Boolean(campaignKey));
-        return Promise.all(validCampaignKeys.map((campaignKey) => fetchCampaignSummary(campaignKey)));
+      .then(async (data) => {
+        const validCampaigns = (data || []).filter((campaign) => {
+          const hasValidId = Boolean(campaign?.id && campaign.id !== 'undefined');
+          const hasValidSlug = Boolean(campaign?.slug && campaign.slug !== 'undefined');
+          if (!hasValidId && !hasValidSlug) {
+            console.warn('Skipping invalid campaign record without id/slug', campaign);
+            return false;
+          }
+          return true;
+        });
+
+        const summaries = await Promise.all(
+          validCampaigns.map(async (campaign) => {
+            const idOrSlug = campaign.id || campaign.slug;
+            if (!idOrSlug) {
+              console.warn('Skipping campaign summary fetch with undefined id/slug', campaign);
+              return null;
+            }
+            const summary = await fetchCampaignSummary(idOrSlug);
+            return {
+              ...summary,
+              id: summary?.id || idOrSlug,
+              slug: summary?.slug || campaign.slug || campaign.id || idOrSlug,
+            };
+          }),
+        );
+
+        return summaries.filter((summary): summary is CampaignSummaryResponse => Boolean(summary?.id && summary.id !== 'undefined'));
       })
       .then((summaries) => setCampaigns(summaries))
       .catch((err) => {
