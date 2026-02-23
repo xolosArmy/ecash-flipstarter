@@ -7,7 +7,10 @@ import type {
 } from './types';
 import type { CampaignSummary as CampaignSummaryResponse } from '../types/campaign';
 
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '');
+const BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL ??
+  (import.meta.env.PROD ? 'https://api.teyolia.cash/api' : '/api')
+).replace(/\/+$/, '');
 
 async function jsonFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const url = `${BASE_URL}${path}`;
