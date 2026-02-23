@@ -10,12 +10,12 @@ interface Props {
 }
 
 export const CampaignCard: React.FC<Props> = ({ campaign }) => {
-  const idOrSlug = campaign.id || campaign.slug;
+  const idOrSlug = campaign.id || (campaign as any).slug;
 
   if (!idOrSlug) {
     return (
       <div style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12, marginBottom: 12, opacity: 0.7 }}>
-        Registro inválido: sin ID
+        Sin ID (registro inválido)
       </div>
     );
   }
