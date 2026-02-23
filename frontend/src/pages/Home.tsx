@@ -48,7 +48,7 @@ export const Home: React.FC = () => {
         const summaries = await Promise.all(
           validCampaigns.map(async (campaign) => {
             const campaignKey = String(campaign.id || campaign.slug || '').trim();
-            const summary = await fetchCampaignSummary(campaignKey);
+            const summary = await fetchCampaignSummary(campaign.id || campaign.slug || campaignKey);
             return {
               ...summary,
               id: summary.id || campaignKey,

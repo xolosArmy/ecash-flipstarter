@@ -24,16 +24,12 @@ const pledgeService = new PledgeService();
 function normalizeCampaign(c: any) {
   const canonicalAddress = c?.covenantAddress || c?.campaignAddress || c?.escrowAddress || c?.recipientAddress;
 
-  const safeId = c?.id && c.id !== 'undefined' ? c.id : undefined;
-  const safeSlug = c?.slug && c.slug !== 'undefined' ? c.slug : undefined;
-
   return {
     ...c,
-    id: safeId || safeSlug,
-    slug: safeSlug || safeId || c?.id,
     campaignAddress: canonicalAddress,
     covenantAddress: canonicalAddress,
     escrowAddress: canonicalAddress,
+    slug: c?.slug && c.slug !== 'undefined' ? c.slug : c?.id,
   };
 }
 
@@ -100,12 +96,10 @@ router.get('/campaigns/:id/summary', async (req, res) => {
 router.get('/campaigns/:id/pledges', async (req, res) => {
   try {
     const resolved = await service.getCanonicalCampaign(req.params.id);
-    if (!resolved) {
-      return res.status(404).json({ error: 'not-found' });
-    }
+    if (!resolved) return res.status(200).json([]);
 
     const pledges = await getPledgesByCampaign(resolved.canonicalId);
-    return res.status(200).json(pledges);
+    return res.status(200).json(Array.isArray(pledges) ? pledges : []);
   } catch (_e) {
     return res.status(200).json([]);
   }
