@@ -21,15 +21,20 @@ const router = Router();
 const service = new CampaignService();
 const pledgeService = new PledgeService();
 
-function normalizeCampaign(c: any) {
-  const canonicalAddress = c?.covenantAddress || c?.campaignAddress || c?.escrowAddress || c?.recipientAddress;
+function normalizeCampaign(c: any, canonicalId?: string) {
+  const id = String(canonicalId || c?.id || c?.slug || '').trim();
+  const slug = String(c?.slug || id).trim();
+  const canonicalAddress = c?.escrowAddress || c?.covenantAddress || c?.campaignAddress || c?.recipientAddress;
 
   return {
     ...c,
+    id,
+    canonicalId: id,
+    slug,
+    recipientAddress: canonicalAddress,
     campaignAddress: canonicalAddress,
     covenantAddress: canonicalAddress,
     escrowAddress: canonicalAddress,
-    slug: c?.slug && c.slug !== 'undefined' ? c.slug : c?.id,
   };
 }
 
@@ -61,7 +66,7 @@ router.get('/campaigns', async (_req, res) => {
       await (require('../services/CampaignService').hydrateCampaignStore)();
       camps = await service.listCampaigns();
     }
-    res.json((camps || []).map(normalizeCampaign));
+    res.json((camps || []).map((campaign) => normalizeCampaign(campaign)));
   } catch (_e) {
     res.json([]);
   }
@@ -82,21 +87,22 @@ router.get('/campaigns/:id', async (req, res) => {
   try {
     const resolved = await service.getCanonicalCampaign(req.params.id);
     if (!resolved?.campaign) return res.status(404).json({ error: 'not-found' });
-    res.json(normalizeCampaign(resolved.campaign));
+    res.json(normalizeCampaign(resolved.campaign, resolved.canonicalId));
   } catch (_e) {
     res.status(404).json({ error: 'error-fetching' });
   }
 });
 
 router.get('/campaigns/:id/summary', async (req, res) => {
-  res.json(await pledgeService.getCampaignSummary(req.params.id));
+  const resolved = await service.getCanonicalCampaign(req.params.id);
+  if (!resolved) return res.status(404).json({ error: 'not-found' });
+  res.json(await pledgeService.getCampaignSummary(resolved.canonicalId));
 });
-
 
 router.get('/campaigns/:id/pledges', async (req, res) => {
   try {
     const resolved = await service.getCanonicalCampaign(req.params.id);
-    if (!resolved) return res.status(200).json([]);
+    if (!resolved) return res.status(404).json({ error: 'not-found' });
 
     const pledges = await getPledgesByCampaign(resolved.canonicalId);
     return res.status(200).json(Array.isArray(pledges) ? pledges : []);

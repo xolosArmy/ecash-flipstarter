@@ -95,7 +95,7 @@ export interface BuiltTxResponse {
 
 export interface GlobalStats {
   totalCampaigns: number;
-  totalGoalSats: string;
+  totalGoalSats: number;
   totalRaisedSats: number;
   totalPledges: number;
 }

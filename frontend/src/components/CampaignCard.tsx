@@ -18,7 +18,7 @@ export const CampaignCard: React.FC<Props> = ({ campaign }) => {
   if (!hasValidIdentifier) {
     return (
       <div style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12, marginBottom: 12, opacity: 0.7 }}>
-        Sin ID (registro inválido)
+        Campaña inválida: sin id/slug
       </div>
     );
   }
@@ -53,7 +53,7 @@ export const CampaignCard: React.FC<Props> = ({ campaign }) => {
           Activación confirmada
         </p>
       )}
-      <Link to={`/campaigns/${idOrSlug}`}>Ver detalles</Link>
+      <Link to={`/campaigns/${campaign.id || campaign.slug}`}>Ver detalles</Link>
     </div>
   );
 };

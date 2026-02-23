@@ -641,7 +641,7 @@ export const CampaignDetail: React.FC = () => {
                 <header>
                   {(() => {
                     const ev = (log?.event ?? '').toString();
-                    const evLower = String(ev || '').toLowerCase();
+                    const evLower = ev ? ev.toLowerCase() : '';
                     const evLabel = ev || 'unknown';
                     return (
                       <span className={`audit-badge badge-${evLower || 'unknown'}`}>

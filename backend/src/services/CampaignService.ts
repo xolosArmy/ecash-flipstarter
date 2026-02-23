@@ -672,7 +672,7 @@ export class CampaignService {
 
     return {
       totalCampaigns: stats?.totalCampaigns ?? 0,
-      totalGoalSats: (stats?.totalGoalSats ?? 0).toString(),
+      totalGoalSats: stats?.totalGoalSats ?? 0,
       totalRaisedSats: stats?.totalRaisedSats ?? 0,
       totalPledges: stats?.totalPledges ?? 0,
     };
@@ -1073,8 +1073,8 @@ export class CampaignService {
       slug: snapshot?.slug ?? deriveCampaignSlug({ id: campaign.id, createdAt: snapshot?.createdAt ?? new Date().toISOString() }),
       name: campaign.name,
       description: campaign.description,
-      goal: campaign.goal.toString(),
-      expirationTime: campaign.expirationTime.toString(),
+      goal: Number(campaign.goal),
+      expirationTime: Number(campaign.expirationTime),
       expiresAt,
       createdAt: snapshot?.createdAt,
       status: campaign.status,

@@ -34,7 +34,7 @@ export class PledgeService {
   async getCampaignSummary(campaignId: string) {
     const db = await getDb();
     const row = await db.get('SELECT COUNT(*) as count, SUM(amount) as total FROM pledges WHERE campaignId = ?', campaignId) as any;
-    return { campaignId, pledgeCount: row?.count || 0, totalPledgedSats: (row?.total || 0).toString(), status: 'active' };
+    return { campaignId, pledgeCount: Number(row?.count || 0), totalPledged: Number(row?.total || 0) };
   }
 
   private hasToken(utxo: Utxo): boolean {
