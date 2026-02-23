@@ -96,6 +96,21 @@ router.get('/campaigns/:id/summary', async (req, res) => {
   res.json(await pledgeService.getCampaignSummary(req.params.id));
 });
 
+
+router.get('/campaigns/:id/pledges', async (req, res) => {
+  try {
+    const resolved = await service.getCanonicalCampaign(req.params.id);
+    if (!resolved) {
+      return res.status(404).json({ error: 'not-found' });
+    }
+
+    const pledges = await getPledgesByCampaign(resolved.canonicalId);
+    return res.status(200).json(pledges);
+  } catch (_e) {
+    return res.status(200).json([]);
+  }
+});
+
 // Historial formateado para el Frontend (AuditLog)
 router.get('/campaigns/:id/history', async (req, res) => {
   try {

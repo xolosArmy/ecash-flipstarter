@@ -31,26 +31,28 @@ export const Home: React.FC = () => {
     setError(null);
     fetchCampaigns()
       .then(async (data) => {
-        const validCampaigns = (data || []).filter((campaign) => {
+        const campaignsList = data || [];
+        const validCampaigns = campaignsList.filter((campaign) => {
           const rawId = campaign?.id?.toString().trim();
           const rawSlug = campaign?.slug?.toString().trim();
           const hasValidId = Boolean(rawId && rawId !== 'undefined' && rawId !== 'null');
           const hasValidSlug = Boolean(rawSlug && rawSlug !== 'undefined' && rawSlug !== 'null');
-          if (!hasValidId && !hasValidSlug) {
-            console.warn('Skipping invalid campaign record without id/slug', campaign);
-            return false;
-          }
-          return true;
+          return hasValidId || hasValidSlug;
         });
+
+        const discardedCount = campaignsList.length - validCampaigns.length;
+        if (discardedCount > 0) {
+          console.warn(`Discarded ${discardedCount} invalid campaign records without usable id/slug`);
+        }
 
         const summaries = await Promise.all(
           validCampaigns.map(async (campaign) => {
-            const idOrSlug = (campaign.id || campaign.slug) as string;
-            const summary = await fetchCampaignSummary(idOrSlug);
+            const campaignKey = String(campaign.id || campaign.slug || '').trim();
+            const summary = await fetchCampaignSummary(campaignKey);
             return {
               ...summary,
-              id: summary.id || idOrSlug,
-              slug: summary.slug || campaign.slug || idOrSlug,
+              id: summary.id || campaignKey,
+              slug: summary.slug || campaign.slug || campaignKey,
             };
           }),
         );
