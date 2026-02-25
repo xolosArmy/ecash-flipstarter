@@ -8,6 +8,7 @@ import { CampaignCard } from '../components/CampaignCard';
 import { WalletConnectBar } from '../components/WalletConnectBar';
 import { SecurityBanner } from '../components/SecurityBanner';
 import { parseXecInputToSats } from '../utils/amount';
+import { getCampaignRouteId } from '../utils/campaignRoute';
 
 export const Home: React.FC = () => {
   const [campaigns, setCampaigns] = useState<CampaignSummaryResponse[]>([]);
@@ -30,7 +31,12 @@ export const Home: React.FC = () => {
     setLoading(true);
     setError(null);
     fetchCampaigns()
-      .then((data) => Promise.all(data.map((campaign) => fetchCampaignSummary(campaign.id))))
+      .then((data) => {
+        const campaignIds = data
+          .map((campaign) => getCampaignRouteId(campaign))
+          .filter((value): value is string => Boolean(value));
+        return Promise.all(campaignIds.map((campaignId) => fetchCampaignSummary(campaignId)));
+      })
       .then((summaries) => setCampaigns(summaries))
       .catch((err) => {
         setError(err instanceof Error ? err.message : 'Failed to load campaigns');

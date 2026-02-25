@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import {
   buildActivationTx,
   buildPayoutTx,
@@ -41,6 +41,7 @@ function requireEcashChainId(session: unknown): string {
 
 export const CampaignDetail: React.FC = () => {
   const { id } = useParams();
+  const location = useLocation();
   const [campaign, setCampaign] = useState<CampaignSummary | null>(null);
   const [loadingCampaign, setLoadingCampaign] = useState(true);
   const [campaignError, setCampaignError] = useState('');
@@ -102,6 +103,13 @@ export const CampaignDetail: React.FC = () => {
     loadMessages(id);
     loadHistory(id);
   }, [id, loadHistory, loadMessages]);
+
+
+  useEffect(() => {
+    if (!id && import.meta.env.DEV) {
+      console.warn('[CampaignDetail] missing :id param', { pathname: location.pathname });
+    }
+  }, [id, location.pathname]);
 
   useEffect(() => {
     if (!id) {
@@ -369,7 +377,7 @@ export const CampaignDetail: React.FC = () => {
     }
   };
 
-  if (!id) return <p>Missing campaign id</p>;
+  if (!id) return <p>Campaña no encontrada.</p>;
   if (loadingCampaign) return <p>Loading campaign...</p>;
   if (campaignError) return <p>{campaignError}</p>;
   if (!campaign) return <p>Campaign not found.</p>;
