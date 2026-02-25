@@ -13,7 +13,9 @@ export interface CampaignPledgeSummary {
 }
 
 export interface CampaignSummary {
-  id: string;
+  id?: string;
+  slug?: string;
+  campaignId?: string;
   name: string;
   goal: number;
   expiresAt: string;

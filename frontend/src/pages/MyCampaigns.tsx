@@ -5,6 +5,7 @@ import type { CampaignSummary } from '../types/campaign';
 import { CampaignCard } from '../components/CampaignCard';
 import { WalletConnectBar } from '../components/WalletConnectBar';
 import { useWalletConnect } from '../wallet/useWalletConnect';
+import { getCampaignRouteId } from '../utils/campaignRoute';
 
 function normalizeAddress(value: string | undefined | null): string {
   if (!value) return '';
@@ -23,7 +24,12 @@ export const MyCampaigns: React.FC = () => {
     setLoading(true);
     setError(null);
     fetchCampaigns()
-      .then((items) => Promise.all(items.map((item) => fetchCampaignSummary(item.id))))
+      .then((items) => {
+        const campaignIds = items
+          .map((item) => getCampaignRouteId(item))
+          .filter((value): value is string => Boolean(value));
+        return Promise.all(campaignIds.map((campaignId) => fetchCampaignSummary(campaignId)));
+      })
       .then(setCampaigns)
       .catch((err) => {
         setError(err instanceof Error ? err.message : 'No se pudo cargar campañas.');
@@ -55,9 +61,11 @@ export const MyCampaigns: React.FC = () => {
       {!loading && !error && addresses.length > 0 && filtered.length === 0 && (
         <p>No hay campañas asociadas a tu dirección conectada.</p>
       )}
-      {filtered.map((campaign) => (
-        <CampaignCard key={campaign.id} campaign={campaign} />
-      ))}
+      {filtered.map((campaign) => {
+        const routeId = getCampaignRouteId(campaign);
+        const fallbackKey = `${campaign.name}-${campaign.expiresAt}`;
+        return <CampaignCard key={routeId ?? fallbackKey} campaign={campaign} />;
+      })}
     </div>
   );
 };

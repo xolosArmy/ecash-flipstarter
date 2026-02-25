@@ -6,6 +6,7 @@ import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 import type { CampaignSummary } from '../types/campaign';
 import { formatXecFromSats } from '../utils/amount';
+import { getCampaignRouteId } from '../utils/campaignRoute';
 
 const defaultIcon = L.icon({
   iconRetinaUrl: markerIcon2x,
@@ -31,12 +32,15 @@ function createPopupContent(campaign: CampaignSummary): HTMLElement {
   goal.textContent = `Meta: ${formatXecFromSats(campaign.goal)} XEC`;
   container.appendChild(goal);
 
-  const link = document.createElement('a');
-  link.href = `/campaigns/${campaign.id}`;
-  link.textContent = 'Ver campana';
-  link.style.display = 'inline-block';
-  link.style.marginTop = '6px';
-  container.appendChild(link);
+  const routeId = getCampaignRouteId(campaign);
+  if (routeId) {
+    const link = document.createElement('a');
+    link.href = `/campaigns/${routeId}`;
+    link.textContent = 'Ver campana';
+    link.style.display = 'inline-block';
+    link.style.marginTop = '6px';
+    container.appendChild(link);
+  }
 
   return container;
 }

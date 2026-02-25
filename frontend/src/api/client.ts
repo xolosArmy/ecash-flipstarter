@@ -37,16 +37,26 @@ async function jsonFetch<T>(path: string, options: RequestInit = {}): Promise<T>
   return res.json();
 }
 
+function requireCampaignIdentifier(value: string | null | undefined, fnName: string): string {
+  const campaignId = value?.trim();
+  if (!campaignId) {
+    throw new Error(`[api:${fnName}] campaign id is required`);
+  }
+  return campaignId;
+}
+
 export async function fetchCampaigns(): Promise<ApiCampaignSummary[]> {
   return jsonFetch<ApiCampaignSummary[]>(`/campaigns`);
 }
 
 export async function fetchCampaign(id: string): Promise<CampaignDetail> {
-  return jsonFetch<CampaignDetail>(`/campaigns/${id}`);
+  const campaignId = requireCampaignIdentifier(id, 'fetchCampaign');
+  return jsonFetch<CampaignDetail>(`/campaigns/${campaignId}`);
 }
 
 export async function fetchCampaignSummary(id: string): Promise<CampaignSummaryResponse> {
-  return jsonFetch<CampaignSummaryResponse>(`/campaigns/${id}/summary`);
+  const campaignId = requireCampaignIdentifier(id, 'fetchCampaignSummary');
+  return jsonFetch<CampaignSummaryResponse>(`/campaigns/${campaignId}/summary`);
 }
 
 export interface CreateCampaignPayload {
@@ -312,7 +322,8 @@ export interface CampaignPledgesResponse {
 }
 
 export async function fetchCampaignPledges(campaignId: string): Promise<CampaignPledgesResponse> {
-  return jsonFetch<CampaignPledgesResponse>(`/campaigns/${campaignId}/pledges`);
+  const requiredCampaignId = requireCampaignIdentifier(campaignId, 'fetchCampaignPledges');
+  return jsonFetch<CampaignPledgesResponse>(`/campaigns/${requiredCampaignId}/pledges`);
 }
 
 export async function fetchGlobalStats(): Promise<GlobalStats> {
@@ -320,5 +331,6 @@ export async function fetchGlobalStats(): Promise<GlobalStats> {
 }
 
 export async function fetchCampaignHistory(id: string): Promise<AuditLog[]> {
-  return jsonFetch<AuditLog[]>(`/campaigns/${id}/history`);
+  const campaignId = requireCampaignIdentifier(id, 'fetchCampaignHistory');
+  return jsonFetch<AuditLog[]>(`/campaigns/${campaignId}/history`);
 }

@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { AmountDisplay } from './AmountDisplay';
 import { StatusBadge } from './StatusBadge';
 import { Countdown } from './Countdown';
+import { getCampaignRouteId } from '../utils/campaignRoute';
 
 interface Props {
   campaign: CampaignSummary;
@@ -12,6 +13,7 @@ interface Props {
 export const CampaignCard: React.FC<Props> = ({ campaign }) => {
   const percent =
     campaign.goal > 0 ? Math.min(100, Math.round((campaign.totalPledged / campaign.goal) * 100)) : 0;
+  const routeId = getCampaignRouteId(campaign);
   const hasConfirmedActivation = Boolean(
     campaign.activation?.feeTxid
       && (campaign.status === 'active'
@@ -40,7 +42,13 @@ export const CampaignCard: React.FC<Props> = ({ campaign }) => {
           Activación confirmada
         </p>
       )}
-      <Link to={`/campaigns/${campaign.id}`}>Ver detalles</Link>
+      {routeId ? (
+        <Link to={`/campaigns/${routeId}`}>Ver detalles</Link>
+      ) : (
+        <button type="button" disabled title="Campaña sin identificador de ruta">
+          Ver detalles
+        </button>
+      )}
     </div>
   );
 };
