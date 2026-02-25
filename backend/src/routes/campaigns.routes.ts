@@ -268,6 +268,26 @@ function resolveCampaignEscrowAddress(campaign: CampaignApiRecord): string {
   return validateAddress(candidate, 'campaignAddress');
 }
 
+function normalizeCampaign(c: any) {
+  const safeId = typeof c?.id === 'string' && c.id.trim() && c.id !== 'undefined' ? c.id : undefined;
+  const safeSlug = typeof c?.slug === 'string' && c.slug.trim() && c.slug !== 'undefined' ? c.slug : undefined;
+  const canonicalAddress = c?.covenantAddress || c?.campaignAddress || c?.escrowAddress || c?.recipientAddress;
+  const stableKey = safeId || safeSlug || canonicalAddress || c?.id || c?.slug || '';
+
+  return {
+    ...c,
+    id: stableKey,
+    slug: stableKey,
+    campaignAddress: canonicalAddress,
+    covenantAddress: canonicalAddress,
+    escrowAddress: canonicalAddress,
+  };
+}
+
+function isPublicCampaign(c: any): boolean {
+  return typeof c?.id === 'string' && c.id.startsWith('campaign-');
+}
+
 async function getCampaignOr404(req: any, res: any): Promise<CampaignApiRecord | null> {
   const campaign = (await service.getCampaign(req.params.id)) as CampaignApiRecord | null;
   if (!campaign) {
@@ -298,10 +318,13 @@ router.get('/campaign', async (_req, res) => {
 
 router.get('/campaigns', async (_req, res) => {
   try {
-    const list = await service.listCampaigns();
-    res.json(list);
+    let camps = await service.listCampaigns();
+    if (camps.length === 0) {
+      return res.json((camps || []).filter(isPublicCampaign).map(normalizeCampaign));
+    }
+    return res.json((camps || []).filter(isPublicCampaign).map(normalizeCampaign));
   } catch (_error) {
-    res.status(500).json({ error: 'Failed to fetch campaigns' });
+    return res.status(500).json({ error: 'Failed to fetch campaigns' });
   }
 });
 
