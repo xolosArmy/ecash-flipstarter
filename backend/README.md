@@ -43,3 +43,45 @@ curl https://chronik.xolosarmy.xyz/chronik-info
 ## Testing
 
 Tests do not start a server; they call handlers directly to avoid socket binding restrictions.
+
+## Deploy en VPS (producción)
+
+Pasos copy/paste para un deploy limpio después de `git reset --hard` o pulls fuertes:
+
+```bash
+git fetch --all && git reset --hard origin/main
+cd backend
+npm run prod:install
+npm run prod:build
+npm run prod:pm2:delete
+npm run prod:pm2:start
+npm run prod:pm2:save
+npm run prod:logs
+```
+
+## Troubleshooting
+
+- Si ves errores de `ts-node`, estás intentando correr TypeScript directo en producción; usa `dist/server.js`.
+- Limpiar logs de PM2:
+
+  ```bash
+  pm2 flush
+  ```
+
+- Verificar proceso y confirmar `script path = dist/server.js`:
+
+  ```bash
+  pm2 describe teyolia-api
+  ```
+
+- Smoke test local:
+
+  ```bash
+  curl -i http://127.0.0.1:3011/api/campaigns | head
+  ```
+
+- Smoke test dominio:
+
+  ```bash
+  curl -i https://api.teyolia.cash/api/campaigns | head
+  ```
