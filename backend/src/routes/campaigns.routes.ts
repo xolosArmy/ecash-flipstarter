@@ -21,6 +21,7 @@ type CampaignStatus =
 
 type CampaignApiRecord = {
   id: string;
+  slug?: string;
   name: string;
   description?: string;
   goal: string;
@@ -289,12 +290,22 @@ function isPublicCampaign(c: any): boolean {
 }
 
 async function getCampaignOr404(req: any, res: any): Promise<CampaignApiRecord | null> {
-  const campaign = (await service.getCampaign(req.params.id)) as CampaignApiRecord | null;
+  const campaign = (await resolveCampaignByIdentifier(req.params.id)) as CampaignApiRecord | null;
   if (!campaign) {
     res.status(404).json({ error: 'campaign-not-found' });
     return null;
   }
   return campaign;
+}
+
+async function resolveCampaignByIdentifier(identifier: string): Promise<CampaignApiRecord | null> {
+  const direct = (await service.getCampaign(identifier)) as CampaignApiRecord | null;
+  if (direct) {
+    return direct;
+  }
+
+  const list = (await service.listCampaigns()) as CampaignApiRecord[];
+  return list.find((campaign) => campaign.slug === identifier || campaign.id === identifier) ?? null;
 }
 
 // GET /api/campaigns
@@ -762,24 +773,21 @@ router.post('/campaigns/:id/payout/confirm', async (req, res) => {
 
 router.get('/campaigns/:id/pledges', async (req, res) => {
   try {
-    const campaign = await service.getCampaign(req.params.id);
+    const campaign = await resolveCampaignByIdentifier(req.params.id);
     if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found' });
     }
 
-    const pledges = await getPledgesByCampaign(req.params.id);
-    const totalPledged = pledges.reduce((total, pledge) => total + pledge.amount, 0);
-    return res.json({
-      totalPledged,
-      pledgeCount: pledges.length,
-      pledges: pledges.map((pledge) => ({
-        txid: pledge.txid,
-        contributorAddress: pledge.contributorAddress,
-        amount: pledge.amount,
-        timestamp: pledge.timestamp,
-        message: pledge.message,
-      })),
-    });
+    const pledges = await getPledgesByCampaign(campaign.id);
+    return res.json(pledges.map((pledge) => ({
+      pledgeId: pledge.pledgeId,
+      txid: pledge.txid,
+      wcOfferId: pledge.wcOfferId ?? null,
+      contributorAddress: pledge.contributorAddress,
+      amount: pledge.amount,
+      timestamp: pledge.timestamp,
+      message: pledge.message,
+    })));
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
   }

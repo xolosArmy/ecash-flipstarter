@@ -321,9 +321,57 @@ export interface CampaignPledgesResponse {
   }>;
 }
 
+type CampaignPledgesApiPayload =
+  | CampaignPledgesResponse
+  | CampaignPledgesResponse['pledges'];
+
+function normalizeCampaignPledgesPayload(payload: CampaignPledgesApiPayload): CampaignPledgesResponse {
+  if (Array.isArray(payload)) {
+    const pledges = payload.map((pledge) => ({
+      txid: pledge.txid ?? null,
+      contributorAddress: pledge.contributorAddress,
+      amount: Number(pledge.amount) || 0,
+      timestamp: pledge.timestamp,
+      message: pledge.message,
+    }));
+    const totalPledged = pledges.reduce((sum, pledge) => sum + pledge.amount, 0);
+    return {
+      totalPledged,
+      pledgeCount: pledges.length,
+      pledges,
+    };
+  }
+
+  if (Array.isArray(payload.pledges)) {
+    const pledges = payload.pledges.map((pledge) => ({
+      txid: pledge.txid ?? null,
+      contributorAddress: pledge.contributorAddress,
+      amount: Number(pledge.amount) || 0,
+      timestamp: pledge.timestamp,
+      message: pledge.message,
+    }));
+    return {
+      totalPledged: Number(payload.totalPledged) || pledges.reduce((sum, pledge) => sum + pledge.amount, 0),
+      pledgeCount: Number(payload.pledgeCount) || pledges.length,
+      pledges,
+    };
+  }
+
+  return { totalPledged: 0, pledgeCount: 0, pledges: [] };
+}
+
 export async function fetchCampaignPledges(campaignId: string): Promise<CampaignPledgesResponse> {
   const requiredCampaignId = requireCampaignIdentifier(campaignId, 'fetchCampaignPledges');
-  return jsonFetch<CampaignPledgesResponse>(`/campaigns/${requiredCampaignId}/pledges`);
+  try {
+    const payload = await jsonFetch<CampaignPledgesApiPayload>(`/campaigns/${requiredCampaignId}/pledges`);
+    return normalizeCampaignPledgesPayload(payload);
+  } catch (err) {
+    const status = (err as Error & { response?: { status?: number } }).response?.status;
+    if (status === 404) {
+      return { totalPledged: 0, pledgeCount: 0, pledges: [] };
+    }
+    throw err;
+  }
 }
 
 export async function fetchGlobalStats(): Promise<GlobalStats> {

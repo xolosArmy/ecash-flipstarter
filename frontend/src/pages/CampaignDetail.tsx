@@ -75,7 +75,11 @@ export const CampaignDetail: React.FC = () => {
             timestamp: pledge.timestamp,
             message: pledge.message!.trim(),
           }))
-          .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+          .sort((a, b) => {
+            const timeA = Number.isFinite(Date.parse(a.timestamp)) ? Date.parse(a.timestamp) : 0;
+            const timeB = Number.isFinite(Date.parse(b.timestamp)) ? Date.parse(b.timestamp) : 0;
+            return timeB - timeA;
+          })
           .slice(0, 20);
         setMessages(nextMessages);
       })
@@ -560,7 +564,7 @@ export const CampaignDetail: React.FC = () => {
               <div className="audit-dot" />
               <div className="audit-content">
                 <header>
-                  <span className={`audit-badge badge-${log.event.toLowerCase()}`}>
+                  <span className={`audit-badge badge-${String(log.event ?? 'unknown').toLowerCase()}`}>
                     {log.event}
                   </span>
                   <time>{new Date(log.timestamp).toLocaleString()}</time>
