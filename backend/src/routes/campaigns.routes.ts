@@ -774,12 +774,12 @@ router.post('/campaigns/:id/payout/confirm', async (req, res) => {
 router.get('/campaigns/:id/pledges', async (req, res) => {
   const campaignId = String(req.params.id ?? '').trim();
   if (!campaignId || campaignId === 'undefined') {
-    return res.status(400).json({ error: 'Missing campaign id' });
+    return res.status(200).json([]);
   }
 
   try {
     const pledges = await getPledgesByCampaign(campaignId);
-    return res.json(pledges.map((pledge) => ({
+    return res.status(200).json(pledges.map((pledge) => ({
       pledgeId: pledge.pledgeId,
       txid: pledge.txid,
       wcOfferId: pledge.wcOfferId ?? null,

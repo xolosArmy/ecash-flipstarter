@@ -361,16 +361,26 @@ function normalizeCampaignPledgesPayload(payload: CampaignPledgesApiPayload): Ca
 }
 
 export async function fetchCampaignPledges(campaignId: string): Promise<CampaignPledgesResponse> {
-  const requiredCampaignId = requireCampaignIdentifier(campaignId, 'fetchCampaignPledges');
+  const requiredCampaignId = campaignId?.trim();
+  if (!requiredCampaignId) {
+    return { totalPledged: 0, pledgeCount: 0, pledges: [] };
+  }
+
+  const url = `${BASE_URL}/campaigns/${requiredCampaignId}/pledges`;
+
   try {
-    const payload = await jsonFetch<CampaignPledgesApiPayload>(`/campaigns/${requiredCampaignId}/pledges`);
-    return normalizeCampaignPledgesPayload(payload);
-  } catch (err) {
-    const status = (err as Error & { response?: { status?: number } }).response?.status;
-    if (status === 404) {
+    const res = await fetch(url, {
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    if (!res.ok) {
       return { totalPledged: 0, pledgeCount: 0, pledges: [] };
     }
-    throw err;
+
+    const payload = (await res.json()) as CampaignPledgesApiPayload;
+    return normalizeCampaignPledgesPayload(payload);
+  } catch (_err) {
+    return { totalPledged: 0, pledgeCount: 0, pledges: [] };
   }
 }
 
