@@ -8,6 +8,7 @@ import {
   fetchCampaignSummary,
 } from '../api/client';
 import { useToast } from '../components/ToastProvider';
+import { getExplorerUrl } from '../utils/explorer';
 
 function getQueryParam(search: string, key: string): string | null {
   const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
@@ -169,7 +170,7 @@ export const TonalliCallback: React.FC = () => {
       {txid && (
         <div>
           <p>Broadcast successful.</p>
-          <p>TXID: {txid}</p>
+          <p>TXID: <a href={getExplorerUrl(txid)} target="_blank" rel="noreferrer">{txid}</a></p>
           {campaignId && <p>Saved under campaign {campaignId}.</p>}
         </div>
       )}

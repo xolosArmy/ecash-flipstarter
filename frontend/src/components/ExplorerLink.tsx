@@ -1,4 +1,5 @@
 import React from 'react';
+import { getExplorerUrl } from '../utils/explorer';
 
 type ExplorerLinkProps = {
   txid: string;
@@ -15,7 +16,7 @@ export const ExplorerLink: React.FC<ExplorerLinkProps> = ({ txid, label }) => {
   if (!normalized) return null;
 
   return (
-    <a href={`https://explorer.e.cash/tx/${normalized}`} target="_blank" rel="noreferrer">
+    <a href={getExplorerUrl(normalized)} target="_blank" rel="noreferrer">
       {label || truncateTxid(normalized)}
     </a>
   );
