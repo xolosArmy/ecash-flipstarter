@@ -1,6 +1,7 @@
-const explorerBaseUrl = (import.meta.env.VITE_EXPLORER_BASE_URL || 'https://explorer.e.cash')
-  .replace(/\/+$/, '');
+export const getExplorerUrl = (txid: string) => {
+  return `https://explorer.xolosarmy.xyz/tx/${txid}`;
+};
 
-export function getExplorerTxUrl(txid: string): string {
-  return `${explorerBaseUrl}/tx/${encodeURIComponent(txid)}`;
-}
+export const getAddressUrl = (address: string) => {
+  return `https://explorer.xolosarmy.xyz/address/${address}`;
+};
