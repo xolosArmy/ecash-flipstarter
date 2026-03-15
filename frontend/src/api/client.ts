@@ -213,27 +213,21 @@ export async function fetchCampaignActivationStatus(
   return jsonFetch<CampaignActivationStatusResponse>(`/campaigns/${campaignId}/activation/status${query}`);
 }
 
-export interface CampaignPayoutBuildResponse {
-  unsignedTxHex: string;
-  beneficiaryAmount: string;
-  treasuryCut: string;
-  wcOfferId: string;
+export interface FinalizeCampaignResponse {
+  success: boolean;
+  campaignId: string;
+  status: 'paid_out' | 'already_paid_out';
+  txid: string | null;
+  beneficiaryAddress: string;
+  goalSats: string;
+  raisedSats: string;
+  message: string;
 }
 
-export async function buildPayoutTx(campaignId: string): Promise<CampaignPayoutBuildResponse> {
-  return jsonFetch<CampaignPayoutBuildResponse>(`/campaigns/${campaignId}/payout/build`, {
+export async function finalizeCampaign(campaignId: string): Promise<FinalizeCampaignResponse> {
+  return jsonFetch<FinalizeCampaignResponse>(`/campaigns/${campaignId}/finalize-request`, {
     method: 'POST',
     body: JSON.stringify({}),
-  });
-}
-
-export async function confirmPayoutTx(
-  campaignId: string,
-  txid: string,
-): Promise<CampaignSummaryResponse> {
-  return jsonFetch<CampaignSummaryResponse>(`/campaigns/${campaignId}/payout/confirm`, {
-    method: 'POST',
-    body: JSON.stringify({ txid }),
   });
 }
 

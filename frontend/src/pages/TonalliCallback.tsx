@@ -3,7 +3,6 @@ import { Link, useLocation } from 'react-router-dom';
 import {
   confirmActivationTx,
   confirmLatestPendingPledgeTx,
-  confirmPayoutTx,
   fetchCampaignActivationStatus,
   fetchCampaignSummary,
 } from '../api/client';
@@ -66,7 +65,7 @@ export const TonalliCallback: React.FC = () => {
         const summary = nextMode === 'activate'
           ? await confirmActivationTx(nextCampaignId, nextTxid)
           : nextMode === 'payout'
-            ? await confirmPayoutTx(nextCampaignId, nextTxid)
+            ? await fetchCampaignSummary(nextCampaignId)
             : await (async () => {
                 await confirmLatestPendingPledgeTx(nextCampaignId, nextTxid);
                 localStorage.removeItem(`tonalli:pledgeId:${nextCampaignId}`);

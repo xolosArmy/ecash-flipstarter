@@ -44,7 +44,6 @@ export interface PayoutTxParams {
   campaignUtxos: Utxo[];
   totalRaised: bigint;
   beneficiaryAddress: string;
-  treasuryAddress: string;
   fixedFee?: bigint;
   dustLimit?: bigint;
 }
@@ -180,10 +179,11 @@ export async function buildPayoutTx(
     change = 0n;
   }
 
-  const treasuryCut = params.totalRaised / 100n;
-  const beneficiaryAmount = params.totalRaised - treasuryCut;
+  // Treasury cut is temporarily disabled because the current covenant finalize path
+  // only matches a single beneficiary output and does not explicitly support a split.
+  const treasuryCut = 0n;
+  const beneficiaryAmount = params.totalRaised;
   const beneficiaryScript = await addressToScriptPubKey(params.beneficiaryAddress);
-  const treasuryScript = await addressToScriptPubKey(params.treasuryAddress);
   const changeScriptPubKey =
     change > 0n ? params.campaignUtxos[0]?.scriptPubKey || '' : '';
 
@@ -191,7 +191,6 @@ export async function buildPayoutTx(
     inputs: [...params.campaignUtxos],
     outputs: [
       { value: beneficiaryAmount, scriptPubKey: beneficiaryScript },
-      ...(treasuryCut > 0n ? [{ value: treasuryCut, scriptPubKey: treasuryScript }] : []),
       ...(change > 0n && changeScriptPubKey
         ? [{ value: change, scriptPubKey: changeScriptPubKey }]
         : []),

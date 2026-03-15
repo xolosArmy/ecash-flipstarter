@@ -12,6 +12,7 @@ import {
 import { getCampaignById, listCampaigns as listCampaignsFromSqlite } from '../db/SQLiteStore';
 import { getDb } from '../store/db';
 import { ACTIVATION_FEE_SATS, ACTIVATION_FEE_XEC } from '../config/constants';
+import { coerceAmountToSats } from '../utils/ecashUnits';
 
 // In-memory cache used by CovenantIndex and pledge services.
 const campaigns = new Map<string, CampaignDefinition>();
@@ -28,16 +29,7 @@ type ActivationOfferOutput = { address: string; valueSats: number };
 type ActivationVerificationState = 'none' | 'pending_verification' | 'verified' | 'invalid';
 
 function toBigIntGoal(value: unknown): bigint {
-  if (typeof value === 'bigint') return value;
-  if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.floor(value));
-  if (typeof value === 'string' && value.trim()) {
-    try {
-      return BigInt(value);
-    } catch {
-      return 0n;
-    }
-  }
-  return 0n;
+  return coerceAmountToSats(value);
 }
 
 function toExpirationTime(value: unknown): bigint {
@@ -920,7 +912,7 @@ export class CampaignService {
   async markPayoutComplete(
     id: string,
     txid: string,
-    treasuryAddressUsed: string,
+    treasuryAddressUsed: string | null,
   ) {
     const campaign = campaigns.get(id);
     if (!campaign) {

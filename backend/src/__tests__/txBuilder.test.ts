@@ -60,9 +60,8 @@ describe('buildPledgeTx', () => {
 });
 
 describe('buildPayoutTx', () => {
-  it('splits payout as 99% creator and 1% treasury', async () => {
+  it('pays the beneficiary with a single output and disables treasury cut', async () => {
     const creatorAddress = 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk';
-    const treasuryAddress = 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk';
     const totalRaised = 100000n;
 
     const built = await buildPayoutTx({
@@ -76,20 +75,18 @@ describe('buildPayoutTx', () => {
       ],
       totalRaised,
       beneficiaryAddress: creatorAddress,
-      treasuryAddress,
       fixedFee: 500n,
     });
 
-    expect(built.treasuryCut).toBe(1000n);
-    expect(built.beneficiaryAmount).toBe(99000n);
+    expect(built.treasuryCut).toBe(0n);
+    expect(built.beneficiaryAmount).toBe(100000n);
     expect(built.beneficiaryAmount + built.treasuryCut).toBe(totalRaised);
-    expect(built.unsignedTx.outputs[0]?.value).toBe(99000n);
-    expect(built.unsignedTx.outputs[1]?.value).toBe(1000n);
+    expect(built.unsignedTx.outputs).toHaveLength(1);
+    expect(built.unsignedTx.outputs[0]?.value).toBe(100000n);
   });
 
-  it('uses floor rounding for treasury cut and keeps exact total conservation', async () => {
+  it('keeps exact total conservation without treasury output', async () => {
     const creatorAddress = 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk';
-    const treasuryAddress = 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk';
     const totalRaised = 101n;
 
     const built = await buildPayoutTx({
@@ -103,12 +100,12 @@ describe('buildPayoutTx', () => {
       ],
       totalRaised,
       beneficiaryAddress: creatorAddress,
-      treasuryAddress,
       fixedFee: 500n,
     });
 
-    expect(built.treasuryCut).toBe(1n);
-    expect(built.beneficiaryAmount).toBe(100n);
+    expect(built.treasuryCut).toBe(0n);
+    expect(built.beneficiaryAmount).toBe(101n);
     expect(built.beneficiaryAmount + built.treasuryCut).toBe(totalRaised);
+    expect(built.unsignedTx.outputs).toHaveLength(1);
   });
 });

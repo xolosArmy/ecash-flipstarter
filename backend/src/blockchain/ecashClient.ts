@@ -8,6 +8,7 @@ import { ChronikClient, type ScriptType } from 'chronik-client';
 import type { BroadcastResult, Utxo } from './types';
 import cashaddr from 'ecashaddrjs';
 import { validateAddress } from '../utils/validation';
+import { coerceAmountToSats, xecToSats } from '../utils/ecashUnits';
 
 const rpcUrl = ecashConfig.rpcUrl;
 const rpcUser = ecashConfig.rpcUsername;
@@ -286,7 +287,7 @@ async function getUtxosForAddressViaRpc(address: string): Promise<Utxo[]> {
   return utxos.map((u) => ({
     txid: u.txid,
     vout: u.vout,
-    value: BigInt(Math.round(u.amount * 1e8)), // assume amount in XEC float
+    value: xecToSats(Number(u.amount)),
     scriptPubKey: u.scriptPubKey,
   }));
 }
@@ -309,7 +310,7 @@ async function getTransactionOutputsViaRpc(txid: string): Promise<TransactionOut
         : '';
     const valueSats =
       typeof output.value === 'number'
-        ? BigInt(Math.round(output.value * 100_000_000))
+        ? xecToSats(output.value)
         : toBigIntSats(output.value);
     return { valueSats, scriptPubKey };
   });
@@ -328,7 +329,7 @@ async function getTransactionInfoViaRpc(txid: string): Promise<TransactionInfo> 
         : '';
     const valueSats =
       typeof output.value === 'number'
-        ? BigInt(Math.round(output.value * 100_000_000))
+        ? xecToSats(output.value)
         : toBigIntSats(output.value);
     return { valueSats, scriptPubKey };
   });
@@ -386,16 +387,5 @@ function formatChronikError(err: unknown): string {
 }
 
 function toBigIntSats(value: unknown): bigint {
-  if (typeof value === 'bigint') return value;
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return BigInt(Math.floor(value));
-  }
-  if (typeof value === 'string' && value.trim()) {
-    try {
-      return BigInt(value);
-    } catch {
-      return 0n;
-    }
-  }
-  return 0n;
+  return coerceAmountToSats(value);
 }

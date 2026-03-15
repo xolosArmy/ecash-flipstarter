@@ -2,13 +2,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
 import {
   buildActivationTx,
-  buildPayoutTx,
   confirmActivationTx,
-  confirmPayoutTx,
   fetchCampaignActivationStatus,
   fetchCampaignHistory,
   fetchCampaignPledges,
   fetchCampaignSummary,
+  finalizeCampaign,
 } from '../api/client';
 import type { AuditLog } from '../api/types';
 import type { CampaignSummary } from '../types/campaign';
@@ -60,7 +59,6 @@ export const CampaignDetail: React.FC = () => {
     connected,
     connect,
     requestSignAndBroadcast,
-    requestSignAndBroadcastRawTx,
     addresses,
   } = useWalletConnect();
   const { showToast } = useToast();
@@ -321,61 +319,25 @@ export const CampaignDetail: React.FC = () => {
     setPayoutError('');
     setPayoutMessage('');
     setPayingOut(true);
-    showToast('Construyendo payout...', 'info');
+    showToast('Solicitando payout al backend...', 'info');
     try {
-      let activeSession: any = null;
-      if (connected && signClient && topic) {
-        try {
-          activeSession = signClient.session.get(topic);
-        } catch {
-          activeSession = null;
-        }
-      }
-      if (!connected) {
-        activeSession = await connect();
-      }
-
-      const { unsignedTxHex, wcOfferId } = await buildPayoutTx(id);
-      setPayoutMessage('Esperando confirmación en Tonalli...');
-      let txid: string | null = null;
-
-      if (typeof unsignedTxHex === 'string' && unsignedTxHex.trim().length > 0) {
-        const result = await requestSignAndBroadcastRawTx({
-          offerId: wcOfferId,
-          rawHex: unsignedTxHex,
-          userPrompt: 'Payout campaign',
-        });
-        txid = result.txid;
-      } else {
-        console.warn('[Payout][WC] Missing unsignedTxHex, falling back to legacy WalletConnect request', {
-          campaignId: id,
-          offerId: wcOfferId,
-        });
-        const ecashNs = activeSession?.namespaces?.ecash;
-        if (!ecashNs) throw new Error('wc-no-ecash-namespace');
-        const chainId = requireEcashChainId(activeSession);
-        const result = await requestSignAndBroadcast(wcOfferId, chainId);
-        txid = extractWalletTxid(result);
-      }
-
-      if (!txid) {
-        throw new Error('Tonalli returned an invalid txid.');
-      }
-      const summary = await confirmPayoutTx(id, txid);
-      setCampaign(summary);
+      setPayoutMessage('Procesando payout...');
+      const result = await finalizeCampaign(id);
+      const refreshed = await fetchCampaignSummary(id);
+      setCampaign(refreshed);
       window.dispatchEvent(
         new CustomEvent('campaign:summary:refresh', {
-          detail: { campaignId: id, summary },
+          detail: { campaignId: id, summary: refreshed },
         }),
       );
       window.dispatchEvent(new Event('campaigns:refresh'));
-      setPayoutMessage(`Payout confirmado. Txid: ${txid}`);
-      showToast('Payout confirmado on-chain', 'success');
+      setPayoutMessage(result.txid ? `Payout enviado. Txid: ${result.txid}` : result.message);
+      showToast(result.txid ? 'Payout enviado' : result.message, 'success');
       refreshCampaign();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'No se pudo finalizar el payout.';
+      const message = err instanceof Error ? err.message : 'No se pudo procesar el payout.';
       setPayoutError(message);
-      showToast('No se pudo completar el payout', 'error');
+      showToast('No se pudo procesar el payout', 'error');
     } finally {
       setPayingOut(false);
     }
@@ -517,14 +479,10 @@ export const CampaignDetail: React.FC = () => {
         <section style={{ border: '1px solid #eee', borderRadius: 8, padding: 12, marginTop: 12 }}>
           <h3>Finalizar / Payout</h3>
           <p>
-            Al fondearse, 1% va a Tesorería Tonalli y 99% al beneficiario.
-            {' '}
-            <small title="El 1% se destina al mantenimiento de la infraestructura de Teyolia solo si la campaña tiene éxito">
-              (?)
-            </small>
+            El payout se procesa desde backend hacia la dirección beneficiaria registrada de la campaña.
           </p>
           <button type="button" onClick={payoutCampaign} disabled={payingOut}>
-            {payingOut ? 'Procesando...' : 'Construir payout'}
+            {payingOut ? 'Procesando...' : 'Solicitar payout'}
           </button>
           {payoutMessage && <p>{payoutMessage}</p>}
           {payoutError && <p style={{ color: '#b00020' }}>{payoutError}</p>}

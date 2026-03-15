@@ -1,16 +1,12 @@
 import { Router } from 'express';
 import { CampaignService } from '../services/CampaignService';
-import { syncCampaignStoreFromDiskCampaigns } from '../services/CampaignService';
 import { validateAddress } from '../utils/validation';
 import { getPledgesByCampaign } from '../store/simplePledges';
-import { addressToScriptPubKey, getTransactionInfo, getUtxosForAddress } from '../blockchain/ecashClient';
-import { buildPayoutTx } from '../blockchain/txBuilder';
-import { serializeBuiltTx } from './serialize';
+import { addressToScriptPubKey, getTransactionInfo } from '../blockchain/ecashClient';
 import { walletConnectOfferStore } from '../services/WalletConnectOfferStore';
 import { ACTIVATION_FEE_SATS, ACTIVATION_FEE_XEC, TREASURY_ADDRESS } from '../config/constants';
-import type { Utxo } from '../blockchain/types';
-import { upsertCampaign as upsertCampaignInSqlite, type StoredCampaign } from '../db/SQLiteStore';
-import { saveCampaignsToDisk } from '../store/campaignPersistence';
+import { coerceAmountToSats } from '../utils/ecashUnits';
+import { AutoPayoutService } from '../services/AutoPayoutService';
 
 type CampaignStatus =
   | 'draft'
@@ -63,10 +59,17 @@ type CampaignApiRecord = {
 };
 
 const TXID_HEX_REGEX = /^[0-9a-f]{64}$/i;
-const PLEDGE_FEE_SATS = 500n;
-
 const router = Router();
 const service = new CampaignService();
+const autoPayoutService = new AutoPayoutService();
+
+function validateCampaignIdParam(raw: unknown): string {
+  const campaignId = String(raw ?? '').trim();
+  if (!campaignId || !/^[A-Za-z0-9._:-]+$/.test(campaignId)) {
+    throw new Error('campaign-id-invalid');
+  }
+  return campaignId;
+}
 
 async function getTotalPledged(campaignId: string): Promise<number> {
   const pledges = await getPledgesByCampaign(campaignId);
@@ -124,8 +127,8 @@ function deriveCampaignStatus(campaign: CampaignApiRecord, totalPledged: number)
     return 'pending_fee';
   }
 
-  const goal = Number(campaign.goal);
-  if (Number.isFinite(goal) && totalPledged >= goal) {
+  const goalSats = coerceAmountToSats(campaign.goal);
+  if (goalSats > 0n && BigInt(totalPledged) >= goalSats) {
     return 'funded';
   }
 
@@ -262,20 +265,6 @@ async function toActivationResponse(campaignId: string, campaign: CampaignApiRec
   };
 }
 
-function resolveCampaignEscrowAddress(campaign: CampaignApiRecord): string {
-  const candidate =
-    campaign.campaignAddress
-    || campaign.covenantAddress
-    || campaign.recipientAddress
-    || campaign.beneficiaryAddress;
-
-  if (!candidate) {
-    throw new Error('campaign-address-required');
-  }
-
-  return validateAddress(candidate, 'campaignAddress');
-}
-
 function normalizeCampaign(c: any) {
   const safeId = typeof c?.id === 'string' && c.id.trim() && c.id !== 'undefined' ? c.id : undefined;
   const safeSlug = typeof c?.slug === 'string' && c.slug.trim() && c.slug !== 'undefined' ? c.slug : undefined;
@@ -304,73 +293,6 @@ function resolveCampaignBeneficiaryAddress(campaign: CampaignApiRecord): string 
   return validateAddress(candidate, 'beneficiaryAddress');
 }
 
-async function selectCampaignFundingUtxos(
-  campaign: CampaignApiRecord,
-  minAmountSats: bigint,
-  feeSats: bigint,
-): Promise<Utxo[]> {
-  const escrowAddress = resolveCampaignEscrowAddress(campaign);
-  const campaignUtxos = (await getUtxosForAddress(escrowAddress)).filter(
-    (utxo) => !utxo.token && !utxo.slpToken && !utxo.tokenStatus && !utxo.plugins?.token,
-  );
-
-  if (minAmountSats > 0n) {
-    const total = campaignUtxos.reduce((acc, utxo) => acc + utxo.value, 0n);
-    if (total < minAmountSats + feeSats) {
-      throw new Error('insufficient-funds');
-    }
-  }
-
-  return campaignUtxos;
-}
-
-function toStoredCampaignRecord(campaign: CampaignApiRecord): StoredCampaign {
-  const expirationMs = Number(campaign.expirationTime);
-  const expiresAt =
-    typeof campaign.expiresAt === 'string' && campaign.expiresAt.trim()
-      ? campaign.expiresAt
-      : Number.isFinite(expirationMs)
-        ? new Date(expirationMs).toISOString()
-        : new Date(0).toISOString();
-
-  return {
-    id: campaign.id,
-    name: campaign.name,
-    description: campaign.description ?? '',
-    goal: campaign.goal,
-    expiresAt,
-    createdAt:
-      typeof campaign.createdAt === 'string' && campaign.createdAt.trim()
-        ? campaign.createdAt
-        : new Date().toISOString(),
-    status: campaign.status,
-    recipientAddress: campaign.recipientAddress,
-    beneficiaryAddress: campaign.beneficiaryAddress,
-    campaignAddress: campaign.campaignAddress,
-    covenantAddress: campaign.covenantAddress,
-    activation: campaign.activation
-      ? {
-        feeSats: campaign.activation.feeSats ?? String(toCampaignActivationFeeRequired(campaign) * 100),
-        feeTxid: campaign.activation.feeTxid ?? null,
-        feePaidAt: campaign.activation.feePaidAt ?? null,
-        payerAddress: campaign.activation.payerAddress ?? null,
-        wcOfferId: campaign.activation.wcOfferId ?? null,
-      }
-      : undefined,
-    activationFeeRequired: campaign.activationFeeRequired,
-    activationFeePaid: campaign.activationFeePaid,
-    activationFeeTxid: campaign.activationFeeTxid,
-    activationFeePaidAt: campaign.activationFeePaidAt,
-    activationFeeVerificationStatus: campaign.activationFeeVerificationStatus,
-    activationFeeVerifiedAt: campaign.activationFeeVerifiedAt,
-    activationOfferMode: campaign.activationOfferMode,
-    activationOfferOutputs: campaign.activationOfferOutputs,
-    activationTreasuryAddressUsed: campaign.activationTreasuryAddressUsed,
-    payout: campaign.payout,
-    treasuryAddressUsed: campaign.treasuryAddressUsed,
-  };
-}
-
 function isValidationError(message: string): boolean {
   return message.includes('invalid')
     || message.includes('required')
@@ -380,7 +302,14 @@ function isValidationError(message: string): boolean {
 }
 
 async function getCampaignOr404(req: any, res: any): Promise<CampaignApiRecord | null> {
-  const campaign = (await resolveCampaignByIdentifier(req.params.id)) as CampaignApiRecord | null;
+  let campaignId: string;
+  try {
+    campaignId = validateCampaignIdParam(req.params.id);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+    return null;
+  }
+  const campaign = (await resolveCampaignByIdentifier(campaignId)) as CampaignApiRecord | null;
   if (!campaign) {
     res.status(404).json({ error: 'campaign-not-found' });
     return null;
@@ -779,9 +708,11 @@ export const activationStatusHandler: Parameters<typeof router.get>[1] = async (
 router.get('/campaigns/:id/activation/status', activationStatusHandler);
 router.get('/campaign/:id/activation/status', activationStatusHandler);
 
-const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req, res) => {
+const finalizeCampaignHandler: Parameters<typeof router.post>[1] = async (req, res) => {
+  let campaign: CampaignApiRecord | null = null;
   try {
-    const campaign = await getCampaignOr404(req, res);
+    const campaignId = validateCampaignIdParam(req.params.id);
+    campaign = await getCampaignOr404(req, res);
     if (!campaign) return;
 
     if (!isActivationFeePaid(campaign)) {
@@ -791,78 +722,71 @@ const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req
       });
     }
 
-    const escrowAddress = resolveCampaignEscrowAddress(campaign);
-    const campaignUtxos = await selectCampaignFundingUtxos(campaign, 0n, PLEDGE_FEE_SATS);
-    const raisedSats = campaignUtxos.reduce((acc, utxo) => acc + utxo.value, 0n);
+    const goalSats = coerceAmountToSats(campaign.goal);
+    const beneficiaryAddress = resolveCampaignBeneficiaryAddress(campaign);
+    const payoutTxid = campaign.payout?.txid ?? null;
 
-    console.log(
-      `[payout/build] Campaign=${campaign.id} Escrow=${escrowAddress} `
-      + `UTXOs=${campaignUtxos.length} Total=${raisedSats.toString()} Goal=${campaign.goal.toString()}`,
-    );
-
-    if (raisedSats < BigInt(campaign.goal)) {
-      return res.status(400).json({
-        error: 'insufficient-funds',
-        details: 'La meta on-chain aún no se ha alcanzado.',
-        escrowAddress,
-        goal: campaign.goal.toString(),
-        raised: raisedSats.toString(),
-        utxoCount: campaignUtxos.length,
+    if (campaign.status === 'paid_out' || payoutTxid) {
+      console.info('[payout] idempotent-hit', {
+        campaignId,
+        goalSats: goalSats.toString(),
+        raisedSats: '0',
+        status: campaign.status,
+        txid: payoutTxid,
+      });
+      return res.json({
+        success: true,
+        campaignId,
+        status: 'paid_out',
+        txid: payoutTxid,
+        beneficiaryAddress,
+        goalSats: goalSats.toString(),
+        raisedSats: '0',
+        message: 'Payout ya procesado previamente.',
       });
     }
 
-    const destinationBeneficiary =
-      typeof req.body?.destinationBeneficiary === 'string' && req.body.destinationBeneficiary.trim()
-        ? validateAddress(req.body.destinationBeneficiary, 'destinationBeneficiary')
-        : resolveCampaignBeneficiaryAddress(campaign);
-
-    const built = await buildPayoutTx({
-      campaignUtxos,
-      totalRaised: raisedSats,
-      beneficiaryAddress: destinationBeneficiary,
-      treasuryAddress: TREASURY_ADDRESS,
-      fixedFee: 0n,
+    const result = await autoPayoutService.finalizeCampaign(campaignId);
+    console.info('[payout] finalize-request', {
+      campaignId,
+      goalSats: result.goalSats.toString(),
+      raisedSats: result.raisedSats.toString(),
+      status: result.status,
+      txid: result.txid,
     });
-
-    const serialized = serializeBuiltTx(built);
-    const offer = walletConnectOfferStore.createOffer({
-      campaignId: campaign.id,
-      unsignedTxHex: serialized.unsignedTxHex || serialized.rawHex,
-      amount: raisedSats.toString(),
-      contributorAddress: destinationBeneficiary,
-    });
-
-    campaign.status = 'funded';
-    campaign.payout = {
-      wcOfferId: offer.offerId,
-      txid: campaign.payout?.txid ?? null,
-      paidAt: campaign.payout?.paidAt ?? null,
-    };
-
-    await upsertCampaignInSqlite(toStoredCampaignRecord(campaign));
-    const campaigns = (await service.listCampaigns()).map((entry) => toStoredCampaignRecord(entry as CampaignApiRecord));
-    const current = toStoredCampaignRecord(campaign);
-    const existingIndex = campaigns.findIndex((entry) => entry.id === campaign.id);
-    if (existingIndex >= 0) {
-      campaigns[existingIndex] = current;
-    } else {
-      campaigns.push(current);
-    }
-    syncCampaignStoreFromDiskCampaigns(campaigns);
-    await saveCampaignsToDisk(campaigns);
-
-    await service.setPayoutOffer(campaign.id, offer.offerId);
 
     return res.json({
-      ...serialized,
-      beneficiaryAmount: built.beneficiaryAmount.toString(),
-      treasuryCut: built.treasuryCut.toString(),
-      treasuryAddress: TREASURY_ADDRESS,
-      wcOfferId: offer.offerId,
-      campaignId: campaign.id,
+      success: true,
+      campaignId,
+      status: result.status,
+      txid: result.txid,
+      beneficiaryAddress,
+      goalSats: result.goalSats.toString(),
+      raisedSats: result.raisedSats.toString(),
+      message: 'Payout enviado.',
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    console.warn('[payout] failed', {
+      campaignId: String(req.params.id ?? '').trim(),
+      goalSats: campaign ? coerceAmountToSats(campaign.goal).toString() : '0',
+      raisedSats: '0',
+      status: campaign?.status ?? 'unknown',
+      txid: campaign?.payout?.txid ?? null,
+      error: message,
+    });
+    if (message === 'auto-payout-spend-path-missing') {
+      return res.status(409).json({
+        error: 'auto-payout-spend-path-missing',
+        message: 'El covenant actual no tiene implementado el spend path backend-side para payout.',
+      });
+    }
+    if (message === 'goal-not-reached') {
+      return res.status(400).json({
+        error: 'goal-not-reached',
+        message: 'La meta on-chain aún no se ha alcanzado.',
+      });
+    }
     if (isValidationError(message)) {
       return res.status(400).json({
         error: 'validation-error',
@@ -876,7 +800,9 @@ const buildCampaignPayoutHandler: Parameters<typeof router.post>[1] = async (req
   }
 };
 
-router.post('/campaigns/:id/payout/build', buildCampaignPayoutHandler);
+router.post('/campaigns/:id/finalize-request', finalizeCampaignHandler);
+router.post('/campaign/:id/finalize-request', finalizeCampaignHandler);
+router.post('/campaigns/:id/payout/build', finalizeCampaignHandler);
 
 router.post('/campaigns/:id/payout/confirm', async (req, res) => {
   try {
