@@ -21,11 +21,14 @@ vi.mock('../services/CampaignService', () => ({
 vi.mock('../blockchain/ecashClient', () => ({
   getUtxosForAddress: vi.fn(),
   addressToScriptPubKey: vi.fn(),
+  broadcastRawTx: vi.fn(),
   getTransactionInfo: vi.fn(),
 }));
 
 vi.mock('../blockchain/txBuilder', () => ({
   buildPayoutTx: vi.fn(),
+  derivePrivKeyFromSeed: vi.fn(),
+  signHybridPayoutTx: vi.fn(),
 }));
 
 vi.mock('../store/simplePledges', () => ({

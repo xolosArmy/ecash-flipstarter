@@ -1,3 +1,7 @@
+import crypto from 'crypto';
+import { HDKey } from '@scure/bip32';
+import { mnemonicToSeedSync } from '@scure/bip39';
+import { secp256k1 } from '@noble/curves/secp256k1';
 import { addressToScriptPubKey } from './ecashClient';
 import type { Utxo, UnsignedTx } from './types';
 
@@ -42,6 +46,8 @@ export interface SimplePaymentTxParams {
 
 export interface PayoutTxParams {
   campaignUtxos: Utxo[];
+  gasUtxo: Utxo;
+  gasAddress: string;
   totalRaised: bigint;
   beneficiaryAddress: string;
   fixedFee?: bigint;
@@ -157,8 +163,11 @@ export async function buildSimplePaymentTx(
 export async function buildPayoutTx(
   params: PayoutTxParams
 ): Promise<BuiltTx & { fee: bigint; treasuryCut: bigint; beneficiaryAmount: bigint }> {
-  if (params.campaignUtxos.some(hasTokenData)) {
+  if (params.campaignUtxos.some(hasTokenData) || hasTokenData(params.gasUtxo)) {
     throw new Error('token-utxo-not-supported');
+  }
+  if (!params.gasUtxo.scriptPubKey) {
+    throw new Error('gas-input-missing-scriptpubkey');
   }
   if (params.totalRaised <= 0n) {
     throw new Error('campaign-funds-empty');
@@ -166,13 +175,11 @@ export async function buildPayoutTx(
 
   const fixedFee = params.fixedFee ?? 500n;
   const dustLimit = params.dustLimit ?? 546n;
-  const totalInput = params.campaignUtxos.reduce((acc, utxo) => acc + utxo.value, 0n);
-  const required = params.totalRaised + fixedFee;
-  if (totalInput < required) {
-    throw new Error('insufficient-funds');
+  if (params.gasUtxo.value < fixedFee) {
+    throw new Error('gas-wallet-insufficient-fee');
   }
 
-  let change = totalInput - required;
+  let change = params.gasUtxo.value - fixedFee;
   let feePaid = fixedFee;
   if (change > 0n && change < dustLimit) {
     feePaid += change;
@@ -184,11 +191,10 @@ export async function buildPayoutTx(
   const treasuryCut = 0n;
   const beneficiaryAmount = params.totalRaised;
   const beneficiaryScript = await addressToScriptPubKey(params.beneficiaryAddress);
-  const changeScriptPubKey =
-    change > 0n ? params.campaignUtxos[0]?.scriptPubKey || '' : '';
+  const changeScriptPubKey = change > 0n ? await addressToScriptPubKey(params.gasAddress) : '';
 
   const unsigned: UnsignedTx = {
-    inputs: [...params.campaignUtxos],
+    inputs: [...params.campaignUtxos, params.gasUtxo],
     outputs: [
       { value: beneficiaryAmount, scriptPubKey: beneficiaryScript },
       ...(change > 0n && changeScriptPubKey
@@ -229,6 +235,115 @@ export async function buildRefundTx(params: RefundTxParams): Promise<BuiltTx> {
     outputs,
   };
   return { unsignedTx: unsigned, rawHex: serializeUnsignedTx(unsigned) };
+}
+
+export async function derivePrivKeyFromSeed(mnemonic: string, index = 0): Promise<Buffer> {
+  const seed = mnemonicToSeedSync(mnemonic.trim());
+  const root = HDKey.fromMasterSeed(seed);
+  const child = root.derive(`m/44'/1899'/0'/0/${index}`);
+  if (!child.privateKey) {
+    throw new Error('No se pudo derivar la clave privada');
+  }
+  return Buffer.from(child.privateKey);
+}
+
+export function signHybridPayoutTx(
+  unsignedTx: UnsignedTx,
+  privKey: Buffer,
+  redeemScriptHex: string,
+  gasInputIndex = unsignedTx.inputs.length - 1
+): string {
+  if (unsignedTx.inputs.length < 2) {
+    throw new Error('hybrid-payout-requires-gas-input');
+  }
+  if (gasInputIndex < 0 || gasInputIndex >= unsignedTx.inputs.length) {
+    throw new Error('invalid-gas-input-index');
+  }
+  if (!unsignedTx.inputs[gasInputIndex]?.scriptPubKey) {
+    throw new Error('gas-input-missing-scriptpubkey');
+  }
+
+  const publicKey = Buffer.from(secp256k1.getPublicKey(privKey, true));
+  const sighashType = 0x41;
+  const chunks: number[] = [];
+
+  writeUInt32LE(chunks, 2);
+
+  const prevouts: number[] = [];
+  for (const input of unsignedTx.inputs) {
+    writeTxid(prevouts, input.txid);
+    writeUInt32LE(prevouts, input.vout);
+  }
+  chunks.push(...hash256(Buffer.from(prevouts)));
+
+  const sequences: number[] = [];
+  for (let i = 0; i < unsignedTx.inputs.length; i += 1) {
+    writeUInt32LE(sequences, i === gasInputIndex ? 0xfffffffe : 0xffffffff);
+  }
+  chunks.push(...hash256(Buffer.from(sequences)));
+
+  const gasInput = unsignedTx.inputs[gasInputIndex];
+  writeTxid(chunks, gasInput.txid);
+  writeUInt32LE(chunks, gasInput.vout);
+
+  const scriptBytes = hexToBytes(gasInput.scriptPubKey);
+  writeVarInt(chunks, scriptBytes.length);
+  chunks.push(...scriptBytes);
+
+  writeUInt64LE(chunks, gasInput.value);
+  writeUInt32LE(chunks, 0xfffffffe);
+
+  const outputs: number[] = [];
+  for (const output of unsignedTx.outputs) {
+    writeUInt64LE(outputs, output.value);
+    const outBytes = hexToBytes(output.scriptPubKey);
+    writeVarInt(outputs, outBytes.length);
+    outputs.push(...outBytes);
+  }
+  chunks.push(...hash256(Buffer.from(outputs)));
+
+  writeUInt32LE(chunks, unsignedTx.locktime ?? 0);
+  writeUInt32LE(chunks, sighashType);
+
+  const sighash = hash256(Buffer.from(chunks));
+  const sig64 = secp256k1.sign(sighash, privKey).toCompactRawBytes();
+  const derSignature = Buffer.concat([toDerSignature(sig64), Buffer.from([sighashType])]);
+  const redeemBytes = hexToBytes(redeemScriptHex);
+
+  const finalTx: number[] = [];
+  writeUInt32LE(finalTx, 2);
+  writeVarInt(finalTx, unsignedTx.inputs.length);
+
+  for (let i = 0; i < unsignedTx.inputs.length; i += 1) {
+    const input = unsignedTx.inputs[i];
+    writeTxid(finalTx, input.txid);
+    writeUInt32LE(finalTx, input.vout);
+
+    const scriptSig =
+      i === gasInputIndex
+        ? [
+          ...encodePushData([...derSignature]),
+          ...derSignature,
+          ...encodePushData([...publicKey]),
+          ...publicKey,
+        ]
+        : [0x51, ...encodePushData(redeemBytes), ...redeemBytes];
+
+    writeVarInt(finalTx, scriptSig.length);
+    finalTx.push(...scriptSig);
+    writeUInt32LE(finalTx, i === gasInputIndex ? 0xfffffffe : 0xffffffff);
+  }
+
+  writeVarInt(finalTx, unsignedTx.outputs.length);
+  for (const output of unsignedTx.outputs) {
+    writeUInt64LE(finalTx, output.value);
+    const outBytes = hexToBytes(output.scriptPubKey);
+    writeVarInt(finalTx, outBytes.length);
+    finalTx.push(...outBytes);
+  }
+
+  writeUInt32LE(finalTx, unsignedTx.locktime ?? 0);
+  return Buffer.from(finalTx).toString('hex');
 }
 
 function serializeUnsignedTx(unsignedTx: UnsignedTx): string {
@@ -295,6 +410,47 @@ function hexToBytes(hex: string): number[] {
     bytes.push(parseInt(clean.slice(i, i + 2), 16));
   }
   return bytes;
+}
+
+function encodePushData(bytes: number[]): number[] {
+  if (bytes.length <= 0x4b) {
+    return [bytes.length];
+  }
+  if (bytes.length <= 0xff) {
+    return [0x4c, bytes.length];
+  }
+  if (bytes.length <= 0xffff) {
+    return [0x4d, bytes.length & 0xff, (bytes.length >> 8) & 0xff];
+  }
+  const buf = Buffer.alloc(4);
+  buf.writeUInt32LE(bytes.length, 0);
+  return [0x4e, ...buf];
+}
+
+function hash256(buffer: Uint8Array): Buffer {
+  const first = crypto.createHash('sha256').update(buffer).digest();
+  return crypto.createHash('sha256').update(first).digest();
+}
+
+function toDerSignature(signature: Uint8Array): Buffer {
+  const r = trimDerInteger(Buffer.from(signature.slice(0, 32)));
+  const s = trimDerInteger(Buffer.from(signature.slice(32, 64)));
+
+  const rElement = Buffer.concat([Buffer.from([0x02, r.length]), r]);
+  const sElement = Buffer.concat([Buffer.from([0x02, s.length]), s]);
+  const body = Buffer.concat([rElement, sElement]);
+  return Buffer.concat([Buffer.from([0x30, body.length]), body]);
+}
+
+function trimDerInteger(value: Buffer): Buffer {
+  let trimmed = value;
+  while (trimmed.length > 1 && trimmed[0] === 0x00 && (trimmed[1] & 0x80) === 0) {
+    trimmed = Buffer.from(trimmed.subarray(1));
+  }
+  if (trimmed[0] & 0x80) {
+    return Buffer.concat([Buffer.from([0x00]), trimmed]);
+  }
+  return Buffer.from(trimmed);
 }
 
 function hasTokenData(utxo: Utxo): boolean {

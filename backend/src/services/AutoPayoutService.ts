@@ -1,10 +1,13 @@
 import { broadcastRawTx, getUtxosForAddress } from '../blockchain/ecashClient';
-import { buildPayoutTx } from '../blockchain/txBuilder';
+import {
+  buildPayoutTx,
+  derivePrivKeyFromSeed,
+  signHybridPayoutTx,
+} from '../blockchain/txBuilder';
 import type { Utxo } from '../blockchain/types';
 import { CampaignService } from './CampaignService';
 import { validateAddress } from '../utils/validation';
 import { coerceAmountToSats } from '../utils/ecashUnits';
-import type { BuiltTx } from '../blockchain/txBuilder';
 
 type CampaignRecord = {
   id: string;
@@ -15,6 +18,7 @@ type CampaignRecord = {
   recipientAddress?: string;
   campaignAddress?: string;
   covenantAddress?: string;
+  redeemScriptHex?: string;
   payout?: {
     txid?: string | null;
     paidAt?: string | null;
@@ -26,7 +30,8 @@ type AutoPayoutDependencies = {
   getUtxosForAddress: (address: string) => Promise<Utxo[]>;
   buildPayoutTx: typeof buildPayoutTx;
   broadcastRawTx: typeof broadcastRawTx;
-  canBroadcastBuiltPayout: (built: BuiltTx) => boolean;
+  derivePrivKeyFromSeed: typeof derivePrivKeyFromSeed;
+  signHybridPayoutTx: typeof signHybridPayoutTx;
 };
 
 export type AutoPayoutResult =
@@ -50,7 +55,8 @@ const defaultDependencies: AutoPayoutDependencies = {
   getUtxosForAddress,
   buildPayoutTx,
   broadcastRawTx,
-  canBroadcastBuiltPayout: () => false,
+  derivePrivKeyFromSeed,
+  signHybridPayoutTx,
 };
 
 function resolveEscrowAddress(campaign: CampaignRecord): string {
@@ -107,6 +113,9 @@ export class AutoPayoutService {
     if (!campaign.activationFeePaid) {
       throw new Error('activation-fee-unpaid');
     }
+    if (!campaign.redeemScriptHex) {
+      throw new Error('campaign-missing-redeem-script');
+    }
 
     const escrowAddress = resolveEscrowAddress(campaign);
     const beneficiaryAddress = resolveBeneficiaryAddress(campaign);
@@ -117,21 +126,47 @@ export class AutoPayoutService {
       throw new Error('goal-not-reached');
     }
 
-    const built = await this.deps.buildPayoutTx({
-      campaignUtxos,
-      totalRaised: raisedSats,
-      beneficiaryAddress,
-      fixedFee: 0n,
-    });
-
-    // The current repository only builds unsigned covenant spends with empty scriptSig
-    // placeholders. Until the real finalize unlocking path is implemented backend-side,
-    // broadcasting here would create an invalid transaction.
-    if (!this.deps.canBroadcastBuiltPayout(built)) {
-      throw new Error('auto-payout-spend-path-missing');
+    const gasSeed = process.env.GAS_WALLET_SEED;
+    const gasAddress = process.env.GAS_WALLET_ADDRESS;
+    if (!gasSeed || !gasAddress) {
+      throw new Error('gas-wallet-not-configured-in-env');
     }
 
-    const broadcast = await this.deps.broadcastRawTx(built.rawHex);
+    const gasUtxos = filterSpendableUtxos(await this.deps.getUtxosForAddress(gasAddress));
+    const feeSats = 500n;
+    const gasUtxo = gasUtxos.find((utxo) => utxo.value >= feeSats && !!utxo.scriptPubKey);
+    if (!gasUtxo) {
+      throw new Error('gas-wallet-empty-or-insufficient-utxo');
+    }
+
+    const built = await this.deps.buildPayoutTx({
+      campaignUtxos,
+      gasUtxo,
+      gasAddress,
+      totalRaised: raisedSats,
+      beneficiaryAddress,
+      fixedFee: feeSats,
+    });
+
+    const privKey = await this.deps.derivePrivKeyFromSeed(gasSeed);
+    const signedHex = this.deps.signHybridPayoutTx(
+      built.unsignedTx,
+      privKey,
+      campaign.redeemScriptHex,
+      built.unsignedTx.inputs.length - 1
+    );
+
+    const changeAmount = gasUtxo.value - built.fee;
+    console.log('\n======================================================');
+    console.log(`[Rescue Mode] Payout Autonomo Iniciado - ID: ${campaignId}`);
+    console.log(`[Rescue Mode] Covenant Output (Beneficiario): ${raisedSats} sats`);
+    console.log(`[Rescue Mode] Gas Input: ${gasUtxo.value} sats`);
+    console.log(`[Rescue Mode] Fee Cobrado al Minero: ${built.fee} sats`);
+    console.log(`[Rescue Mode] Cambio retornado a Gas Wallet: ${changeAmount > 0n ? changeAmount : 0n} sats`);
+    console.log('======================================================\n');
+
+    const broadcast = await this.deps.broadcastRawTx(signedHex);
+    console.log(`[Rescue Mode] BROADCAST EXITOSO. TXID: ${broadcast.txid}\n`);
     await this.deps.campaignService.markPayoutComplete(campaign.id, broadcast.txid, null);
 
     return {

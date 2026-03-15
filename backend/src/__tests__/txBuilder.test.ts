@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildPayoutTx, buildPledgeTx } from '../blockchain/txBuilder';
+import {
+  buildPayoutTx,
+  buildPledgeTx,
+  signHybridPayoutTx,
+} from '../blockchain/txBuilder';
 import { addressToScriptPubKey } from '../blockchain/ecashClient';
 
 describe('buildPledgeTx', () => {
@@ -69,10 +73,17 @@ describe('buildPayoutTx', () => {
         {
           txid: '55'.repeat(32),
           vout: 1,
-          value: totalRaised + 500n,
+          value: totalRaised,
           scriptPubKey: '51',
         },
       ],
+      gasUtxo: {
+        txid: '77'.repeat(32),
+        vout: 0,
+        value: 500n,
+        scriptPubKey: '76a914000000000000000000000000000000000000000088ac',
+      },
+      gasAddress: creatorAddress,
       totalRaised,
       beneficiaryAddress: creatorAddress,
       fixedFee: 500n,
@@ -81,6 +92,7 @@ describe('buildPayoutTx', () => {
     expect(built.treasuryCut).toBe(0n);
     expect(built.beneficiaryAmount).toBe(100000n);
     expect(built.beneficiaryAmount + built.treasuryCut).toBe(totalRaised);
+    expect(built.unsignedTx.inputs).toHaveLength(2);
     expect(built.unsignedTx.outputs).toHaveLength(1);
     expect(built.unsignedTx.outputs[0]?.value).toBe(100000n);
   });
@@ -94,10 +106,17 @@ describe('buildPayoutTx', () => {
         {
           txid: '66'.repeat(32),
           vout: 0,
-          value: totalRaised + 500n,
+          value: totalRaised,
           scriptPubKey: '51',
         },
       ],
+      gasUtxo: {
+        txid: '88'.repeat(32),
+        vout: 1,
+        value: 700n,
+        scriptPubKey: '76a914000000000000000000000000000000000000000088ac',
+      },
+      gasAddress: creatorAddress,
       totalRaised,
       beneficiaryAddress: creatorAddress,
       fixedFee: 500n,
@@ -107,5 +126,47 @@ describe('buildPayoutTx', () => {
     expect(built.beneficiaryAmount).toBe(101n);
     expect(built.beneficiaryAmount + built.treasuryCut).toBe(totalRaised);
     expect(built.unsignedTx.outputs).toHaveLength(1);
+  });
+
+  it('signs a hybrid payout preserving all covenant inputs and a DER gas signature', () => {
+    const raw = signHybridPayoutTx(
+      {
+        inputs: [
+          { txid: '11'.repeat(32), vout: 0, value: 700n, scriptPubKey: '51' },
+          { txid: '22'.repeat(32), vout: 1, value: 300n, scriptPubKey: '51' },
+          {
+            txid: '33'.repeat(32),
+            vout: 2,
+            value: 900n,
+            scriptPubKey: '76a914000000000000000000000000000000000000000088ac',
+          },
+        ],
+        outputs: [
+          { value: 1000n, scriptPubKey: '76a914111111111111111111111111111111111111111188ac' },
+          { value: 400n, scriptPubKey: '76a914222222222222222222222222222222222222222288ac' },
+        ],
+      },
+      Buffer.from('01'.repeat(32), 'hex'),
+      '51',
+      2
+    );
+
+    expect(raw).toMatch(/^[0-9a-f]+$/);
+    expect(raw.startsWith('02000000')).toBe(true);
+  });
+
+  it('rejects hybrid signing when the gas input lacks a scriptPubKey', () => {
+    expect(() => signHybridPayoutTx(
+      {
+        inputs: [
+          { txid: '11'.repeat(32), vout: 0, value: 1000n, scriptPubKey: '51' },
+          { txid: '22'.repeat(32), vout: 1, value: 500n, scriptPubKey: '' },
+        ],
+        outputs: [{ value: 1000n, scriptPubKey: '76a914111111111111111111111111111111111111111188ac' }],
+      },
+      Buffer.from('01'.repeat(32), 'hex'),
+      '51',
+      1
+    )).toThrow('gas-input-missing-scriptpubkey');
   });
 });
