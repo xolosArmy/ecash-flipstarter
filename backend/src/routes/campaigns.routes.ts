@@ -726,25 +726,35 @@ const finalizeCampaignHandler: Parameters<typeof router.post>[1] = async (req, r
     const beneficiaryAddress = resolveCampaignBeneficiaryAddress(campaign);
     const payoutTxid = campaign.payout?.txid ?? null;
 
-    if (campaign.status === 'paid_out' || payoutTxid) {
-      console.info('[payout] idempotent-hit', {
-        campaignId,
-        goalSats: goalSats.toString(),
-        raisedSats: '0',
-        status: campaign.status,
-        txid: payoutTxid,
-      });
-      return res.json({
-        success: true,
-        campaignId,
-        status: 'paid_out',
-        txid: payoutTxid,
-        beneficiaryAddress,
-        goalSats: goalSats.toString(),
-        raisedSats: '0',
-        message: 'Payout ya procesado previamente.',
-      });
-    }
+    const forceRescueId = process.env.FORCE_RESCUE_CAMPAIGN_ID?.trim();
+
+if ((campaign.status === 'paid_out' || payoutTxid) && forceRescueId !== campaignId) {
+  console.info('[payout] idempotent-hit', {
+    campaignId,
+    goalSats: goalSats.toString(),
+    raisedSats: '0',
+    status: campaign.status,
+    txid: payoutTxid,
+  });
+
+  return res.json({
+    success: true,
+    campaignId,
+    status: 'paid_out',
+    txid: payoutTxid,
+    beneficiaryAddress,
+    goalSats: goalSats.toString(),
+    raisedSats: '0',
+    message: 'Payout ya procesado previamente.',
+  });
+}
+
+if ((campaign.status === 'paid_out' || payoutTxid) && forceRescueId === campaignId) {
+  console.info('[force-rescue] route bypassing historical payout marker', {
+    campaignId,
+    historicalTxid: payoutTxid,
+  });
+}
 
     const result = await autoPayoutService.finalizeCampaign(campaignId);
     console.info('[payout] finalize-request', {
