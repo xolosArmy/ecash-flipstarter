@@ -10,8 +10,11 @@ router.post('/campaign/:id/refund', async (req, res) => {
   try {
     const refundAddress = validateAddress(req.body.refundAddress as string, 'refundAddress');
     const refundAmount = BigInt(req.body.refundAmount);
-    const tx = await service.createRefundTx(req.params.id, refundAddress, refundAmount);
-    res.json(serializeBuiltTx(tx));
+    const result = await service.refundCampaign(req.params.id, refundAddress, refundAmount);
+    res.json({
+      txid: result.txid,
+      ...serializeBuiltTx(result.builtTx),
+    });
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
   }

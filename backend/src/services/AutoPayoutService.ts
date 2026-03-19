@@ -1,5 +1,9 @@
 import { createHash } from 'crypto';
-import { compileCampaignScript } from '../covenants/scriptCompiler';
+import {
+  compileCampaignScript,
+  LEGACY_PLACEHOLDER_COVENANT,
+  TEYOLIA_COVENANT_V1,
+} from '../covenants/scriptCompiler';
 import { broadcastRawTx, getUtxosForAddress } from '../blockchain/ecashClient';
 import {
   buildPayoutTx,
@@ -13,9 +17,26 @@ import { coerceAmountToSats } from '../utils/ecashUnits';
 
 type CampaignRecord = {
   id: string;
+  name?: string;
+  description?: string;
   goal: string;
-  status?: string;
+  expirationTime?: string;
+  expiresAt?: string;
+  status?:
+    | 'draft'
+    | 'created'
+    | 'pending_fee'
+    | 'pending_verification'
+    | 'fee_invalid'
+    | 'active'
+    | 'expired'
+    | 'funded'
+    | 'paid_out';
   activationFeePaid?: boolean;
+  beneficiaryPubKey?: string;
+  refundOraclePubKey?: string;
+  contractVersion?: string | null;
+  constructorArgs?: Record<string, string> | null;
   beneficiaryAddress?: string;
   recipientAddress?: string;
   campaignAddress?: string;
@@ -133,18 +154,26 @@ if ((campaign.status === 'paid_out' || payoutTxid) && forceRescueId === campaign
       throw new Error('activation-fee-unpaid');
     }
     let redeemScriptHex = campaign.redeemScriptHex?.trim();
+    const expirationTime = BigInt(campaign.expirationTime ?? new Date(campaign.expiresAt ?? 0).getTime());
+    const contractVersion =
+      campaign.contractVersion === TEYOLIA_COVENANT_V1 || campaign.contractVersion === LEGACY_PLACEHOLDER_COVENANT
+        ? campaign.contractVersion
+        : undefined;
 
 if (!redeemScriptHex) {
   const compiled = compileCampaignScript({
     id: campaign.id,
-    name: campaign.name,
+    name: campaign.name ?? campaign.id,
     description: campaign.description ?? '',
     goal: goalSats,
-    expirationTime: BigInt(campaign.expirationTime ?? new Date(campaign.expiresAt).getTime()),
+    expirationTime,
     beneficiaryPubKey: campaign.beneficiaryPubKey ?? '',
+    refundOraclePubKey: campaign.refundOraclePubKey,
     beneficiaryAddress: campaign.beneficiaryAddress,
     campaignAddress: campaign.campaignAddress,
     covenantAddress: campaign.covenantAddress,
+    contractVersion,
+    constructorArgs: campaign.constructorArgs ?? undefined,
     status: campaign.status,
   });
 
@@ -152,7 +181,7 @@ if (!redeemScriptHex) {
     campaign.id,
     campaign.name ?? '',
     goalSats.toString(),
-    BigInt(campaign.expirationTime ?? new Date(campaign.expiresAt).getTime()).toString(),
+    expirationTime.toString(),
     campaign.beneficiaryPubKey ?? '',
     campaign.beneficiaryAddress ?? '',
   ].join('|');

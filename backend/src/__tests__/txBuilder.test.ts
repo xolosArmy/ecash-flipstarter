@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildFinalizeTx,
   buildPayoutTx,
   buildPledgeTx,
+  buildRefundTx,
+  buildFinalizeUnlockingScriptV1,
+  buildPledgeUnlockingScriptV1,
+  buildRefundUnlockingScriptV1,
+  computeEcashSigHash,
   signHybridPayoutTx,
+  signFinalizeInputV1,
+  signRefundInputV1,
 } from '../blockchain/txBuilder';
 import { addressToScriptPubKey } from '../blockchain/ecashClient';
+import { TEYOLIA_COVENANT_V1 } from '../covenants/scriptCompiler';
 
 describe('buildPledgeTx', () => {
   it('routes campaign output first and contributor change last', async () => {
@@ -60,6 +69,168 @@ describe('buildPledgeTx', () => {
         campaignScriptPubKey: '51',
       }),
     ).rejects.toThrow('token-utxo-not-supported');
+  });
+
+  it('builds the V1 covenant pledge unlocking script with selector 0x03 and redeemScript', async () => {
+    const contributorAddress = 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk';
+    const contributorScript = await addressToScriptPubKey(contributorAddress);
+    const redeemScriptHex = '51';
+
+    const built = await buildPledgeTx({
+      contributorUtxos: [
+        {
+          txid: '11'.repeat(32),
+          vout: 0,
+          value: 5000n,
+          scriptPubKey: contributorScript,
+        },
+      ],
+      covenantUtxo: {
+        txid: '22'.repeat(32),
+        vout: 1,
+        value: 3000n,
+        scriptPubKey: 'a914' + 'ab'.repeat(20) + '87',
+      },
+      amount: 1000n,
+      covenantScriptHash: '',
+      contributorAddress,
+      campaignScriptPubKey: 'a914' + 'ab'.repeat(20) + '87',
+      contractVersion: TEYOLIA_COVENANT_V1,
+      redeemScriptHex,
+    });
+
+    expect(built.unsignedTx.inputs[0]?.scriptSig).toBe(buildPledgeUnlockingScriptV1(redeemScriptHex));
+    expect(built.unsignedTx.outputs[0]).toEqual({
+      value: 4000n,
+      scriptPubKey: 'a914' + 'ab'.repeat(20) + '87',
+    });
+  });
+});
+
+describe('V1 covenant spends', () => {
+  const beneficiaryAddress = 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk';
+  const refundAddress = 'ecash:qz2708636snqhsxu8wnlka78h6fdp77ar59jrf5035';
+  const covenantScriptPubKey = 'a914' + 'cd'.repeat(20) + '87';
+  const redeemScriptHex = '51';
+  const beneficiaryPrivKey = Buffer.from('01'.repeat(32), 'hex');
+  const oraclePrivKey = Buffer.from('02'.repeat(32), 'hex');
+
+  it('finalize scriptSig contains signature, pubkey, selector 0x01 and redeemScript', async () => {
+    const built = await buildFinalizeTx({
+      covenantUtxo: {
+        txid: '33'.repeat(32),
+        vout: 0,
+        value: 5000n,
+        scriptPubKey: covenantScriptPubKey,
+      },
+      beneficiaryAddress,
+      contractVersion: TEYOLIA_COVENANT_V1,
+      redeemScriptHex,
+      beneficiaryPrivKey,
+    });
+
+    const signature = signFinalizeInputV1(
+      {
+        ...built.unsignedTx,
+        inputs: built.unsignedTx.inputs.map((input, index) => (index === 0 ? { ...input, scriptSig: undefined } : input)),
+      },
+      beneficiaryPrivKey,
+      redeemScriptHex,
+      0,
+    );
+    const pubkeyHex = '031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f';
+
+    expect(built.unsignedTx.inputs[0]?.scriptSig).toBe(
+      buildFinalizeUnlockingScriptV1(signature, pubkeyHex, redeemScriptHex),
+    );
+  });
+
+  it('refund scriptSig contains oracle signature, selector 0x02 and redeemScript', async () => {
+    const built = await buildRefundTx({
+      covenantUtxo: {
+        txid: '44'.repeat(32),
+        vout: 1,
+        value: 6000n,
+        scriptPubKey: covenantScriptPubKey,
+      },
+      refundAddress,
+      refundAmount: 2000n,
+      contractVersion: TEYOLIA_COVENANT_V1,
+      redeemScriptHex,
+      refundOraclePrivKey: oraclePrivKey,
+      expirationTime: 123456n,
+    });
+
+    const signature = signRefundInputV1(
+      {
+        ...built.unsignedTx,
+        inputs: built.unsignedTx.inputs.map((input, index) => (index === 0 ? { ...input, scriptSig: undefined } : input)),
+      },
+      oraclePrivKey,
+      redeemScriptHex,
+      0,
+    );
+
+    expect(built.unsignedTx.inputs[0]?.scriptSig).toBe(
+      buildRefundUnlockingScriptV1(signature, redeemScriptHex),
+    );
+  });
+
+  it('refund uses the requested locktime and a non-final sequence when CLTV applies', async () => {
+    const built = await buildRefundTx({
+      covenantUtxo: {
+        txid: '55'.repeat(32),
+        vout: 2,
+        value: 6000n,
+        scriptPubKey: covenantScriptPubKey,
+      },
+      refundAddress,
+      refundAmount: 2000n,
+      contractVersion: TEYOLIA_COVENANT_V1,
+      redeemScriptHex,
+      refundOraclePrivKey: oraclePrivKey,
+      expirationTime: 987654n,
+    });
+
+    expect(built.unsignedTx.locktime).toBe(987654);
+    expect(built.unsignedTx.inputs[0]?.sequence).toBe(0xfffffffe);
+  });
+
+  it('computes a deterministic eCash sighash for V1 signing', () => {
+    const tx = {
+      inputs: [
+        {
+          txid: '66'.repeat(32),
+          vout: 0,
+          value: 5000n,
+          scriptPubKey: covenantScriptPubKey,
+          sequence: 0xfffffffe,
+        },
+      ],
+      outputs: [
+        { value: 2000n, scriptPubKey: '76a914' + '11'.repeat(20) + '88ac' },
+        { value: 2500n, scriptPubKey: covenantScriptPubKey },
+      ],
+      locktime: 123456,
+    };
+
+    expect(computeEcashSigHash(tx, 0, redeemScriptHex)).toBe(computeEcashSigHash(tx, 0, redeemScriptHex));
+  });
+
+  it('legacy campaigns keep using the old finalize path', async () => {
+    const built = await buildFinalizeTx({
+      covenantUtxo: {
+        txid: '77'.repeat(32),
+        vout: 0,
+        value: 5000n,
+        scriptPubKey: '51',
+      },
+      beneficiaryAddress,
+    });
+
+    expect(built.unsignedTx.inputs[0]?.scriptSig).toBeUndefined();
+    expect(built.unsignedTx.outputs).toHaveLength(1);
+    expect(built.unsignedTx.outputs[0]?.value).toBe(5000n);
   });
 });
 

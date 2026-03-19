@@ -31,6 +31,19 @@ const SAMPLE_CAMPAIGN: StoredCampaign = {
   beneficiaryAddress: 'ecash:qpbeneficiaryaddress000000000000000000',
   campaignAddress: 'ecash:qpcampaignaddress0000000000000000000000',
   covenantAddress: 'ecash:qpcovenantaddress000000000000000000000',
+  beneficiaryPubKey: `02${'11'.repeat(32)}`,
+  refundOraclePubKey: `03${'22'.repeat(32)}`,
+  contractVersion: 'teyolia-covenant-v1',
+  constructorArgs: {
+    goal: '12345',
+    expirationTime: '1798675200000',
+    beneficiaryPubKey: `02${'11'.repeat(32)}`,
+    refundOraclePubKey: `03${'22'.repeat(32)}`,
+    feeCapSats: '1000',
+  },
+  redeemScriptHex: '51',
+  scriptHash: 'aa'.repeat(20),
+  scriptPubKey: 'a914' + 'bb'.repeat(20) + '87',
   location: {
     latitude: 32.5149,
     longitude: -117.0382,
@@ -87,6 +100,11 @@ describe('SQLiteStore', () => {
     expect(columnNames).toContain('activationTreasuryAddressUsed');
     expect(columnNames).toContain('treasuryAddressUsed');
     expect(columnNames).toContain('payout_txid');
+    expect(columnNames).toContain('contractVersion');
+    expect(columnNames).toContain('constructorArgs');
+    expect(columnNames).toContain('redeemScriptHex');
+    expect(columnNames).toContain('scriptHash');
+    expect(columnNames).toContain('scriptPubKey');
   });
 
   it('upserts and lists campaigns with activation defaults', async () => {
@@ -102,6 +120,11 @@ describe('SQLiteStore', () => {
     expect(list[0].activation?.feeSats).toBe('80000000');
     expect(list[0].activationFeeRequired).toBe(800000);
     expect(list[0].activationFeePaid).toBe(false);
+    expect(list[0].contractVersion).toBe('teyolia-covenant-v1');
+    expect(list[0].constructorArgs?.refundOraclePubKey).toBe(SAMPLE_CAMPAIGN.refundOraclePubKey);
+    expect(list[0].redeemScriptHex).toBe('51');
+    expect(list[0].scriptHash).toBe('aa'.repeat(20));
+    expect(list[0].scriptPubKey).toBe('a914' + 'bb'.repeat(20) + '87');
   });
 
   it('gets campaign by id and updates existing records via upsert', async () => {

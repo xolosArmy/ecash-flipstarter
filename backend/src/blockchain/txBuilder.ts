@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { HDKey } from '@scure/bip32';
 import { mnemonicToSeedSync } from '@scure/bip39';
 import { secp256k1 } from '@noble/curves/secp256k1';
+import { TEYOLIA_COVENANT_V1 } from '../covenants/scriptCompiler';
 import { addressToScriptPubKey } from './ecashClient';
 import type { Utxo, UnsignedTx } from './types';
 
@@ -15,17 +16,32 @@ export interface PledgeTxParams {
   contributorAddress: string;
   beneficiaryAddress?: string;
   campaignScriptPubKey?: string;
+  contractVersion?: string;
+  redeemScriptHex?: string;
+  feeRateSatsPerByte?: bigint;
 }
 
 export interface FinalizeTxParams {
   covenantUtxo: Utxo;
   beneficiaryAddress: string;
+  contractVersion?: string;
+  redeemScriptHex?: string;
+  beneficiaryPrivKey?: Buffer | string;
+  beneficiaryPubKey?: string;
+  gasUtxos?: Utxo[];
+  gasChangeAddress?: string;
+  fixedFee?: bigint;
 }
 
 export interface RefundTxParams {
   covenantUtxo: Utxo;
   refundAddress: string;
   refundAmount: bigint;
+  contractVersion?: string;
+  redeemScriptHex?: string;
+  refundOraclePrivKey?: Buffer | string;
+  expirationTime?: bigint | number;
+  fixedFee?: bigint;
 }
 
 export interface BuiltTx {
@@ -57,11 +73,27 @@ export interface PayoutTxParams {
 const MIN_ABSOLUTE_FEE = 500n;
 const MIN_RELAY_FEE_PER_KB = 1000n;
 const DEFAULT_SIMPLE_PAYMENT_FEE_RATE_SATS_PER_BYTE = 2n;
+const SIGHASH_FORKID = 0x40;
+const SIGHASH_ALL = 0x01;
+const SIGHASH_SINGLE = 0x03;
+const SIGHASH_ANYONECANPAY = 0x80;
+const SIGHASH_ALL_FORKID = SIGHASH_ALL | SIGHASH_FORKID;
+const SIGHASH_SINGLE_ANYONECANPAY_FORKID = SIGHASH_SINGLE | SIGHASH_FORKID | SIGHASH_ANYONECANPAY;
+const NON_FINAL_SEQUENCE = 0xfffffffe;
+const FINAL_SEQUENCE = 0xffffffff;
 
 export async function buildPledgeTx(params: PledgeTxParams): Promise<BuiltTx> {
   // Guard against accidental token/baton inputs for pledge construction.
   if (params.contributorUtxos.some(hasTokenData)) {
     throw new Error('token-utxo-not-supported');
+  }
+
+  if (
+    params.contractVersion === TEYOLIA_COVENANT_V1
+    && params.redeemScriptHex
+    && params.covenantUtxo.scriptPubKey
+  ) {
+    return buildPledgeTxV1(params);
   }
 
   const totalInput = params.contributorUtxos.reduce((acc, u) => acc + u.value, 0n);
@@ -212,6 +244,14 @@ export async function buildPayoutTx(
 }
 
 export async function buildFinalizeTx(params: FinalizeTxParams): Promise<BuiltTx> {
+  if (
+    params.contractVersion === TEYOLIA_COVENANT_V1
+    && params.redeemScriptHex
+    && params.beneficiaryPrivKey
+  ) {
+    return buildFinalizeTxV1(params);
+  }
+
   const beneficiaryScript = await addressToScriptPubKey(params.beneficiaryAddress);
   const unsigned: UnsignedTx = {
     inputs: [params.covenantUtxo],
@@ -221,6 +261,14 @@ export async function buildFinalizeTx(params: FinalizeTxParams): Promise<BuiltTx
 }
 
 export async function buildRefundTx(params: RefundTxParams): Promise<BuiltTx> {
+  if (
+    params.contractVersion === TEYOLIA_COVENANT_V1
+    && params.redeemScriptHex
+    && params.refundOraclePrivKey
+  ) {
+    return buildRefundTxV1(params);
+  }
+
   if (params.refundAmount > params.covenantUtxo.value) throw new Error('refund-too-large');
   const refundScript = await addressToScriptPubKey(params.refundAddress);
   const remaining = params.covenantUtxo.value - params.refundAmount;
@@ -245,6 +293,280 @@ export async function derivePrivKeyFromSeed(mnemonic: string, index = 0): Promis
     throw new Error('No se pudo derivar la clave privada');
   }
   return Buffer.from(child.privateKey);
+}
+
+export function buildPledgeUnlockingScriptV1(redeemScriptHex: string): string {
+  return serializeScriptChunks([
+    pushHexChunk('03'),
+    pushHexChunk(redeemScriptHex),
+  ]);
+}
+
+export function buildFinalizeUnlockingScriptV1(
+  beneficiarySignatureHex: string,
+  beneficiaryPubKeyHex: string,
+  redeemScriptHex: string
+): string {
+  return serializeScriptChunks([
+    pushHexChunk(beneficiarySignatureHex),
+    pushHexChunk(beneficiaryPubKeyHex),
+    pushHexChunk('01'),
+    pushHexChunk(redeemScriptHex),
+  ]);
+}
+
+export function buildRefundUnlockingScriptV1(
+  oracleSignatureHex: string,
+  redeemScriptHex: string
+): string {
+  return serializeScriptChunks([
+    pushHexChunk(oracleSignatureHex),
+    pushHexChunk('02'),
+    pushHexChunk(redeemScriptHex),
+  ]);
+}
+
+export function computeEcashSigHash(
+  unsignedTx: UnsignedTx,
+  inputIndex: number,
+  coveredBytecodeHex: string,
+  sighashType = SIGHASH_SINGLE_ANYONECANPAY_FORKID
+): string {
+  if (inputIndex < 0 || inputIndex >= unsignedTx.inputs.length) {
+    throw new Error('invalid-input-index');
+  }
+
+  const baseType = sighashType & 0x1f;
+  const anyoneCanPay = (sighashType & SIGHASH_ANYONECANPAY) !== 0;
+  const chunks: number[] = [];
+
+  writeUInt32LE(chunks, 2);
+  chunks.push(...(anyoneCanPay ? ZERO_HASH_BYTES : hashPrevouts(unsignedTx.inputs)));
+  chunks.push(...((anyoneCanPay || baseType === 0x02 || baseType === 0x03) ? ZERO_HASH_BYTES : hashSequences(unsignedTx.inputs)));
+
+  const input = unsignedTx.inputs[inputIndex]!;
+  writeTxid(chunks, input.txid);
+  writeUInt32LE(chunks, input.vout);
+
+  const coveredBytecode = hexToBytes(coveredBytecodeHex);
+  writeVarInt(chunks, coveredBytecode.length);
+  chunks.push(...coveredBytecode);
+
+  writeUInt64LE(chunks, input.value);
+  writeUInt32LE(chunks, input.sequence ?? FINAL_SEQUENCE);
+  chunks.push(...hashOutputs(unsignedTx.outputs, inputIndex, baseType));
+  writeUInt32LE(chunks, unsignedTx.locktime ?? 0);
+  writeUInt32LE(chunks, sighashType);
+
+  return hash256(Buffer.from(chunks)).toString('hex');
+}
+
+export function signFinalizeInputV1(
+  unsignedTx: UnsignedTx,
+  beneficiaryPrivKey: Buffer | string,
+  redeemScriptHex: string,
+  inputIndex = 0
+): string {
+  return signEcashInput(unsignedTx, beneficiaryPrivKey, redeemScriptHex, inputIndex);
+}
+
+export function signRefundInputV1(
+  unsignedTx: UnsignedTx,
+  refundOraclePrivKey: Buffer | string,
+  redeemScriptHex: string,
+  inputIndex = 0
+): string {
+  return signEcashInput(unsignedTx, refundOraclePrivKey, redeemScriptHex, inputIndex);
+}
+
+export function signP2pkhInput(
+  unsignedTx: UnsignedTx,
+  privateKey: Buffer | string,
+  inputIndex: number
+): string {
+  const input = unsignedTx.inputs[inputIndex];
+  if (!input) {
+    throw new Error('invalid-input-index');
+  }
+  if (!input.scriptPubKey) {
+    throw new Error('p2pkh-input-missing-scriptpubkey');
+  }
+
+  const privKey = asPrivKeyBuffer(privateKey);
+  const publicKey = Buffer.from(secp256k1.getPublicKey(privKey, true));
+  const sighash = Buffer.from(
+    computeP2pkhSigHash(unsignedTx, inputIndex, input.scriptPubKey, SIGHASH_ALL_FORKID),
+    'hex',
+  );
+  const sig64 = secp256k1.sign(sighash, privKey).toCompactRawBytes();
+  const derSignature = Buffer.concat([toDerSignature(sig64), Buffer.from([SIGHASH_ALL_FORKID])]);
+
+  return Buffer.from([
+    ...encodePushData([...derSignature]),
+    ...derSignature,
+    ...encodePushData([...publicKey]),
+    ...publicKey,
+  ]).toString('hex');
+}
+
+export function serializeTx(unsignedTx: UnsignedTx): string {
+  return serializeUnsignedTx(unsignedTx);
+}
+
+async function buildPledgeTxV1(params: PledgeTxParams): Promise<BuiltTx> {
+  const campaignScript = await resolveCampaignScriptPubKey(params);
+  const covenantInput = {
+    ...params.covenantUtxo,
+    scriptSig: buildPledgeUnlockingScriptV1(params.redeemScriptHex!),
+    sequence: FINAL_SEQUENCE,
+  };
+  const contributorInputs = params.contributorUtxos.map((utxo) => ({
+    ...utxo,
+    sequence: FINAL_SEQUENCE,
+  }));
+
+  const nextCovenantValue = params.covenantUtxo.value + params.amount;
+  const contributorTotal = params.contributorUtxos.reduce((acc, utxo) => acc + utxo.value, 0n);
+  const changeScript = await addressToScriptPubKey(params.contributorAddress);
+  const feeRate = params.feeRateSatsPerByte ?? DEFAULT_SIMPLE_PAYMENT_FEE_RATE_SATS_PER_BYTE;
+  let outputs: UnsignedTx['outputs'] = [{ value: nextCovenantValue, scriptPubKey: campaignScript }];
+
+  let fee = estimateTxFee(
+    {
+      inputs: [covenantInput, ...contributorInputs],
+      outputs,
+    },
+    feeRate,
+  );
+  if (contributorTotal < params.amount + fee) {
+    throw new Error('insufficient-funds');
+  }
+
+  let change = contributorTotal - params.amount - fee;
+  if (change > 0n) {
+    const outputsWithChange = [...outputs, { value: change, scriptPubKey: changeScript }];
+    fee = estimateTxFee(
+      {
+        inputs: [covenantInput, ...contributorInputs],
+        outputs: outputsWithChange,
+      },
+      feeRate,
+    );
+    change = contributorTotal - params.amount - fee;
+    if (change > 0n) {
+      outputs = outputsWithChange.map((output, index) => (index === 1 ? { ...output, value: change } : output));
+    }
+  }
+
+  if (change > 0n && change < 546n) {
+    fee += change;
+    change = 0n;
+  }
+  if (change > 0n) {
+    outputs = [
+      outputs[0]!,
+      { value: change, scriptPubKey: changeScript },
+    ];
+  }
+
+  const unsignedTx: UnsignedTx = {
+    inputs: [covenantInput, ...contributorInputs],
+    outputs,
+  };
+  return { unsignedTx, rawHex: serializeUnsignedTx(unsignedTx), fee };
+}
+
+async function buildFinalizeTxV1(params: FinalizeTxParams): Promise<BuiltTx> {
+  const gasUtxos = (params.gasUtxos ?? []).map((utxo) => {
+    if (hasTokenData(utxo)) {
+      throw new Error('token-utxo-not-supported');
+    }
+    if (!utxo.scriptPubKey) {
+      throw new Error('gas-input-missing-scriptpubkey');
+    }
+    return { ...utxo, sequence: FINAL_SEQUENCE };
+  });
+  const beneficiaryScript = await addressToScriptPubKey(params.beneficiaryAddress);
+  const feeTarget = params.fixedFee ?? MIN_ABSOLUTE_FEE;
+  const gasTotal = gasUtxos.reduce((acc, utxo) => acc + utxo.value, 0n);
+  const covenantLoss = gasTotal >= feeTarget ? 0n : feeTarget - gasTotal;
+  if (covenantLoss > 1000n) {
+    throw new Error('finalize-fee-cap-exceeded');
+  }
+
+  const beneficiaryAmount = params.covenantUtxo.value - covenantLoss;
+  if (beneficiaryAmount <= 0n) {
+    throw new Error('covenant-funds-empty');
+  }
+
+  const outputs: UnsignedTx['outputs'] = [{ value: beneficiaryAmount, scriptPubKey: beneficiaryScript }];
+  let gasChange = gasTotal > feeTarget ? gasTotal - feeTarget : 0n;
+  if (gasChange > 0n) {
+    if (!params.gasChangeAddress) {
+      throw new Error('gas-change-address-required');
+    }
+    const gasChangeScript = await addressToScriptPubKey(params.gasChangeAddress);
+    if (gasChange >= 546n) {
+      outputs.push({ value: gasChange, scriptPubKey: gasChangeScript });
+    } else {
+      gasChange = 0n;
+    }
+  }
+
+  const covenantInput: UnsignedTx['inputs'][number] = {
+    ...params.covenantUtxo,
+    sequence: FINAL_SEQUENCE,
+  };
+  const unsignedTx: UnsignedTx = {
+    inputs: [covenantInput, ...gasUtxos],
+    outputs,
+  };
+  const beneficiaryPubKey = normalizePublicKey(params.beneficiaryPrivKey!, params.beneficiaryPubKey);
+  const signature = signFinalizeInputV1(unsignedTx, params.beneficiaryPrivKey!, params.redeemScriptHex!, 0);
+  covenantInput.scriptSig = buildFinalizeUnlockingScriptV1(signature, beneficiaryPubKey, params.redeemScriptHex!);
+
+  return {
+    unsignedTx,
+    rawHex: serializeUnsignedTx(unsignedTx),
+    fee: params.covenantUtxo.value + gasTotal - outputs.reduce((acc, output) => acc + output.value, 0n),
+  };
+}
+
+async function buildRefundTxV1(params: RefundTxParams): Promise<BuiltTx> {
+  const fixedFee = params.fixedFee ?? MIN_ABSOLUTE_FEE;
+  if (params.refundAmount > params.covenantUtxo.value) {
+    throw new Error('refund-too-large');
+  }
+
+  const refundScript = await addressToScriptPubKey(params.refundAddress);
+  const locktime = normalizeLocktime(params.expirationTime);
+  const remainingAfterFee = params.covenantUtxo.value - params.refundAmount - fixedFee;
+  if (remainingAfterFee < 0n) {
+    throw new Error('refund-insufficient-for-fee');
+  }
+
+  const outputs: UnsignedTx['outputs'] = [{ value: params.refundAmount, scriptPubKey: refundScript }];
+  if (remainingAfterFee >= 546n) {
+    outputs.push({ value: remainingAfterFee, scriptPubKey: params.covenantUtxo.scriptPubKey });
+  }
+
+  const covenantInput: UnsignedTx['inputs'][number] = {
+    ...params.covenantUtxo,
+    sequence: NON_FINAL_SEQUENCE,
+  };
+  const unsignedTx: UnsignedTx = {
+    inputs: [covenantInput],
+    outputs,
+    locktime,
+  };
+  const signature = signRefundInputV1(unsignedTx, params.refundOraclePrivKey!, params.redeemScriptHex!, 0);
+  covenantInput.scriptSig = buildRefundUnlockingScriptV1(signature, params.redeemScriptHex!);
+
+  return {
+    unsignedTx,
+    rawHex: serializeUnsignedTx(unsignedTx),
+    fee: params.covenantUtxo.value - outputs.reduce((acc, output) => acc + output.value, 0n),
+  };
 }
 
 export function signHybridPayoutTx(
@@ -278,7 +600,7 @@ export function signHybridPayoutTx(
 
   const sequences: number[] = [];
   for (let i = 0; i < unsignedTx.inputs.length; i += 1) {
-    writeUInt32LE(sequences, i === gasInputIndex ? 0xfffffffe : 0xffffffff);
+    writeUInt32LE(sequences, i === gasInputIndex ? NON_FINAL_SEQUENCE : FINAL_SEQUENCE);
   }
   chunks.push(...hash256(Buffer.from(sequences)));
 
@@ -291,7 +613,7 @@ export function signHybridPayoutTx(
   chunks.push(...scriptBytes);
 
   writeUInt64LE(chunks, gasInput.value);
-  writeUInt32LE(chunks, 0xfffffffe);
+  writeUInt32LE(chunks, NON_FINAL_SEQUENCE);
 
   const outputs: number[] = [];
   for (const output of unsignedTx.outputs) {
@@ -331,7 +653,7 @@ export function signHybridPayoutTx(
 
     writeVarInt(finalTx, scriptSig.length);
     finalTx.push(...scriptSig);
-    writeUInt32LE(finalTx, i === gasInputIndex ? 0xfffffffe : 0xffffffff);
+    writeUInt32LE(finalTx, i === gasInputIndex ? NON_FINAL_SEQUENCE : FINAL_SEQUENCE);
   }
 
   writeVarInt(finalTx, unsignedTx.outputs.length);
@@ -346,6 +668,127 @@ export function signHybridPayoutTx(
   return Buffer.from(finalTx).toString('hex');
 }
 
+const ZERO_HASH_BYTES = new Array(32).fill(0);
+
+function signEcashInput(
+  unsignedTx: UnsignedTx,
+  privateKey: Buffer | string,
+  redeemScriptHex: string,
+  inputIndex: number
+): string {
+  const privKey = asPrivKeyBuffer(privateKey);
+  const sighash = Buffer.from(
+    computeEcashSigHash(unsignedTx, inputIndex, redeemScriptHex, SIGHASH_SINGLE_ANYONECANPAY_FORKID),
+    'hex',
+  );
+  const sig64 = secp256k1.sign(sighash, privKey).toCompactRawBytes();
+  return Buffer.concat([
+    toDerSignature(sig64),
+    Buffer.from([SIGHASH_SINGLE_ANYONECANPAY_FORKID]),
+  ]).toString('hex');
+}
+
+function computeP2pkhSigHash(
+  unsignedTx: UnsignedTx,
+  inputIndex: number,
+  coveredBytecodeHex: string,
+  sighashType = SIGHASH_ALL_FORKID
+): string {
+  if (inputIndex < 0 || inputIndex >= unsignedTx.inputs.length) {
+    throw new Error('invalid-input-index');
+  }
+
+  const baseType = sighashType & 0x1f;
+  const anyoneCanPay = (sighashType & SIGHASH_ANYONECANPAY) !== 0;
+  const chunks: number[] = [];
+
+  writeUInt32LE(chunks, 2);
+  chunks.push(...(anyoneCanPay ? ZERO_HASH_BYTES : hashPrevouts(unsignedTx.inputs)));
+  chunks.push(...((anyoneCanPay || baseType === 0x02 || baseType === 0x03) ? ZERO_HASH_BYTES : hashSequences(unsignedTx.inputs)));
+
+  const input = unsignedTx.inputs[inputIndex]!;
+  writeTxid(chunks, input.txid);
+  writeUInt32LE(chunks, input.vout);
+
+  const coveredBytecode = hexToBytes(coveredBytecodeHex);
+  writeVarInt(chunks, coveredBytecode.length);
+  chunks.push(...coveredBytecode);
+
+  writeUInt64LE(chunks, input.value);
+  writeUInt32LE(chunks, input.sequence ?? FINAL_SEQUENCE);
+  chunks.push(...hashOutputs(unsignedTx.outputs, inputIndex, baseType));
+  writeUInt32LE(chunks, unsignedTx.locktime ?? 0);
+  writeUInt32LE(chunks, sighashType);
+
+  return hash256(Buffer.from(chunks)).toString('hex');
+}
+
+function hashPrevouts(inputs: UnsignedTx['inputs']): number[] {
+  const bytes: number[] = [];
+  for (const input of inputs) {
+    writeTxid(bytes, input.txid);
+    writeUInt32LE(bytes, input.vout);
+  }
+  return [...hash256(Buffer.from(bytes))];
+}
+
+function hashSequences(inputs: UnsignedTx['inputs']): number[] {
+  const bytes: number[] = [];
+  for (const input of inputs) {
+    writeUInt32LE(bytes, input.sequence ?? FINAL_SEQUENCE);
+  }
+  return [...hash256(Buffer.from(bytes))];
+}
+
+function hashOutputs(outputs: UnsignedTx['outputs'], inputIndex: number, baseType: number): number[] {
+  if (baseType === 0x02) {
+    return ZERO_HASH_BYTES;
+  }
+  if (baseType === 0x03) {
+    if (inputIndex >= outputs.length) {
+      return ZERO_HASH_BYTES;
+    }
+    return serializeAndHashOutputs([outputs[inputIndex]!]);
+  }
+  return serializeAndHashOutputs(outputs);
+}
+
+function serializeAndHashOutputs(outputs: UnsignedTx['outputs']): number[] {
+  const bytes: number[] = [];
+  for (const output of outputs) {
+    writeUInt64LE(bytes, output.value);
+    const scriptBytes = hexToBytes(output.scriptPubKey);
+    writeVarInt(bytes, scriptBytes.length);
+    bytes.push(...scriptBytes);
+  }
+  return [...hash256(Buffer.from(bytes))];
+}
+
+function asPrivKeyBuffer(privateKey: Buffer | string): Buffer {
+  if (Buffer.isBuffer(privateKey)) {
+    return privateKey;
+  }
+  return Buffer.from(privateKey, 'hex');
+}
+
+function normalizePublicKey(privateKey: Buffer | string, publicKey?: string): string {
+  if (publicKey?.trim()) {
+    return publicKey.trim().toLowerCase();
+  }
+  return Buffer.from(secp256k1.getPublicKey(asPrivKeyBuffer(privateKey), true)).toString('hex');
+}
+
+function normalizeLocktime(locktime: bigint | number | undefined): number {
+  if (locktime === undefined) {
+    throw new Error('refund-expiration-required');
+  }
+  const value = typeof locktime === 'bigint' ? locktime : BigInt(locktime);
+  if (value < 0n || value > 0xffffffffn) {
+    throw new Error('invalid-locktime');
+  }
+  return Number(value);
+}
+
 function serializeUnsignedTx(unsignedTx: UnsignedTx): string {
   const version = 2;
   const locktime = unsignedTx.locktime ?? 0;
@@ -356,8 +799,10 @@ function serializeUnsignedTx(unsignedTx: UnsignedTx): string {
   for (const input of unsignedTx.inputs) {
     writeTxid(chunks, input.txid);
     writeUInt32LE(chunks, input.vout);
-    writeVarInt(chunks, 0); // empty scriptSig for unsigned
-    writeUInt32LE(chunks, 0xffffffff); // sequence
+    const scriptSigBytes = input.scriptSig ? hexToBytes(input.scriptSig) : [];
+    writeVarInt(chunks, scriptSigBytes.length);
+    chunks.push(...scriptSigBytes);
+    writeUInt32LE(chunks, input.sequence ?? FINAL_SEQUENCE);
   }
 
   writeVarInt(chunks, unsignedTx.outputs.length);
@@ -427,6 +872,15 @@ function encodePushData(bytes: number[]): number[] {
   return [0x4e, ...buf];
 }
 
+function serializeScriptChunks(chunks: string[]): string {
+  return chunks.join('');
+}
+
+function pushHexChunk(hex: string): string {
+  const bytes = hexToBytes(hex);
+  return Buffer.from([...encodePushData(bytes), ...bytes]).toString('hex');
+}
+
 function hash256(buffer: Uint8Array): Buffer {
   const first = crypto.createHash('sha256').update(buffer).digest();
   return crypto.createHash('sha256').update(first).digest();
@@ -475,6 +929,19 @@ function calculateMinRequiredFee(inputs: Utxo[], outputs: UnsignedTx['outputs'])
   return relayMinFee > MIN_ABSOLUTE_FEE ? relayMinFee : MIN_ABSOLUTE_FEE;
 }
 
+function estimateTxFee(unsignedTx: UnsignedTx, feeRateSatsPerByte: bigint): bigint {
+  if (feeRateSatsPerByte <= 0n) {
+    throw new Error('invalid-fee-rate');
+  }
+  const estimatedSize = estimateUnsignedTxSize(unsignedTx);
+  const relayMinFee = (estimatedSize * MIN_RELAY_FEE_PER_KB + 999n) / 1000n;
+  const sizeBasedFee = estimatedSize * feeRateSatsPerByte;
+  if (sizeBasedFee < MIN_ABSOLUTE_FEE) {
+    return MIN_ABSOLUTE_FEE > relayMinFee ? MIN_ABSOLUTE_FEE : relayMinFee;
+  }
+  return sizeBasedFee > relayMinFee ? sizeBasedFee : relayMinFee;
+}
+
 function estimateSignedTxSize(inputs: Utxo[], outputs: UnsignedTx['outputs']): bigint {
   let size = 4n + 4n;
   size += BigInt(varIntSize(inputs.length));
@@ -487,6 +954,26 @@ function estimateSignedTxSize(inputs: Utxo[], outputs: UnsignedTx['outputs']): b
   }
   size += BigInt(varIntSize(outputs.length));
   for (const output of outputs) {
+    const scriptSize = output.scriptPubKey.length / 2;
+    size += 8n;
+    size += BigInt(varIntSize(scriptSize));
+    size += BigInt(scriptSize);
+  }
+  return size;
+}
+
+function estimateUnsignedTxSize(unsignedTx: UnsignedTx): bigint {
+  let size = 4n + 4n;
+  size += BigInt(varIntSize(unsignedTx.inputs.length));
+  for (const input of unsignedTx.inputs) {
+    const scriptSigSize = input.scriptSig ? input.scriptSig.length / 2 : estimateScriptSigSize(input.scriptPubKey);
+    size += 36n;
+    size += BigInt(varIntSize(scriptSigSize));
+    size += BigInt(scriptSigSize);
+    size += 4n;
+  }
+  size += BigInt(varIntSize(unsignedTx.outputs.length));
+  for (const output of unsignedTx.outputs) {
     const scriptSize = output.scriptPubKey.length / 2;
     size += 8n;
     size += BigInt(varIntSize(scriptSize));

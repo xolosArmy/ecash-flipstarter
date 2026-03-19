@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import { AutoPayoutService } from '../services/AutoPayoutService';
+import { FinalizeService } from '../services/FinalizeService';
 
 const router = Router();
-const service = new AutoPayoutService();
+const service = new FinalizeService();
 
 router.post('/campaign/:id/finalize', async (req, res) => {
   try {

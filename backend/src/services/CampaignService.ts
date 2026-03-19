@@ -3,6 +3,10 @@ import {
   ensureCampaignCovenant,
   hasValidCampaignCovenant,
 } from '../covenants/campaignDefinition';
+import {
+  LEGACY_PLACEHOLDER_COVENANT,
+  TEYOLIA_COVENANT_V1,
+} from '../covenants/scriptCompiler';
 import { CovenantIndex, type CovenantRef } from '../blockchain/covenantIndex';
 import {
   loadCampaignsFromDisk,
@@ -64,9 +68,15 @@ function toCampaignDefinition(snapshot: StoredCampaign): CampaignDefinition {
     goal: toBigIntGoal(snapshot.goal),
     expirationTime: toExpirationTime(snapshot.expiresAt),
     beneficiaryPubKey: snapshot.beneficiaryPubKey ?? '',
+    refundOraclePubKey: snapshot.refundOraclePubKey ?? undefined,
     beneficiaryAddress: snapshot.beneficiaryAddress ?? undefined,
     campaignAddress: snapshot.campaignAddress ?? undefined,
     covenantAddress: snapshot.covenantAddress ?? undefined,
+    contractVersion:
+      snapshot.contractVersion === TEYOLIA_COVENANT_V1 || snapshot.contractVersion === LEGACY_PLACEHOLDER_COVENANT
+        ? snapshot.contractVersion
+        : undefined,
+    constructorArgs: snapshot.constructorArgs ?? undefined,
     status: snapshot.status ?? undefined,
   };
 }
@@ -170,6 +180,12 @@ function toStoredCampaign(definition: CampaignDefinition, prior?: StoredCampaign
     campaignAddress: definition.campaignAddress,
     covenantAddress: definition.covenantAddress,
     beneficiaryPubKey: definition.beneficiaryPubKey,
+    refundOraclePubKey: definition.refundOraclePubKey,
+    contractVersion: definition.contractVersion,
+    constructorArgs: definition.constructorArgs ?? null,
+    redeemScriptHex: priorNormalized?.redeemScriptHex ?? null,
+    scriptHash: priorNormalized?.scriptHash ?? null,
+    scriptPubKey: priorNormalized?.scriptPubKey ?? null,
     location: priorNormalized?.location,
     activation: priorNormalized?.activation ?? {
       feeSats: String(activationFeeRequired * 100),
@@ -223,10 +239,17 @@ export function syncCampaignStoreFromDiskCampaigns(diskCampaigns: StoredCampaign
         campaignAddress: snapshot.campaignAddress ?? snapshot.covenantAddress,
       },
     });
+    campaign.contractVersion = ensured.contractVersion ?? campaign.contractVersion;
+    campaign.constructorArgs = ensured.constructorArgs ?? campaign.constructorArgs;
     campaign.campaignAddress = ensured.campaignAddress;
     campaign.covenantAddress = ensured.campaignAddress;
     snapshot.campaignAddress = ensured.campaignAddress;
     snapshot.covenantAddress = ensured.campaignAddress;
+    snapshot.contractVersion = ensured.contractVersion ?? snapshot.contractVersion ?? undefined;
+    snapshot.constructorArgs = ensured.constructorArgs ?? snapshot.constructorArgs ?? null;
+    snapshot.redeemScriptHex = ensured.redeemScriptHex ?? null;
+    snapshot.scriptHash = ensured.scriptHash;
+    snapshot.scriptPubKey = ensured.scriptPubKey;
     campaigns.set(campaign.id, campaign);
     campaignSnapshots.set(campaign.id, snapshot);
 
@@ -333,12 +356,26 @@ export class CampaignService {
       || campaign.campaignAddress !== nextAddress
       || campaign.covenantAddress !== nextAddress
       || snapshot.campaignAddress !== nextAddress
-      || snapshot.covenantAddress !== nextAddress;
+      || snapshot.covenantAddress !== nextAddress
+      || campaign.contractVersion !== ensured.contractVersion
+      || snapshot.contractVersion !== ensured.contractVersion
+      || JSON.stringify(campaign.constructorArgs ?? null) !== JSON.stringify(ensured.constructorArgs ?? null)
+      || JSON.stringify(snapshot.constructorArgs ?? null) !== JSON.stringify(ensured.constructorArgs ?? null)
+      || snapshot.redeemScriptHex !== (ensured.redeemScriptHex ?? null)
+      || snapshot.scriptHash !== ensured.scriptHash
+      || snapshot.scriptPubKey !== ensured.scriptPubKey;
 
     campaign.campaignAddress = nextAddress;
     campaign.covenantAddress = nextAddress;
     snapshot.campaignAddress = nextAddress;
     snapshot.covenantAddress = nextAddress;
+    campaign.contractVersion = ensured.contractVersion ?? campaign.contractVersion;
+    campaign.constructorArgs = ensured.constructorArgs ?? campaign.constructorArgs;
+    snapshot.contractVersion = ensured.contractVersion ?? snapshot.contractVersion ?? undefined;
+    snapshot.constructorArgs = ensured.constructorArgs ?? snapshot.constructorArgs ?? null;
+    snapshot.redeemScriptHex = ensured.redeemScriptHex ?? null;
+    snapshot.scriptHash = ensured.scriptHash;
+    snapshot.scriptPubKey = ensured.scriptPubKey;
     covenant.scriptHash = ensured.scriptHash;
     covenant.scriptPubKey = ensured.scriptPubKey;
     return changed;
@@ -379,6 +416,22 @@ export class CampaignService {
 
     const activationFeeRequired = toActivationFeeRequired(payload.activationFeeRequired);
     const activationFeePaid = false;
+    const requestedContractVersion = typeof payload.contractVersion === 'string'
+      ? payload.contractVersion.trim()
+      : '';
+    const payloadConstructorArgs =
+      typeof payload.constructorArgs === 'object' && payload.constructorArgs !== null
+        ? Object.fromEntries(
+          Object.entries(payload.constructorArgs as Record<string, unknown>)
+            .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+        )
+        : undefined;
+    const refundOraclePubKeyCandidate =
+      typeof payload.refundOraclePubKey === 'string' && payload.refundOraclePubKey.trim()
+        ? payload.refundOraclePubKey.trim()
+        : typeof payloadConstructorArgs?.refundOraclePubKey === 'string'
+          ? payloadConstructorArgs.refundOraclePubKey
+          : process.env.TEYOLIA_REFUND_ORACLE_PUBKEY?.trim() || process.env.REFUND_ORACLE_PUBKEY?.trim() || undefined;
 
     const requestedStatus = typeof payload.status === 'string' ? payload.status : undefined;
     const initialStatus = activationFeePaid
@@ -400,6 +453,11 @@ export class CampaignService {
             ? payload.recipientAddress
             : undefined,
       covenantAddress: payload.covenantAddress,
+      refundOraclePubKey: refundOraclePubKeyCandidate,
+      contractVersion: requestedContractVersion === LEGACY_PLACEHOLDER_COVENANT
+        ? LEGACY_PLACEHOLDER_COVENANT
+        : TEYOLIA_COVENANT_V1,
+      constructorArgs: payloadConstructorArgs,
       status: initialStatus,
     };
     const ensuredInitialCovenant = ensureCampaignCovenant({
@@ -411,6 +469,8 @@ export class CampaignService {
         value: 0n,
       },
     });
+    campaign.contractVersion = ensuredInitialCovenant.contractVersion ?? campaign.contractVersion;
+    campaign.constructorArgs = ensuredInitialCovenant.constructorArgs ?? campaign.constructorArgs;
     campaign.campaignAddress = ensuredInitialCovenant.campaignAddress;
     campaign.covenantAddress = ensuredInitialCovenant.campaignAddress;
 
@@ -431,6 +491,12 @@ export class CampaignService {
       campaignAddress: campaign.campaignAddress,
       covenantAddress: campaign.covenantAddress,
       beneficiaryPubKey: campaign.beneficiaryPubKey,
+      refundOraclePubKey: campaign.refundOraclePubKey,
+      contractVersion: ensuredInitialCovenant.contractVersion ?? campaign.contractVersion,
+      constructorArgs: ensuredInitialCovenant.constructorArgs ?? campaign.constructorArgs ?? null,
+      redeemScriptHex: ensuredInitialCovenant.redeemScriptHex ?? null,
+      scriptHash: ensuredInitialCovenant.scriptHash,
+      scriptPubKey: ensuredInitialCovenant.scriptPubKey,
       activation: {
         feeSats:
           typeof payload.activation === 'object' && payload.activation && 'feeSats' in payload.activation
@@ -1001,6 +1067,12 @@ export class CampaignService {
       campaignAddress: campaign.campaignAddress,
       covenantAddress: campaign.covenantAddress,
       beneficiaryPubKey: campaign.beneficiaryPubKey,
+      refundOraclePubKey: snapshot?.refundOraclePubKey,
+      contractVersion: snapshot?.contractVersion ?? campaign.contractVersion ?? null,
+      constructorArgs: snapshot?.constructorArgs ?? campaign.constructorArgs ?? null,
+      redeemScriptHex: snapshot?.redeemScriptHex ?? null,
+      scriptHash: snapshot?.scriptHash ?? covenant?.scriptHash ?? null,
+      scriptPubKey: snapshot?.scriptPubKey ?? covenant?.scriptPubKey ?? null,
       location: snapshot?.location,
       activation: snapshot?.activation,
       activationFeeRequired: snapshot?.activationFeeRequired ?? ACTIVATION_FEE_XEC,
@@ -1019,6 +1091,9 @@ export class CampaignService {
           ...covenant,
           value: covenant.value.toString(),
           campaignAddress: campaign.campaignAddress ?? snapshot?.campaignAddress ?? snapshot?.covenantAddress,
+          contractVersion: snapshot?.contractVersion ?? campaign.contractVersion ?? null,
+          constructorArgs: snapshot?.constructorArgs ?? campaign.constructorArgs ?? null,
+          redeemScriptHex: snapshot?.redeemScriptHex ?? null,
         }
         : undefined,
       progress,

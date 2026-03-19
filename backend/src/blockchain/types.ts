@@ -18,6 +18,8 @@ export interface UnsignedTx {
     vout: number;
     value: bigint;
     scriptPubKey: string;
+    scriptSig?: string;
+    sequence?: number;
   }[];
   outputs: {
     value: bigint;

@@ -30,6 +30,12 @@ export type StoredCampaign = {
   campaignAddress?: string;
   covenantAddress?: string;
   beneficiaryPubKey?: string;
+  refundOraclePubKey?: string;
+  contractVersion?: string;
+  constructorArgs?: Record<string, string> | null;
+  redeemScriptHex?: string | null;
+  scriptHash?: string | null;
+  scriptPubKey?: string | null;
   location?: {
     latitude: number;
     longitude: number;
@@ -107,6 +113,12 @@ export async function initializeDatabase(database?: Database): Promise<void> {
       campaignAddress TEXT,
       covenantAddress TEXT,
       beneficiaryPubKey TEXT,
+      refundOraclePubKey TEXT,
+      contractVersion TEXT,
+      constructorArgs TEXT,
+      redeemScriptHex TEXT,
+      scriptHash TEXT,
+      scriptPubKey TEXT,
       location_lat REAL,
       location_lng REAL,
       activation_feeSats TEXT,
@@ -175,6 +187,12 @@ async function ensureCampaignColumns(db: Database): Promise<void> {
     { name: 'campaignAddress', sqlType: 'TEXT' },
     { name: 'covenantAddress', sqlType: 'TEXT' },
     { name: 'beneficiaryPubKey', sqlType: 'TEXT' },
+    { name: 'refundOraclePubKey', sqlType: 'TEXT' },
+    { name: 'contractVersion', sqlType: 'TEXT' },
+    { name: 'constructorArgs', sqlType: 'TEXT' },
+    { name: 'redeemScriptHex', sqlType: 'TEXT' },
+    { name: 'scriptHash', sqlType: 'TEXT' },
+    { name: 'scriptPubKey', sqlType: 'TEXT' },
     { name: 'location_lat', sqlType: 'REAL' },
     { name: 'location_lng', sqlType: 'REAL' },
     { name: 'activation_feeSats', sqlType: 'TEXT' },
@@ -220,6 +238,12 @@ type CampaignRow = {
   campaignAddress: string | null;
   covenantAddress: string | null;
   beneficiaryPubKey: string | null;
+  refundOraclePubKey: string | null;
+  contractVersion: string | null;
+  constructorArgs: string | null;
+  redeemScriptHex: string | null;
+  scriptHash: string | null;
+  scriptPubKey: string | null;
   location_lat: number | null;
   location_lng: number | null;
   activation_feeSats: string | null;
@@ -265,6 +289,24 @@ function deriveExpirationTime(expiresAt: string, explicit?: string | null): stri
   return Number.isFinite(parsed) ? String(parsed) : '0';
 }
 
+function parseConstructorArgs(raw: string | null): Record<string, string> | null {
+  if (!raw || !raw.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const entries = Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string');
+    return entries.length > 0 ? Object.fromEntries(entries) : null;
+  } catch {
+    return null;
+  }
+}
+
+function serializeConstructorArgs(value: StoredCampaign['constructorArgs']): string | null {
+  if (!value || typeof value !== 'object') return null;
+  const entries = Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string');
+  return entries.length > 0 ? JSON.stringify(Object.fromEntries(entries)) : null;
+}
+
 function mapRowToCampaign(row: CampaignRow): StoredCampaign {
   const expiresAt = row.expiresAt && row.expiresAt.trim() ? row.expiresAt : row.expirationTime ?? '';
   const campaign: StoredCampaign = {
@@ -280,6 +322,12 @@ function mapRowToCampaign(row: CampaignRow): StoredCampaign {
     campaignAddress: row.campaignAddress ?? undefined,
     covenantAddress: row.covenantAddress ?? undefined,
     beneficiaryPubKey: row.beneficiaryPubKey ?? undefined,
+    refundOraclePubKey: row.refundOraclePubKey ?? undefined,
+    contractVersion: row.contractVersion ?? undefined,
+    constructorArgs: parseConstructorArgs(row.constructorArgs),
+    redeemScriptHex: row.redeemScriptHex ?? null,
+    scriptHash: row.scriptHash ?? null,
+    scriptPubKey: row.scriptPubKey ?? null,
     activation: {
       feeSats: row.activation_feeSats ?? String(ACTIVATION_FEE_XEC * 100),
       feeTxid: row.activation_feeTxid,
@@ -347,6 +395,7 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
       ? campaign.activationOfferMode
       : null;
   const activationOfferOutputs = serializeActivationOfferOutputs(campaign.activationOfferOutputs);
+  const constructorArgs = serializeConstructorArgs(campaign.constructorArgs);
 
   try {
     await db.run(
@@ -364,6 +413,12 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
         campaignAddress,
         covenantAddress,
         beneficiaryPubKey,
+        refundOraclePubKey,
+        contractVersion,
+        constructorArgs,
+        redeemScriptHex,
+        scriptHash,
+        scriptPubKey,
         location_lat,
         location_lng,
         activation_feeSats,
@@ -385,7 +440,7 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
         payout_paidAt,
         treasuryAddressUsed,
         expirationTime
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         campaign.id,
@@ -400,6 +455,12 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
         campaign.campaignAddress ?? null,
         campaign.covenantAddress ?? null,
         campaign.beneficiaryPubKey ?? null,
+        campaign.refundOraclePubKey ?? null,
+        campaign.contractVersion ?? null,
+        constructorArgs,
+        campaign.redeemScriptHex ?? null,
+        campaign.scriptHash ?? null,
+        campaign.scriptPubKey ?? null,
         campaign.location?.latitude ?? null,
         campaign.location?.longitude ?? null,
         campaign.activation?.feeSats ?? String(activationFeeRequired * 100),

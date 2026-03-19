@@ -6,7 +6,7 @@ import { addressToScriptPubKey, getTransactionInfo } from '../blockchain/ecashCl
 import { walletConnectOfferStore } from '../services/WalletConnectOfferStore';
 import { ACTIVATION_FEE_SATS, ACTIVATION_FEE_XEC, TREASURY_ADDRESS } from '../config/constants';
 import { coerceAmountToSats } from '../utils/ecashUnits';
-import { AutoPayoutService } from '../services/AutoPayoutService';
+import { FinalizeService } from '../services/FinalizeService';
 
 type CampaignStatus =
   | 'draft'
@@ -61,7 +61,7 @@ type CampaignApiRecord = {
 const TXID_HEX_REGEX = /^[0-9a-f]{64}$/i;
 const router = Router();
 const service = new CampaignService();
-const autoPayoutService = new AutoPayoutService();
+const finalizeService = new FinalizeService();
 
 function validateCampaignIdParam(raw: unknown): string {
   const campaignId = String(raw ?? '').trim();
@@ -756,7 +756,7 @@ if ((campaign.status === 'paid_out' || payoutTxid) && forceRescueId === campaign
   });
 }
 
-    const result = await autoPayoutService.finalizeCampaign(campaignId);
+    const result = await finalizeService.finalizeCampaign(campaignId);
     console.info('[payout] finalize-request', {
       campaignId,
       goalSats: result.goalSats.toString(),

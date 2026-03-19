@@ -1,26 +1,110 @@
 import { buildRefundTx, type BuiltTx } from '../blockchain/txBuilder';
-import { covenantIndexInstance } from './CampaignService';
+import { broadcastRawTx, getUtxosForAddress } from '../blockchain/ecashClient';
+import type { Utxo } from '../blockchain/types';
+import { CampaignService, covenantIndexInstance } from './CampaignService';
+import {
+  filterSpendableUtxos,
+  isV1Campaign,
+  requireV1ExpirationTime,
+  requireV1RedeemScriptHex,
+  requireV1RefundOraclePubKey,
+  resolveCampaignEscrowAddress,
+  resolvePrivateKeyFromEnv,
+  selectCampaignCovenantUtxo,
+  type SpendableCampaignRecord,
+} from './covenantV1Integration';
+
+type RefundDependencies = {
+  campaignService: Pick<CampaignService, 'getCampaign'>;
+  getUtxosForAddress: typeof getUtxosForAddress;
+  buildRefundTx: typeof buildRefundTx;
+  broadcastRawTx: typeof broadcastRawTx;
+};
+
+const defaultDependencies: RefundDependencies = {
+  campaignService: new CampaignService(),
+  getUtxosForAddress,
+  buildRefundTx,
+  broadcastRawTx,
+};
+
+export type BroadcastRefundResult = {
+  txid: string;
+  builtTx: BuiltTx;
+};
 
 export class RefundService {
-  /**
-   * Build an unsigned refund transaction draining part of the covenant to refundAddress.
-   */
-  async createRefundTx(campaignId: string, refundAddress: string, refundAmount: bigint): Promise<BuiltTx> {
-    const covenant = covenantIndexInstance.getCovenantRef(campaignId);
-    if (!covenant) throw new Error('campaign-not-found');
+  constructor(private readonly deps: RefundDependencies = defaultDependencies) {}
 
-    const built = await buildRefundTx({
-      covenantUtxo: {
-        txid: covenant.txid,
-        vout: covenant.vout,
-        value: covenant.value,
-        scriptPubKey: covenant.scriptPubKey,
-      },
-      refundAddress,
-      refundAmount,
+  async refundCampaign(campaignId: string, refundAddress: string, refundAmount: bigint): Promise<BroadcastRefundResult> {
+    const campaign = await this.deps.campaignService.getCampaign(campaignId) as SpendableCampaignRecord | null;
+    if (!campaign) {
+      throw new Error('campaign-not-found');
+    }
+    if (!isV1Campaign(campaign)) {
+      const builtTx = await this.createRefundTx(campaignId, refundAddress, refundAmount);
+      const broadcast = await this.deps.broadcastRawTx(builtTx.rawHex);
+      return { txid: broadcast.txid, builtTx };
+    }
+
+    const builtTx = await this.createRefundTx(campaignId, refundAddress, refundAmount);
+    const broadcast = await this.deps.broadcastRawTx(builtTx.rawHex);
+    const tracked = covenantIndexInstance.getCovenantRef(campaignId);
+    const nextCovenantOutput = builtTx.unsignedTx.outputs[1];
+    covenantIndexInstance.setCovenantRef({
+      campaignId,
+      txid: nextCovenantOutput ? broadcast.txid : '',
+      vout: nextCovenantOutput ? 1 : 0,
+      value: nextCovenantOutput?.value ?? 0n,
+      scriptHash: tracked?.scriptHash ?? '',
+      scriptPubKey: tracked?.scriptPubKey ?? '',
+    });
+    return { txid: broadcast.txid, builtTx };
+  }
+
+  async createRefundTx(campaignId: string, refundAddress: string, refundAmount: bigint): Promise<BuiltTx> {
+    const campaign = await this.deps.campaignService.getCampaign(campaignId) as SpendableCampaignRecord | null;
+    if (!campaign) {
+      throw new Error('campaign-not-found');
+    }
+
+    const escrowAddress = resolveCampaignEscrowAddress(campaign);
+    const spendableUtxos = filterSpendableUtxos(await this.deps.getUtxosForAddress(escrowAddress));
+    const covenantUtxo = selectCampaignCovenantUtxo({
+      campaignId,
+      utxos: spendableUtxos,
+      scriptPubKey: campaign.scriptPubKey,
+      tracked: covenantIndexInstance.getCovenantRef(campaignId),
     });
 
-    covenantIndexInstance.updateValue(campaignId, covenant.value - refundAmount);
-    return built;
+    if (!isV1Campaign(campaign)) {
+      return this.deps.buildRefundTx({
+        covenantUtxo,
+        refundAddress,
+        refundAmount,
+      });
+    }
+
+    const redeemScriptHex = requireV1RedeemScriptHex(campaign);
+    const expirationTime = requireV1ExpirationTime(campaign);
+    const refundOraclePubKey = requireV1RefundOraclePubKey(campaign);
+    const refundOraclePrivKey = await resolvePrivateKeyFromEnv({
+      privKeyEnvNames: ['TEYOLIA_REFUND_ORACLE_PRIVKEY', 'REFUND_ORACLE_PRIVKEY'],
+      seedEnvNames: ['TEYOLIA_REFUND_ORACLE_SEED', 'REFUND_ORACLE_SEED'],
+      publicKeyHex: refundOraclePubKey,
+      missingError: 'refund-oracle-signing-key-not-configured',
+      mismatchError: 'refund-oracle-signing-key-mismatch',
+    });
+
+    return this.deps.buildRefundTx({
+      covenantUtxo,
+      refundAddress,
+      refundAmount,
+      contractVersion: campaign.contractVersion ?? undefined,
+      redeemScriptHex,
+      refundOraclePrivKey,
+      expirationTime,
+      fixedFee: 500n,
+    });
   }
 }

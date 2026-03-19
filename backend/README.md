@@ -26,6 +26,16 @@ curl https://chronik.xolosarmy.xyz/chronik-info
 - `TEYOLIA_ACTIVATION_FEE_XEC` (default `800000`): activation fee required before campaign can become `active`.
 - `TEYOLIA_TREASURY_ADDRESS` (default `ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk`): treasury destination for activation fee and 1% funded payout cut.
 
+## Teyolia Covenant V1 signing env vars
+
+- `TEYOLIA_BENEFICIARY_PRIVKEY` or `BENEFICIARY_PRIVKEY`: hex private key used to sign V1 `finalize` covenant spends. Backend verifies it matches the persisted `beneficiaryPubKey`.
+- `TEYOLIA_BENEFICIARY_SEED` or `BENEFICIARY_SEED`: optional mnemonic seed alternative for the beneficiary signer when a raw private key is not supplied.
+- `TEYOLIA_REFUND_ORACLE_PRIVKEY` or `REFUND_ORACLE_PRIVKEY`: hex private key used to sign V1 `refund` spends. Backend verifies it matches the persisted `refundOraclePubKey`.
+- `TEYOLIA_REFUND_ORACLE_SEED` or `REFUND_ORACLE_SEED`: optional mnemonic seed alternative for the refund oracle signer.
+- `TEYOLIA_GAS_WALLET_PRIVKEY` or `GAS_WALLET_PRIVKEY`: optional hex private key for auxiliary P2PKH gas inputs used by V1 `finalize`.
+- `TEYOLIA_GAS_WALLET_SEED` or `GAS_WALLET_SEED`: optional mnemonic seed alternative for the gas wallet signer.
+- `TEYOLIA_GAS_WALLET_ADDRESS` or `GAS_WALLET_ADDRESS`: optional address from which auxiliary gas UTXOs are loaded for V1 `finalize`. If omitted, V1 finalize still builds without gas inputs and the covenant output covers the fee.
+
 ## WalletConnect Offer Flow
 
 - Build pledge offer: `POST /api/campaigns/:id/pledge/build` with `{ "contributorAddress": "ecash:...", "amount": 3000 }`.

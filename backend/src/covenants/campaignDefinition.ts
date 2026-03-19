@@ -1,7 +1,11 @@
 import cashaddr from 'ecashaddrjs';
 import { type CovenantRef } from '../blockchain/covenantIndex';
 import { validateAddress } from '../utils/validation';
-import { compileCampaignScript } from './scriptCompiler';
+import {
+  compileCampaignScript,
+  LEGACY_PLACEHOLDER_COVENANT,
+  TEYOLIA_COVENANT_V1,
+} from './scriptCompiler';
 
 export interface CampaignDefinition {
   id: string;
@@ -10,9 +14,12 @@ export interface CampaignDefinition {
   goal: bigint;
   expirationTime: bigint;
   beneficiaryPubKey: string;
+  refundOraclePubKey?: string;
   beneficiaryAddress?: string;
   campaignAddress?: string;
   covenantAddress?: string;
+  contractVersion?: typeof TEYOLIA_COVENANT_V1 | typeof LEGACY_PLACEHOLDER_COVENANT;
+  constructorArgs?: Record<string, string>;
   status?:
     | 'draft'
     | 'created'
@@ -30,6 +37,10 @@ export type CampaignCovenantRecord = {
   scriptPubKey: string;
   scriptHash: string;
   campaignAddress: string;
+  contractVersion?: typeof TEYOLIA_COVENANT_V1 | typeof LEGACY_PLACEHOLDER_COVENANT;
+  constructorArgs?: Record<string, string>;
+  redeemScriptHex?: string;
+  beneficiaryLockingBytecodeHex?: string;
   txid?: string;
   vout?: number;
   value?: string | number | bigint;
@@ -75,6 +86,10 @@ export function ensureCampaignCovenant(args: {
     scriptPubKey: script.scriptHex,
     scriptHash: script.scriptHash,
     campaignAddress,
+    contractVersion: script.contractVersion,
+    constructorArgs: script.constructorArgs,
+    redeemScriptHex: script.redeemScriptHex,
+    beneficiaryLockingBytecodeHex: script.beneficiaryLockingBytecodeHex,
     txid: typeof existing?.txid === 'string' ? existing.txid : undefined,
     vout: typeof existing?.vout === 'number' ? existing.vout : undefined,
     value: typeof existing?.value === 'bigint'
