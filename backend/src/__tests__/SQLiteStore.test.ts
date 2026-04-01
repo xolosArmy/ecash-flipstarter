@@ -192,4 +192,110 @@ describe('SQLiteStore', () => {
     expect(deleted).toBe(true);
     expect(await getCampaignById(SAMPLE_CAMPAIGN.id, db)).toBeNull();
   });
+
+  it('round-trips activationOfferOutputs with token.amount and protocol', async () => {
+    const db = await openDatabase(dbPath);
+    await initializeDatabase(db);
+
+    await upsertCampaign(
+      {
+        ...SAMPLE_CAMPAIGN,
+        activationOfferMode: 'intent',
+        activationOfferOutputs: [
+          {
+            address: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+            valueSats: 546,
+            token: {
+              protocol: 'ALP',
+              tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+              amount: '160000',
+            },
+          },
+        ],
+      },
+      db,
+    );
+
+    const stored = await getCampaignById(SAMPLE_CAMPAIGN.id, db);
+    expect(stored?.activationOfferOutputs).toEqual([
+      {
+        address: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+        valueSats: 546,
+        token: {
+          protocol: 'ALP',
+          tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+          amount: '160000',
+        },
+      },
+    ]);
+
+    const row = await db.get<{ activationOfferOutputs: string }>(
+      'SELECT activationOfferOutputs FROM campaigns WHERE id = ?',
+      [SAMPLE_CAMPAIGN.id],
+    );
+    expect(JSON.parse(row!.activationOfferOutputs)).toEqual([
+      {
+        address: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+        valueSats: 546,
+        token: {
+          protocol: 'ALP',
+          tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+          amount: '160000',
+        },
+      },
+    ]);
+  });
+
+  it('normalizes legacy activationOfferOutputs with tokenAmount and missing protocol on read', async () => {
+    const db = await openDatabase(dbPath);
+    await initializeDatabase(db);
+
+    await upsertCampaign(SAMPLE_CAMPAIGN, db);
+    await db.run(
+      'UPDATE campaigns SET activationOfferOutputs = ? WHERE id = ?',
+      [
+        JSON.stringify([
+          {
+            address: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+            valueSats: 546,
+            token: {
+              tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+              tokenAmount: '160000',
+            },
+          },
+        ]),
+        SAMPLE_CAMPAIGN.id,
+      ],
+    );
+
+    const stored = await getCampaignById(SAMPLE_CAMPAIGN.id, db);
+    expect(stored?.activationOfferOutputs).toEqual([
+      {
+        address: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+        valueSats: 546,
+        token: {
+          protocol: 'ALP',
+          tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+          amount: '160000',
+        },
+      },
+    ]);
+
+    await upsertCampaign({ ...(stored as StoredCampaign) }, db);
+    const row = await db.get<{ activationOfferOutputs: string }>(
+      'SELECT activationOfferOutputs FROM campaigns WHERE id = ?',
+      [SAMPLE_CAMPAIGN.id],
+    );
+    expect(JSON.parse(row!.activationOfferOutputs)).toEqual([
+      {
+        address: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+        valueSats: 546,
+        token: {
+          protocol: 'ALP',
+          tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+          amount: '160000',
+        },
+      },
+    ]);
+  });
 });

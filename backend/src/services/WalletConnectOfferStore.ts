@@ -1,19 +1,12 @@
 import { randomBytes, randomUUID } from 'crypto';
+import type { ActivationOfferOutput } from '../types/tokenOutput';
 
 export type WalletConnectOffer = {
   offerId: string;
   campaignId: string;
   unsignedTxHex?: string;
   mode?: 'tx' | 'intent';
-  outputs?: Array<{
-    address: string;
-    valueSats: number;
-    token?: {
-      protocol: 'ALP';
-      tokenId: string;
-      amount: string;
-    };
-  }>;
+  outputs?: ActivationOfferOutput[];
   userPrompt?: string;
   amount: string;
   contributorAddress: string;

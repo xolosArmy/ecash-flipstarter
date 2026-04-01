@@ -17,6 +17,7 @@ import { getCampaignById, listCampaigns as listCampaignsFromSqlite } from '../db
 import { getDb } from '../store/db';
 import { ACTIVATION_FEE_SATS, ACTIVATION_FEE_XEC } from '../config/constants';
 import { coerceAmountToSats } from '../utils/ecashUnits';
+import { normalizeActivationOfferOutputs, type ActivationOfferOutput } from '../types/tokenOutput';
 
 // In-memory cache used by CovenantIndex and pledge services.
 const campaigns = new Map<string, CampaignDefinition>();
@@ -29,15 +30,6 @@ type AuditLogRow = {
   timestamp: string;
 };
 
-type ActivationOfferOutput = {
-  address: string;
-  valueSats: number;
-  token?: {
-    protocol: 'ALP';
-    tokenId: string;
-    amount: string;
-  };
-};
 type ActivationVerificationState = 'none' | 'pending_verification' | 'verified' | 'invalid';
 
 function toBigIntGoal(value: unknown): bigint {
@@ -139,7 +131,7 @@ function normalizeSnapshot(snapshot: StoredCampaign): StoredCampaign {
     activationFeeVerificationStatus,
     activationFeeVerifiedAt,
     activationOfferMode: snapshot.activationOfferMode ?? null,
-    activationOfferOutputs: snapshot.activationOfferOutputs ?? null,
+    activationOfferOutputs: normalizeActivationOfferOutputs(snapshot.activationOfferOutputs, { fallbackProtocol: true }),
     activationTreasuryAddressUsed: snapshot.activationTreasuryAddressUsed ?? null,
     treasuryAddressUsed: snapshot.treasuryAddressUsed ?? null,
   };

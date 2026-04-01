@@ -3,6 +3,11 @@ import path from 'path';
 import sqlite3 from 'sqlite3';
 import { Database, open } from 'sqlite';
 import { ACTIVATION_FEE_XEC } from '../config/constants';
+import {
+  normalizeActivationOfferOutput,
+  normalizeActivationOfferOutputs,
+  type ActivationOfferOutput,
+} from '../types/tokenOutput';
 
 export type CampaignStatus =
   | 'draft'
@@ -54,15 +59,7 @@ export type StoredCampaign = {
   activationFeeVerificationStatus?: ActivationFeeVerificationStatus;
   activationFeeVerifiedAt?: string | null;
   activationOfferMode?: 'tx' | 'intent' | null;
-  activationOfferOutputs?: Array<{
-    address: string;
-    valueSats: number;
-    token?: {
-      protocol: 'ALP';
-      tokenId: string;
-      amount: string;
-    };
-  }> | null;
+  activationOfferOutputs?: ActivationOfferOutput[] | null;
   activationTreasuryAddressUsed?: string | null;
   payout?: {
     wcOfferId?: string | null;
@@ -502,48 +499,7 @@ function parseActivationOfferOutputs(raw: string | null): StoredCampaign['activa
   if (!raw || !raw.trim()) return null;
   try {
     const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return null;
-    const outputs = parsed
-      .map((entry) => {
-        if (!entry || typeof entry !== 'object') return null;
-        const address = (entry as { address?: unknown }).address;
-        const valueSats = (entry as { valueSats?: unknown }).valueSats;
-        const token = (entry as { token?: unknown }).token;
-        if (typeof address !== 'string') return null;
-        const valueNumber = Number(valueSats);
-        if (!Number.isFinite(valueNumber) || valueNumber <= 0) return null;
-        const parsedToken =
-          token && typeof token === 'object'
-            ? {
-                protocol: (token as { protocol?: unknown }).protocol === 'ALP' ? 'ALP' as const : null,
-                tokenId:
-                  typeof (token as { tokenId?: unknown }).tokenId === 'string'
-                    ? ((token as { tokenId?: string }).tokenId ?? '').toLowerCase()
-                    : null,
-                amount:
-                  typeof (token as { amount?: unknown }).amount === 'string'
-                    ? (token as { amount?: string }).amount
-                    : typeof (token as { tokenAmount?: unknown }).tokenAmount === 'string'
-                    ? (token as { tokenAmount?: string }).tokenAmount
-                    : null,
-              }
-            : null;
-        return {
-          address,
-          valueSats: Math.floor(valueNumber),
-          ...(parsedToken?.protocol && parsedToken.tokenId && parsedToken.amount
-            ? {
-                token: {
-                  protocol: parsedToken.protocol,
-                  tokenId: parsedToken.tokenId,
-                  amount: parsedToken.amount,
-                },
-              }
-            : {}),
-        };
-      })
-      .filter((entry): entry is NonNullable<StoredCampaign['activationOfferOutputs']>[number] => entry !== null);
-    return outputs.length > 0 ? outputs : null;
+    return normalizeActivationOfferOutputs(parsed, { fallbackProtocol: true });
   } catch {
     return null;
   }
@@ -553,7 +509,10 @@ function serializeActivationOfferOutputs(
   outputs: StoredCampaign['activationOfferOutputs'],
 ): string | null {
   if (!Array.isArray(outputs) || outputs.length === 0) return null;
-  return JSON.stringify(outputs);
+  const normalized = outputs
+    .map((entry) => normalizeActivationOfferOutput(entry, { fallbackProtocol: true }))
+    .filter((entry): entry is ActivationOfferOutput => entry !== null);
+  return normalized.length > 0 ? JSON.stringify(normalized) : null;
 }
 
 export async function getCampaignById(id: string, database?: Database): Promise<StoredCampaign | null> {

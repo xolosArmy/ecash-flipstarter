@@ -1,3 +1,5 @@
+import type { TokenOutput } from '../types/tokenOutput';
+
 export interface CovenantRef {
   txid: string;
   vout: number;
@@ -44,15 +46,7 @@ export interface CampaignSummary {
   activationFeeVerificationStatus?: 'none' | 'pending_verification' | 'verified' | 'invalid';
   activationFeeVerifiedAt?: string | null;
   activationOfferMode?: 'tx' | 'intent' | null;
-  activationOfferOutputs?: Array<{
-    address: string;
-    valueSats: number;
-    token?: {
-      protocol: 'ALP';
-      tokenId: string;
-      amount: string;
-    };
-  }> | null;
+  activationOfferOutputs?: TokenOutput[] | null;
   activationTreasuryAddressUsed?: string | null;
   payout?: {
     wcOfferId?: string | null;
@@ -88,15 +82,7 @@ export interface BuiltTxResponse {
   nextCovenantValue?: string;
   fee?: string;
   mode?: 'tx' | 'intent';
-  outputs?: Array<{
-    address: string;
-    valueSats: number;
-    token?: {
-      protocol: 'ALP';
-      tokenId: string;
-      amount: string;
-    };
-  }>;
+  outputs?: TokenOutput[];
   userPrompt?: string;
   wcOfferId?: string;
   offerId?: string;

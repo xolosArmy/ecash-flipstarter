@@ -15,6 +15,7 @@ import {
 } from '../config/constants';
 import { coerceAmountToSats } from '../utils/ecashUnits';
 import { FinalizeService } from '../services/FinalizeService';
+import { normalizeActivationOfferOutputs, type ActivationOfferOutput } from '../types/tokenOutput';
 
 type CampaignStatus =
   | 'draft'
@@ -56,15 +57,7 @@ type CampaignApiRecord = {
   activationFeeVerificationStatus?: 'none' | 'pending_verification' | 'verified' | 'invalid';
   activationFeeVerifiedAt?: string | null;
   activationOfferMode?: 'tx' | 'intent' | null;
-  activationOfferOutputs?: Array<{
-    address: string;
-    valueSats: number;
-    token?: {
-      protocol: 'ALP';
-      tokenId: string;
-      amount: string;
-    };
-  }> | null;
+  activationOfferOutputs?: ActivationOfferOutput[] | null;
   activationTreasuryAddressUsed?: string | null;
   payout?: {
     wcOfferId?: string | null;
@@ -524,20 +517,19 @@ export const buildActivationHandler: Parameters<typeof router.post>[1] = async (
     const activationFeeRequired = toCampaignActivationFeeRequired(campaign);
     const amount = BigInt(ACTIVATION_FEE_TOKEN_AMOUNT_RAW);
     const activationFeeTxid = getActivationFeeTxid(campaign);
-    const persistedOutputs =
-      Array.isArray(campaign.activationOfferOutputs) && campaign.activationOfferOutputs.length > 0
-        ? campaign.activationOfferOutputs
-        : null;
+    const persistedOutputs = normalizeActivationOfferOutputs(campaign.activationOfferOutputs, { fallbackProtocol: true });
     const treasuryAddress = campaign.activationTreasuryAddressUsed || TREASURY_ADDRESS;
-    const outputs = persistedOutputs ?? [{
-      address: treasuryAddress,
-      valueSats: Number(ACTIVATION_FEE_TOKEN_DUST_SATS),
-      token: {
-        protocol: ACTIVATION_FEE_TOKEN_PROTOCOL,
-        tokenId: ACTIVATION_FEE_TOKEN_ID,
-        amount: ACTIVATION_FEE_TOKEN_AMOUNT_RAW,
+    const outputs = persistedOutputs ?? [
+      {
+        address: treasuryAddress,
+        valueSats: Number(ACTIVATION_FEE_TOKEN_DUST_SATS),
+        token: {
+          protocol: ACTIVATION_FEE_TOKEN_PROTOCOL,
+          tokenId: ACTIVATION_FEE_TOKEN_ID,
+          amount: ACTIVATION_FEE_TOKEN_AMOUNT_RAW,
+        },
       },
-    }];
+    ];
     const userPrompt = 'Pagar fee de activación';
     const shouldLogOfferCreated =
       campaign.status === 'pending_fee'

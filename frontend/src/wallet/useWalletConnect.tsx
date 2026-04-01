@@ -20,6 +20,12 @@ import {
   WC_METHOD,
   requestSignAndBroadcastTransaction,
 } from '../walletconnect/client';
+import {
+  normalizeAlpTokenPayload,
+  normalizeTokenOutputs,
+  type TokenOutputLike,
+  type WalletConnectTokenOutput,
+} from '../types/tokenOutput';
 
 type WalletConnectState = {
   signClient: SignClient | null;
@@ -39,29 +45,13 @@ type WalletConnectState = {
     offerId: string,
     chainId: string,
     options?: {
-      outputs?: Array<{
-        address: string;
-        valueSats: number;
-        token?: {
-          protocol: 'ALP';
-          tokenId: string;
-          amount: string;
-        };
-      }>;
+      outputs?: TokenOutputLike[];
       userPrompt?: string;
     }
   ) => Promise<unknown>;
   requestSignAndBroadcastIntent: (args: {
     offerId: string;
-    outputs: Array<{
-      address: string;
-      valueSats: string | number | bigint;
-      token?: {
-        protocol: 'ALP';
-        tokenId: string;
-        amount: string;
-      };
-    }>;
+    outputs: TokenOutputLike[];
     message?: string;
     userPrompt?: string;
   }) => Promise<{ txid: string }>;
@@ -123,6 +113,24 @@ function formatInvalidEcashSessionMessage(session: SessionTypes.Struct): string 
   const chains = diagnostics.detectedChains.join(', ') || '(ninguna)';
   const methods = diagnostics.detectedMethods.join(', ') || '(ninguno)';
   return `${INVALID_SESSION_RECONNECT_MESSAGE} Chains detectadas: ${chains}. Methods detectados: ${methods}.`;
+}
+
+export function normalizeWalletConnectOutputs(outputs: TokenOutputLike[]): WalletConnectTokenOutput[] {
+  return normalizeTokenOutputs(outputs, {
+    fallbackProtocol: true,
+    stringifyValueSats: true,
+  }).map((output) => ({
+    address: output.address,
+    valueSats: String(output.valueSats),
+    ...(output.token
+      ? {
+          token: normalizeAlpTokenPayload(output.token, { fallbackProtocol: true }),
+        }
+      : {}),
+  })).filter((output): output is WalletConnectTokenOutput => {
+    if (!output.token) return true;
+    return output.token.protocol === 'ALP' && Boolean(output.token.tokenId) && Boolean(output.token.amount);
+  });
 }
 
 export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -313,15 +321,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
     offerId: string,
     chainId: string,
     options?: {
-      outputs?: Array<{
-        address: string;
-        valueSats: number;
-        token?: {
-          protocol: 'ALP';
-          tokenId: string;
-          amount: string;
-        };
-      }>;
+      outputs?: TokenOutputLike[];
       userPrompt?: string;
     }
   ) => {
@@ -337,7 +337,11 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
 
     setStatus('signing');
     try {
-      const result = await requestSignAndBroadcastTransaction(topic, offerId, chainId || CHAIN_ID, options);
+      const normalizedOutputs = options?.outputs ? normalizeWalletConnectOutputs(options.outputs) : undefined;
+      const result = await requestSignAndBroadcastTransaction(topic, offerId, chainId || CHAIN_ID, {
+        ...options,
+        ...(normalizedOutputs ? { outputs: normalizedOutputs } : {}),
+      });
       setStatus('connected');
       return result;
     } catch (err) {
@@ -354,15 +358,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const requestSignAndBroadcastIntent = async (args: {
     offerId: string;
-    outputs: Array<{
-      address: string;
-      valueSats: string | number | bigint;
-      token?: {
-        protocol: 'ALP';
-        tokenId: string;
-        amount: string;
-      };
-    }>;
+    outputs: TokenOutputLike[];
     message?: string;
     userPrompt?: string;
   }): Promise<{ txid: string }> => {
@@ -380,19 +376,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
 
     setStatus('signing');
     try {
-      const normalizedOutputs = args.outputs.map((output) => ({
-        address: output.address,
-        valueSats:
-          typeof output.valueSats === 'bigint' ? output.valueSats.toString() : String(output.valueSats),
-        ...(output.token
-          ? {
-              token: {
-                tokenId: output.token.tokenId,
-                amount: output.token.amount,
-              },
-            }
-          : {}),
-      }));
+      const normalizedOutputs = normalizeWalletConnectOutputs(args.outputs);
       const result = await client.request({
         topic: activeTopic,
         chainId: CHAIN_ID,

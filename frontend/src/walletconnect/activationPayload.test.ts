@@ -61,6 +61,29 @@ describe('activationPayload helpers', () => {
     expect(parsed.totalSats).toBe(777);
   });
 
+  it('normalizes legacy tokenAmount payloads without protocol to ALP outputs', () => {
+    const parsed = parseEcashSignAndBroadcastRequest({
+      outputs: [{
+        address: 'ecash:qz0example',
+        valueSats: 546,
+        token: {
+          tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+          tokenAmount: '160000',
+        },
+      }],
+    });
+
+    expect(parsed.outputs).toEqual([{
+      address: 'ecash:qz0example',
+      valueSats: 546,
+      token: {
+        protocol: 'ALP',
+        tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+        amount: '160000',
+      },
+    }]);
+  });
+
   it('throws clear error for malformed legacy inputsUsed outpoint', () => {
     expect(() =>
       parseEcashSignAndBroadcastRequest({

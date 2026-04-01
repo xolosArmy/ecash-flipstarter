@@ -6,6 +6,7 @@ import type {
   GlobalStats,
 } from './types';
 import type { CampaignSummary as CampaignSummaryResponse } from '../types/campaign';
+import { normalizeTokenOutputs, type TokenOutputLike } from '../types/tokenOutput';
 
 const BASE_URL = (
   import.meta.env.VITE_API_BASE_URL ??
@@ -45,18 +46,32 @@ function requireCampaignIdentifier(value: string | null | undefined, fnName: str
   return campaignId;
 }
 
+function normalizeActivationOutputs(outputs: TokenOutputLike[] | null | undefined) {
+  return normalizeTokenOutputs(outputs, { fallbackProtocol: true });
+}
+
+function normalizeCampaignRecord<T extends { activationOfferOutputs?: TokenOutputLike[] | null }>(campaign: T): T {
+  return {
+    ...campaign,
+    activationOfferOutputs: normalizeActivationOutputs(campaign.activationOfferOutputs),
+  };
+}
+
 export async function fetchCampaigns(): Promise<ApiCampaignSummary[]> {
-  return jsonFetch<ApiCampaignSummary[]>(`/campaigns`);
+  const campaigns = await jsonFetch<ApiCampaignSummary[]>(`/campaigns`);
+  return campaigns.map((campaign) => normalizeCampaignRecord(campaign));
 }
 
 export async function fetchCampaign(id: string): Promise<CampaignDetail> {
   const campaignId = requireCampaignIdentifier(id, 'fetchCampaign');
-  return jsonFetch<CampaignDetail>(`/campaigns/${campaignId}`);
+  const campaign = await jsonFetch<CampaignDetail>(`/campaigns/${campaignId}`);
+  return normalizeCampaignRecord(campaign);
 }
 
 export async function fetchCampaignSummary(id: string): Promise<CampaignSummaryResponse> {
   const campaignId = requireCampaignIdentifier(id, 'fetchCampaignSummary');
-  return jsonFetch<CampaignSummaryResponse>(`/campaigns/${campaignId}/summary`);
+  const campaign = await jsonFetch<CampaignSummaryResponse>(`/campaigns/${campaignId}/summary`);
+  return normalizeCampaignRecord(campaign);
 }
 
 export interface CreateCampaignPayload {
@@ -115,15 +130,7 @@ export interface CampaignActivationBuildResponse {
   mode: 'intent' | 'tx';
   activationFeeRequired: number;
   treasuryAddress: string;
-  outputs: Array<{
-    address: string;
-    valueSats: number;
-    token?: {
-      protocol: 'ALP';
-      tokenId: string;
-      amount: string;
-    };
-  }>;
+  outputs: TokenOutputLike[];
   userPrompt: string;
   feeSats: string;
   payerAddress: string;
@@ -144,10 +151,14 @@ export async function buildActivationTx(
   campaignId: string,
   payerAddress: string,
 ): Promise<CampaignActivationBuildResponse> {
-  return jsonFetch<CampaignActivationBuildResponse>(`/campaigns/${campaignId}/activation/build`, {
+  const response = await jsonFetch<CampaignActivationBuildResponse>(`/campaigns/${campaignId}/activation/build`, {
     method: 'POST',
     body: JSON.stringify({ payerAddress }),
   });
+  return {
+    ...response,
+    outputs: normalizeActivationOutputs(response.outputs),
+  };
 }
 
 export async function buildCampaignActivationTx(

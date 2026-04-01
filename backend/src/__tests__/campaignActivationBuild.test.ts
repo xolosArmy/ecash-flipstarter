@@ -149,6 +149,52 @@ describe('buildActivationHandler', () => {
     expect(createOfferMock).not.toHaveBeenCalled();
     expect(setActivationOfferMock).not.toHaveBeenCalled();
   });
+
+  it('normalizes legacy persisted activation outputs without protocol before returning them', async () => {
+    const { buildActivationHandler } = (await import('../routes/campaigns.routes')) as {
+      buildActivationHandler: (req: any, res: any) => Promise<void>;
+    };
+    getCampaignMock.mockResolvedValue({
+      ...BASE_CAMPAIGN,
+      activationOfferMode: 'intent',
+      activationOfferOutputs: [
+        {
+          address: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+          valueSats: 546,
+          token: {
+            tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+            tokenAmount: '160000',
+          },
+        },
+      ],
+      activation: {
+        feeSats: '160000',
+        wcOfferId: 'persisted-offer',
+      },
+    });
+
+    const req = {
+      params: { id: 'camp-1' },
+      body: { payerAddress: 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk' },
+    };
+    const res = createMockRes();
+
+    await buildActivationHandler(req as any, res as any);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.outputs).toEqual([
+      {
+        address: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+        valueSats: 546,
+        token: {
+          protocol: 'ALP',
+          tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+          amount: '160000',
+        },
+      },
+    ]);
+    expect(createOfferMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('confirmActivationHandler', () => {

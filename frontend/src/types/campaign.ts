@@ -1,3 +1,5 @@
+import type { TokenOutput } from './tokenOutput';
+
 export interface Pledge {
   txid: string | null;
   contributorAddress: string;
@@ -35,15 +37,7 @@ export interface CampaignSummary {
   activationFeeVerificationStatus?: 'none' | 'pending_verification' | 'verified' | 'invalid';
   activationFeeVerifiedAt?: string | null;
   activationOfferMode?: 'tx' | 'intent' | null;
-  activationOfferOutputs?: Array<{
-    address: string;
-    valueSats: number;
-    token?: {
-      protocol: 'ALP';
-      tokenId: string;
-      amount: string;
-    };
-  }> | null;
+  activationOfferOutputs?: TokenOutput[] | null;
   activationTreasuryAddressUsed?: string | null;
   payout?: CampaignPayout;
   treasuryAddressUsed?: string | null;

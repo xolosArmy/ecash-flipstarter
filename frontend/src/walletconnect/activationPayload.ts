@@ -1,4 +1,5 @@
 import { normalizeOutpoints } from './outpoints';
+import { normalizeTokenOutput } from '../types/tokenOutput';
 
 type ActivationBuildLike = {
   rawHex?: string;
@@ -77,39 +78,24 @@ function parseOutputs(outputs: unknown): ParsedEcashOutput[] {
       value?: unknown;
       token?: { protocol?: unknown; tokenId?: unknown; amount?: unknown; tokenAmount?: unknown };
     };
-    const address = typeof record.address === 'string' ? record.address.trim() : '';
-    const valueSource = record.valueSats ?? record.value;
-    const valueSats = typeof valueSource === 'string' ? Number(valueSource) : valueSource;
-    if (!address) {
-      throw new Error(`outputs[${index}].address es inválido.`);
-    }
-    if (!Number.isInteger(valueSats) || Number(valueSats) <= 0) {
+    const normalized = normalizeTokenOutput(
+      {
+        address: typeof record.address === 'string' ? record.address : '',
+        valueSats: (record.valueSats ?? record.value) as number | string | bigint,
+        token: record.token,
+      },
+      { fallbackProtocol: true },
+    );
+    if (!normalized || typeof normalized.valueSats !== 'number') {
+      if (typeof record.address !== 'string' || !record.address.trim()) {
+        throw new Error(`outputs[${index}].address es inválido.`);
+      }
       throw new Error(`outputs[${index}].valueSats/value es inválido.`);
     }
-    const hasToken = Boolean(record.token);
-    if (hasToken) {
-      const protocol = record.token?.protocol;
-      const tokenId = typeof record.token?.tokenId === 'string' ? record.token.tokenId.trim().toLowerCase() : '';
-      const amount =
-        typeof record.token?.amount === 'string'
-          ? record.token.amount.trim()
-          : typeof record.token?.tokenAmount === 'string'
-          ? record.token.tokenAmount.trim()
-          : '';
-      if (protocol !== 'ALP' || !tokenId || !/^\d+$/.test(amount)) {
-        throw new Error(`outputs[${index}].token es inválido.`);
-      }
-      return {
-        address,
-        valueSats: Number(valueSats),
-        token: {
-          protocol: 'ALP' as const,
-          tokenId,
-          amount,
-        },
-      };
+    if (record.token && !normalized.token) {
+      throw new Error(`outputs[${index}].token es inválido.`);
     }
-    return { address, valueSats: Number(valueSats) };
+    return normalized;
   });
 }
 
