@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { TEYOLIA_COVENANT_V1 } from '../covenants/scriptCompiler';
 import { AutoPayoutService } from '../services/AutoPayoutService';
 
 const campaign = {
@@ -180,5 +181,29 @@ describe('AutoPayoutService', () => {
       status: 'already_paid_out',
       txid: 'bb'.repeat(32),
     });
+  });
+
+  it('blocks rescue mode for signed V1 campaigns', async () => {
+    process.env.GAS_WALLET_SEED = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+    process.env.GAS_WALLET_ADDRESS = 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk';
+
+    const buildPayoutTx = vi.fn();
+    const service = new AutoPayoutService({
+      campaignService: {
+        getCampaign: vi.fn().mockResolvedValue({
+          ...campaign,
+          contractVersion: TEYOLIA_COVENANT_V1,
+        }),
+        markPayoutComplete: vi.fn(),
+      },
+      getUtxosForAddress: vi.fn(),
+      buildPayoutTx,
+      broadcastRawTx: vi.fn(),
+      derivePrivKeyFromSeed: vi.fn(),
+      signHybridPayoutTx: vi.fn(),
+    });
+
+    await expect(service.finalizeCampaign(campaign.id)).rejects.toThrow('auto-payout-unsupported-for-v1');
+    expect(buildPayoutTx).not.toHaveBeenCalled();
   });
 });

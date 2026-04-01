@@ -160,6 +160,11 @@ if ((campaign.status === 'paid_out' || payoutTxid) && forceRescueId === campaign
         ? campaign.contractVersion
         : undefined;
 
+    if (contractVersion === TEYOLIA_COVENANT_V1) {
+      console.warn(`[AutoPayoutService] Rescue Mode blocked for signed V1 covenant: ${campaignId}`);
+      throw new Error('auto-payout-unsupported-for-v1');
+    }
+
 if (!redeemScriptHex) {
   const compiled = compileCampaignScript({
     id: campaign.id,

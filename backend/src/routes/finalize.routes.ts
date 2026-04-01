@@ -16,7 +16,10 @@ router.post('/campaign/:id/finalize', async (req, res) => {
     });
   } catch (err) {
     const message = (err as Error).message;
-    const status = message === 'auto-payout-spend-path-missing' ? 409 : 400;
+    const status = (
+      message === 'auto-payout-spend-path-missing'
+      || message === 'auto-payout-unsupported-for-v1'
+    ) ? 409 : 400;
     res.status(status).json({ error: message });
   }
 });
