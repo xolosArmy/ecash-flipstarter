@@ -111,6 +111,7 @@ export const Home: React.FC = () => {
         name: trimmedName,
         description: trimmedDescription,
         beneficiaryAddress: trimmedBeneficiaryAddress,
+        contractVersion: 'teyolia-covenant-v1',
         goal: parsedGoal.sats,
         expiresAt: expiresAtIso,
       });

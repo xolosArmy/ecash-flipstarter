@@ -7,6 +7,7 @@ import {
   LEGACY_PLACEHOLDER_COVENANT,
   TEYOLIA_COVENANT_V1,
 } from '../covenants/scriptCompiler';
+import { derivePrivKeyFromSeed } from '../blockchain/txBuilder';
 import { CovenantIndex, type CovenantRef } from '../blockchain/covenantIndex';
 import {
   loadCampaignsFromDisk,
@@ -18,6 +19,7 @@ import { getDb } from '../store/db';
 import { ACTIVATION_FEE_SATS, ACTIVATION_FEE_XEC } from '../config/constants';
 import { coerceAmountToSats } from '../utils/ecashUnits';
 import { normalizeActivationOfferOutputs, type ActivationOfferOutput } from '../types/tokenOutput';
+import { secp256k1 } from '@noble/curves/secp256k1';
 
 // In-memory cache used by CovenantIndex and pledge services.
 const campaigns = new Map<string, CampaignDefinition>();
@@ -31,6 +33,81 @@ type AuditLogRow = {
 };
 
 type ActivationVerificationState = 'none' | 'pending_verification' | 'verified' | 'invalid';
+
+function trimString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizePublicKeyHex(value: unknown): string {
+  const candidate = trimString(value).toLowerCase();
+  if (!candidate) {
+    return '';
+  }
+  try {
+    secp256k1.ProjectivePoint.fromHex(candidate);
+    return candidate;
+  } catch {
+    return '';
+  }
+}
+
+async function resolveBeneficiaryPubKey(
+  payload: Partial<CampaignDefinition> & Record<string, unknown>,
+): Promise<string> {
+  const payloadPubKey = normalizePublicKeyHex(payload.beneficiaryPubKey);
+  if (payloadPubKey) {
+    return payloadPubKey;
+  }
+
+  const envPubKey = normalizePublicKeyHex(
+    process.env.TEYOLIA_BENEFICIARY_PUBKEY ?? process.env.BENEFICIARY_PUBKEY,
+  );
+  if (envPubKey) {
+    return envPubKey;
+  }
+
+  const beneficiarySeed = trimString(
+    process.env.TEYOLIA_BENEFICIARY_SEED ?? process.env.BENEFICIARY_SEED,
+  );
+  if (beneficiarySeed) {
+    const privateKey = await derivePrivKeyFromSeed(beneficiarySeed);
+    return Buffer.from(secp256k1.getPublicKey(privateKey, true)).toString('hex');
+  }
+
+  const beneficiaryPrivKey = trimString(
+    process.env.TEYOLIA_BENEFICIARY_PRIVKEY ?? process.env.BENEFICIARY_PRIVKEY,
+  );
+  if (beneficiaryPrivKey) {
+    try {
+      return Buffer.from(secp256k1.getPublicKey(Buffer.from(beneficiaryPrivKey, 'hex'), true)).toString('hex');
+    } catch {
+      return '';
+    }
+  }
+
+  return '';
+}
+
+function assertV1CampaignCovenant(args: {
+  requestedV1: boolean;
+  contractVersion?: string;
+  beneficiaryPubKey?: string;
+  redeemScriptHex?: string;
+  scriptHash?: string;
+}): void {
+  if (!args.requestedV1) {
+    return;
+  }
+  if (!trimString(args.beneficiaryPubKey)) {
+    throw new Error('missing-beneficiary-pubkey-for-v1');
+  }
+  if (args.contractVersion !== TEYOLIA_COVENANT_V1) {
+    throw new Error('invalid-v1-campaign-covenant');
+  }
+  if (!trimString(args.redeemScriptHex) || !trimString(args.scriptHash)) {
+    throw new Error('invalid-v1-campaign-covenant');
+  }
+}
 
 function toBigIntGoal(value: unknown): bigint {
   return coerceAmountToSats(value);
@@ -419,6 +496,7 @@ export class CampaignService {
     const requestedContractVersion = typeof payload.contractVersion === 'string'
       ? payload.contractVersion.trim()
       : '';
+    const requestedV1 = requestedContractVersion !== LEGACY_PLACEHOLDER_COVENANT;
     const payloadConstructorArgs =
       typeof payload.constructorArgs === 'object' && payload.constructorArgs !== null
         ? Object.fromEntries(
@@ -429,9 +507,19 @@ export class CampaignService {
     const refundOraclePubKeyCandidate =
       typeof payload.refundOraclePubKey === 'string' && payload.refundOraclePubKey.trim()
         ? payload.refundOraclePubKey.trim()
-        : typeof payloadConstructorArgs?.refundOraclePubKey === 'string'
+          : typeof payloadConstructorArgs?.refundOraclePubKey === 'string'
           ? payloadConstructorArgs.refundOraclePubKey
           : process.env.TEYOLIA_REFUND_ORACLE_PUBKEY?.trim() || process.env.REFUND_ORACLE_PUBKEY?.trim() || undefined;
+    const resolvedBeneficiaryPubKey = requestedV1 ? await resolveBeneficiaryPubKey(payload) : '';
+
+    if (requestedV1 && !resolvedBeneficiaryPubKey) {
+      throw new Error('missing-beneficiary-pubkey-for-v1');
+    }
+
+    const constructorArgs = {
+      ...(payloadConstructorArgs ?? {}),
+      ...(requestedV1 ? { beneficiaryPubKey: resolvedBeneficiaryPubKey } : {}),
+    };
 
     const requestedStatus = typeof payload.status === 'string' ? payload.status : undefined;
     const initialStatus = activationFeePaid
@@ -444,7 +532,7 @@ export class CampaignService {
       description: payload.description || '',
       goal: payload.goal !== undefined ? BigInt(payload.goal) : 0n,
       expirationTime: toExpirationTime(payload.expirationTime ?? expiresAtCandidate),
-      beneficiaryPubKey: payload.beneficiaryPubKey || '',
+      beneficiaryPubKey: resolvedBeneficiaryPubKey,
       beneficiaryAddress: payload.beneficiaryAddress,
       campaignAddress:
         typeof payload.campaignAddress === 'string'
@@ -457,7 +545,7 @@ export class CampaignService {
       contractVersion: requestedContractVersion === LEGACY_PLACEHOLDER_COVENANT
         ? LEGACY_PLACEHOLDER_COVENANT
         : TEYOLIA_COVENANT_V1,
-      constructorArgs: payloadConstructorArgs,
+      constructorArgs,
       status: initialStatus,
     };
     const ensuredInitialCovenant = ensureCampaignCovenant({
@@ -468,6 +556,13 @@ export class CampaignService {
         vout: 0,
         value: 0n,
       },
+    });
+    assertV1CampaignCovenant({
+      requestedV1,
+      contractVersion: ensuredInitialCovenant.contractVersion,
+      beneficiaryPubKey: campaign.beneficiaryPubKey,
+      redeemScriptHex: ensuredInitialCovenant.redeemScriptHex,
+      scriptHash: ensuredInitialCovenant.scriptHash,
     });
     campaign.contractVersion = ensuredInitialCovenant.contractVersion ?? campaign.contractVersion;
     campaign.constructorArgs = ensuredInitialCovenant.constructorArgs ?? campaign.constructorArgs;

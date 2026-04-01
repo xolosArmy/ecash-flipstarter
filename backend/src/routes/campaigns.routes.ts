@@ -446,6 +446,12 @@ router.post('/campaign', async (req, res) => {
     if (typeof req.body?.beneficiaryAddress === 'string' && req.body.beneficiaryAddress.trim()) {
       req.body.beneficiaryAddress = validateAddress(req.body.beneficiaryAddress, 'beneficiaryAddress');
     }
+    if (typeof req.body?.beneficiaryPubKey === 'string') {
+      req.body.beneficiaryPubKey = req.body.beneficiaryPubKey.trim().toLowerCase();
+    }
+    if (typeof req.body?.contractVersion === 'string') {
+      req.body.contractVersion = req.body.contractVersion.trim();
+    }
     const campaign = await service.createCampaign(req.body ?? {});
     res.status(201).json(campaign);
   } catch (err) {
@@ -457,6 +463,12 @@ router.post('/campaigns', async (req, res) => {
   try {
     if (typeof req.body?.beneficiaryAddress === 'string' && req.body.beneficiaryAddress.trim()) {
       req.body.beneficiaryAddress = validateAddress(req.body.beneficiaryAddress, 'beneficiaryAddress');
+    }
+    if (typeof req.body?.beneficiaryPubKey === 'string') {
+      req.body.beneficiaryPubKey = req.body.beneficiaryPubKey.trim().toLowerCase();
+    }
+    if (typeof req.body?.contractVersion === 'string') {
+      req.body.contractVersion = req.body.contractVersion.trim();
     }
     const campaign = await service.createCampaign(req.body ?? {});
     res.status(201).json(campaign);

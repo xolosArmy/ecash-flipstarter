@@ -57,6 +57,7 @@ export const CreateCampaign: React.FC = () => {
         goal: parsedGoal.sats,
         expiresAt: new Date(expiresAtValue).toISOString(),
         beneficiaryAddress: beneficiaryAddressValue,
+        contractVersion: 'teyolia-covenant-v1',
         description: descriptionValue || undefined,
         location: locationValue || undefined,
       });

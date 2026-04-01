@@ -79,6 +79,8 @@ export interface CreateCampaignPayload {
   goal: number;
   expiresAt: string;
   beneficiaryAddress: string;
+  beneficiaryPubKey?: string;
+  contractVersion?: 'teyolia-covenant-v1' | 'legacy-placeholder';
   description?: string;
   location?: string;
 }

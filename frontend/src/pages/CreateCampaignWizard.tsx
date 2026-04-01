@@ -223,6 +223,7 @@ export const CreateCampaignWizard: React.FC = () => {
         goal: parsedGoal.sats,
         expiresAt: new Date(trimmedExpiresAt).toISOString(),
         beneficiaryAddress: trimmedBeneficiary,
+        contractVersion: 'teyolia-covenant-v1',
         description: description.trim() || undefined,
         location: location.trim() || undefined,
       });

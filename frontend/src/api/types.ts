@@ -59,6 +59,10 @@ export interface CampaignSummary {
 export interface CampaignDetail extends CampaignSummary {
   description: string;
   beneficiaryPubKey?: string;
+  contractVersion?: 'teyolia-covenant-v1' | 'legacy-placeholder';
+  redeemScriptHex?: string | null;
+  scriptHash?: string | null;
+  constructorArgs?: Record<string, string> | null;
   covenant?: CovenantRef;
 }
 
