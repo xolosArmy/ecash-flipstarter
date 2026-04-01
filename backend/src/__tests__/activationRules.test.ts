@@ -144,12 +144,28 @@ describe('activation fee rules', () => {
 
     await service.setActivationOffer(campaignId, 'offer-1', 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk', {
       mode: 'intent',
-      outputs: [{ address: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk', valueSats: 80000000 }],
+      outputs: [{
+        address: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+        valueSats: 546,
+        token: {
+          protocol: 'ALP',
+          tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+          tokenAmount: '160000',
+        },
+      }],
       treasuryAddressUsed: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
     });
     await service.setActivationOffer(campaignId, 'offer-1', 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk', {
       mode: 'intent',
-      outputs: [{ address: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk', valueSats: 80000000 }],
+      outputs: [{
+        address: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
+        valueSats: 546,
+        token: {
+          protocol: 'ALP',
+          tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+          tokenAmount: '160000',
+        },
+      }],
       treasuryAddressUsed: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
       logAuditEvent: false,
     });
@@ -165,7 +181,15 @@ describe('ecashClient chronik protobuf wrapper', () => {
     process.env.E_CASH_BACKEND = 'chronik';
     process.env.CHRONIK_URL = 'https://chronik.xolosarmy.xyz';
     const txMock = vi.fn().mockResolvedValue({
-      outputs: [{ sats: 80000000n, outputScript: '76a914abcd88ac' }],
+      outputs: [{
+        sats: 546n,
+        outputScript: '76a914abcd88ac',
+        token: {
+          tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+          tokenType: { protocol: 'ALP' },
+          atoms: 160000n,
+        },
+      }],
       block: { height: 900000 },
     });
     const blockchainInfoMock = vi.fn().mockResolvedValue({ tipHeight: 900100 });
@@ -183,7 +207,15 @@ describe('ecashClient chronik protobuf wrapper', () => {
     expect(info.txid).toBe('a'.repeat(64));
     expect(info.confirmations).toBe(1);
     expect(info.height).toBe(900000);
-    expect(info.outputs).toEqual([{ scriptPubKey: '76a914abcd88ac', valueSats: 80000000n }]);
+    expect(info.outputs).toEqual([{
+      scriptPubKey: '76a914abcd88ac',
+      valueSats: 546n,
+      token: {
+        tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+        amount: 160000n,
+        protocol: 'ALP',
+      },
+    }]);
     expect(blockchainInfo).toEqual({ tipHeight: 900100 });
   });
 
@@ -191,7 +223,15 @@ describe('ecashClient chronik protobuf wrapper', () => {
     process.env.E_CASH_BACKEND = 'chronik';
     process.env.CHRONIK_URL = 'https://chronik.xolosarmy.xyz';
     const txMock = vi.fn().mockResolvedValue({
-      outputs: [{ sats: 2000n, outputScript: '76a914ffff88ac' }],
+      outputs: [{
+        sats: 2000n,
+        outputScript: '76a914ffff88ac',
+        token: {
+          tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+          tokenType: { protocol: 'ALP' },
+          atoms: 100n,
+        },
+      }],
     });
     vi.doMock('chronik-client', () => ({
       ChronikClient: vi.fn().mockImplementation(() => ({
@@ -205,7 +245,15 @@ describe('ecashClient chronik protobuf wrapper', () => {
     expect(info.txid).toBe('b'.repeat(64));
     expect(info.confirmations).toBe(0);
     expect(info.height).toBe(-1);
-    expect(info.outputs).toEqual([{ scriptPubKey: '76a914ffff88ac', valueSats: 2000n }]);
+    expect(info.outputs).toEqual([{
+      scriptPubKey: '76a914ffff88ac',
+      valueSats: 2000n,
+      token: {
+        tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+        amount: 100n,
+        protocol: 'ALP',
+      },
+    }]);
   });
 
   it('preserves outputs needed to detect invalid treasury output/monto insuficiente', async () => {

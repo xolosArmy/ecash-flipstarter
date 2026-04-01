@@ -352,19 +352,9 @@ export const CampaignDetail: React.FC = () => {
     campaign.goal > 0
       ? Math.min(100, Math.round((campaign.totalPledged / campaign.goal) * 100))
       : 0;
-  const activationFeeSats = campaign.activation?.feeSats || '80000000';
   const activationFeeTxid = campaign.activationFeeTxid || campaign.activation?.feeTxid || null;
   const activationFeePaid = campaign.activationFeePaid ?? Boolean(activationFeeTxid);
-  const activationFeeRequiredXec = (() => {
-    if (typeof campaign.activationFeeRequired === 'number' && Number.isFinite(campaign.activationFeeRequired)) {
-      return campaign.activationFeeRequired;
-    }
-    const parsedSats = Number(activationFeeSats);
-    if (Number.isFinite(parsedSats) && parsedSats > 0) {
-      return Math.floor(parsedSats / 100);
-    }
-    return 800000;
-  })();
+  const activationFeeLabel = '1,600.00 RMZ';
   const payoutTxid = campaign.payout?.txid || null;
   const hasConfirmedActivation = Boolean(
     activationFeePaid
@@ -402,7 +392,7 @@ export const CampaignDetail: React.FC = () => {
         </p>
       )}
       <p>
-        Fee de activación: {new Intl.NumberFormat('es-MX').format(activationFeeRequiredXec)} XEC
+        Fee de activación: {activationFeeLabel}
         {' · '}
         Estado: {activationFeePaid ? 'Pagada' : 'Pendiente'}
       </p>
@@ -457,8 +447,7 @@ export const CampaignDetail: React.FC = () => {
         <section style={{ border: '1px solid #eee', borderRadius: 8, padding: 12, marginTop: 12 }}>
           <h3>Activar campaña</h3>
           <p>
-            Para activar la campaña debes pagar la fee de activación de{' '}
-            {new Intl.NumberFormat('es-MX').format(activationFeeRequiredXec)} XEC.
+            Para activar la campaña debes pagar la fee de activación de {activationFeeLabel}.
           </p>
           <label style={{ display: 'grid', gap: 4 }}>
             Payer Address

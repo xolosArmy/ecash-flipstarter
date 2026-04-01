@@ -5,7 +5,15 @@ export type WalletConnectOffer = {
   campaignId: string;
   unsignedTxHex?: string;
   mode?: 'tx' | 'intent';
-  outputs?: Array<{ address: string; valueSats: number }>;
+  outputs?: Array<{
+    address: string;
+    valueSats: number;
+    token?: {
+      protocol: 'ALP';
+      tokenId: string;
+      tokenAmount: string;
+    };
+  }>;
   userPrompt?: string;
   amount: string;
   contributorAddress: string;

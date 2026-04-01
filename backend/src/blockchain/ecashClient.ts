@@ -20,6 +20,11 @@ const chronik = new ChronikClient([effectiveChronikBaseUrl]);
 export type TransactionOutput = {
   valueSats: bigint;
   scriptPubKey: string;
+  token?: {
+    tokenId: string;
+    amount: bigint;
+    protocol: string | null;
+  };
 };
 
 export type TransactionInfo = {
@@ -180,22 +185,25 @@ async function broadcastRawTxViaChronik(rawTxHex: string): Promise<BroadcastResu
 
 async function getTransactionOutputsViaChronik(txid: string): Promise<TransactionOutput[]> {
   const tx = await chronikRequest(`tx ${txid}`, () => chronik.tx(txid));
-  const outputs = (tx as { outputs?: Array<{ sats?: unknown; outputScript?: unknown }> }).outputs ?? [];
+  const outputs =
+    (tx as { outputs?: Array<{ sats?: unknown; outputScript?: unknown; token?: unknown }> }).outputs ?? [];
   return outputs.map((output) => ({
     valueSats: toBigIntSats(output.sats),
     scriptPubKey: typeof output.outputScript === 'string' ? output.outputScript.toLowerCase() : '',
+    token: parseTransactionToken(output.token),
   }));
 }
 
 async function getTransactionInfoViaChronik(txid: string): Promise<TransactionInfo> {
   const tx = await chronikRequest(`tx ${txid}`, () => chronik.tx(txid));
   const txRecord = tx as {
-    outputs?: Array<{ sats?: unknown; outputScript?: unknown }>;
+    outputs?: Array<{ sats?: unknown; outputScript?: unknown; token?: unknown }>;
     block?: { height?: unknown };
   };
   const outputs = (txRecord.outputs ?? []).map((output) => ({
     valueSats: toBigIntSats(output.sats),
     scriptPubKey: typeof output.outputScript === 'string' ? output.outputScript.toLowerCase() : '',
+    token: parseTransactionToken(output.token),
   }));
   const heightRaw = txRecord.block?.height;
   const height = typeof heightRaw === 'number' && Number.isFinite(heightRaw) ? Math.floor(heightRaw) : -1;
@@ -298,7 +306,9 @@ async function broadcastRawTxViaRpc(rawTxHex: string): Promise<BroadcastResult> 
 }
 
 async function getTransactionOutputsViaRpc(txid: string): Promise<TransactionOutput[]> {
-  const tx = await rpcCall<{ vout?: Array<{ value?: unknown; scriptPubKey?: { hex?: unknown } }> }>(
+  const tx = await rpcCall<{
+    vout?: Array<{ value?: unknown; scriptPubKey?: { hex?: unknown }; tokenData?: unknown; token?: unknown }>;
+  }>(
     'getrawtransaction',
     [txid, true],
   );
@@ -312,13 +322,13 @@ async function getTransactionOutputsViaRpc(txid: string): Promise<TransactionOut
       typeof output.value === 'number'
         ? xecToSats(output.value)
         : toBigIntSats(output.value);
-    return { valueSats, scriptPubKey };
+    return { valueSats, scriptPubKey, token: parseTransactionToken(output.tokenData ?? output.token) };
   });
 }
 
 async function getTransactionInfoViaRpc(txid: string): Promise<TransactionInfo> {
   const tx = await rpcCall<{
-    vout?: Array<{ value?: unknown; scriptPubKey?: { hex?: unknown } }>;
+    vout?: Array<{ value?: unknown; scriptPubKey?: { hex?: unknown }; tokenData?: unknown; token?: unknown }>;
     confirmations?: unknown;
     blockhash?: unknown;
   }>('getrawtransaction', [txid, true]);
@@ -331,7 +341,7 @@ async function getTransactionInfoViaRpc(txid: string): Promise<TransactionInfo> 
       typeof output.value === 'number'
         ? xecToSats(output.value)
         : toBigIntSats(output.value);
-    return { valueSats, scriptPubKey };
+    return { valueSats, scriptPubKey, token: parseTransactionToken(output.tokenData ?? output.token) };
   });
   const confirmations =
     typeof tx.confirmations === 'number' && Number.isFinite(tx.confirmations)
@@ -388,4 +398,34 @@ function formatChronikError(err: unknown): string {
 
 function toBigIntSats(value: unknown): bigint {
   return coerceAmountToSats(value);
+}
+
+function parseTransactionToken(value: unknown): TransactionOutput['token'] | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const token = value as {
+    tokenId?: unknown;
+    atoms?: unknown;
+    amount?: unknown;
+    tokenAmount?: unknown;
+    tokenType?: { protocol?: unknown };
+    protocol?: unknown;
+  };
+  const tokenId = typeof token.tokenId === 'string' ? token.tokenId.toLowerCase() : '';
+  if (!tokenId) {
+    return undefined;
+  }
+
+  return {
+    tokenId,
+    amount: toBigIntSats(token.atoms ?? token.amount ?? token.tokenAmount),
+    protocol:
+      typeof token.tokenType?.protocol === 'string'
+        ? token.tokenType.protocol
+        : typeof token.protocol === 'string'
+          ? token.protocol
+          : null,
+  };
 }

@@ -8,7 +8,16 @@ type ActivationBuildLike = {
   unsignedTx?: {
     inputs?: Array<{ txid?: string; hash?: string; vout?: number; n?: number }>;
   };
-  outputs?: Array<{ address?: string; valueSats?: number; value?: number | string }>;
+  outputs?: Array<{
+    address?: string;
+    valueSats?: number;
+    value?: number | string;
+    token?: {
+      protocol?: unknown;
+      tokenId?: unknown;
+      tokenAmount?: unknown;
+    };
+  }>;
   message?: string;
 };
 
@@ -18,6 +27,11 @@ const HEX_REGEX = /^[0-9a-f]+$/i;
 export type ParsedEcashOutput = {
   address: string;
   valueSats: number;
+  token?: {
+    protocol: 'ALP';
+    tokenId: string;
+    tokenAmount: string;
+  };
 };
 
 export type ParsedEcashSignAndBroadcastRequest = {
@@ -56,7 +70,12 @@ function parseOutputs(outputs: unknown): ParsedEcashOutput[] {
     throw new Error('outputs es requerido y debe contener al menos una salida.');
   }
   return outputs.map((entry, index) => {
-    const record = entry as { address?: unknown; valueSats?: unknown; value?: unknown };
+    const record = entry as {
+      address?: unknown;
+      valueSats?: unknown;
+      value?: unknown;
+      token?: { protocol?: unknown; tokenId?: unknown; tokenAmount?: unknown };
+    };
     const address = typeof record.address === 'string' ? record.address.trim() : '';
     const valueSource = record.valueSats ?? record.value;
     const valueSats = typeof valueSource === 'string' ? Number(valueSource) : valueSource;
@@ -65,6 +84,25 @@ function parseOutputs(outputs: unknown): ParsedEcashOutput[] {
     }
     if (!Number.isInteger(valueSats) || Number(valueSats) <= 0) {
       throw new Error(`outputs[${index}].valueSats/value es inválido.`);
+    }
+    const hasToken = Boolean(record.token);
+    if (hasToken) {
+      const protocol = record.token?.protocol;
+      const tokenId = typeof record.token?.tokenId === 'string' ? record.token.tokenId.trim().toLowerCase() : '';
+      const tokenAmount =
+        typeof record.token?.tokenAmount === 'string' ? record.token.tokenAmount.trim() : '';
+      if (protocol !== 'ALP' || !tokenId || !/^\d+$/.test(tokenAmount)) {
+        throw new Error(`outputs[${index}].token es inválido.`);
+      }
+      return {
+        address,
+        valueSats: Number(valueSats),
+        token: {
+          protocol: 'ALP' as const,
+          tokenId,
+          tokenAmount,
+        },
+      };
     }
     return { address, valueSats: Number(valueSats) };
   });

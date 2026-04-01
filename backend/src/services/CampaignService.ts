@@ -29,7 +29,15 @@ type AuditLogRow = {
   timestamp: string;
 };
 
-type ActivationOfferOutput = { address: string; valueSats: number };
+type ActivationOfferOutput = {
+  address: string;
+  valueSats: number;
+  token?: {
+    protocol: 'ALP';
+    tokenId: string;
+    tokenAmount: string;
+  };
+};
 type ActivationVerificationState = 'none' | 'pending_verification' | 'verified' | 'invalid';
 
 function toBigIntGoal(value: unknown): bigint {

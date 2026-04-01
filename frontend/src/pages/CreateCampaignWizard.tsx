@@ -358,7 +358,7 @@ export const CreateCampaignWizard: React.FC = () => {
     await confirmActivation(txid, payerAddress.trim() || undefined);
   };
 
-  const activationFeeSats = campaign?.activation?.feeSats ?? '80000000';
+  const activationFeeLabel = '1,600.00 RMZ';
 
   return (
     <div>
@@ -451,7 +451,7 @@ export const CreateCampaignWizard: React.FC = () => {
             Estado actual: <StatusBadge status={campaign?.status || 'draft'} />
           </p>
           <p>
-            Fee de activación: <strong><AmountDisplay sats={activationFeeSats} /></strong> (estado: {campaign?.activationFeePaid ? 'Pagada' : 'Pendiente'}).
+            Fee de activación: <strong>{activationFeeLabel}</strong> (estado: {campaign?.activationFeePaid ? 'Pagada' : 'Pendiente'}).
           </p>
           <WalletConnectBar />
           <label style={{ display: 'grid', gap: 4, marginBottom: 10 }}>

@@ -26,12 +26,28 @@ describe('activationPayload helpers', () => {
 
   it('parses intent-only payload as intent mode', () => {
     const parsed = parseEcashSignAndBroadcastRequest({
-      outputs: [{ address: 'ecash:qz0example', valueSats: 1234 }],
+      outputs: [{
+        address: 'ecash:qz0example',
+        valueSats: 546,
+        token: {
+          protocol: 'ALP',
+          tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+          tokenAmount: '160000',
+        },
+      }],
       message: 'hola',
     });
     expect(parsed.mode).toBe('intent');
-    expect(parsed.outputs).toEqual([{ address: 'ecash:qz0example', valueSats: 1234 }]);
-    expect(parsed.totalSats).toBe(1234);
+    expect(parsed.outputs).toEqual([{
+      address: 'ecash:qz0example',
+      valueSats: 546,
+      token: {
+        protocol: 'ALP',
+        tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+        tokenAmount: '160000',
+      },
+    }]);
+    expect(parsed.totalSats).toBe(546);
   });
 
   it('parses legacy inputsUsed payload as legacy mode', () => {

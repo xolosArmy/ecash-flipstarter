@@ -4,7 +4,15 @@ import { validateAddress } from '../utils/validation';
 import { getPledgesByCampaign } from '../store/simplePledges';
 import { addressToScriptPubKey, getTransactionInfo } from '../blockchain/ecashClient';
 import { walletConnectOfferStore } from '../services/WalletConnectOfferStore';
-import { ACTIVATION_FEE_SATS, ACTIVATION_FEE_XEC, TREASURY_ADDRESS } from '../config/constants';
+import {
+  ACTIVATION_FEE_SATS,
+  ACTIVATION_FEE_TOKEN_AMOUNT_RAW,
+  ACTIVATION_FEE_TOKEN_DUST_SATS,
+  ACTIVATION_FEE_TOKEN_ID,
+  ACTIVATION_FEE_TOKEN_PROTOCOL,
+  ACTIVATION_FEE_XEC,
+  TREASURY_ADDRESS,
+} from '../config/constants';
 import { coerceAmountToSats } from '../utils/ecashUnits';
 import { FinalizeService } from '../services/FinalizeService';
 
@@ -48,7 +56,15 @@ type CampaignApiRecord = {
   activationFeeVerificationStatus?: 'none' | 'pending_verification' | 'verified' | 'invalid';
   activationFeeVerifiedAt?: string | null;
   activationOfferMode?: 'tx' | 'intent' | null;
-  activationOfferOutputs?: Array<{ address: string; valueSats: number }> | null;
+  activationOfferOutputs?: Array<{
+    address: string;
+    valueSats: number;
+    token?: {
+      protocol: 'ALP';
+      tokenId: string;
+      tokenAmount: string;
+    };
+  }> | null;
   activationTreasuryAddressUsed?: string | null;
   payout?: {
     wcOfferId?: string | null;
@@ -183,6 +199,8 @@ type VerificationResult =
     status: 'verified';
     confirmations: number;
     treasuryOk: true;
+    dustOk: true;
+    tokenOk: true;
     amountOk: true;
   }
   | {
@@ -190,6 +208,8 @@ type VerificationResult =
     warning: string;
     confirmations: number;
     treasuryOk: boolean;
+    dustOk: boolean;
+    tokenOk: boolean;
     amountOk: boolean;
   }
   | {
@@ -197,13 +217,15 @@ type VerificationResult =
     error: string;
     confirmations: number;
     treasuryOk: boolean;
+    dustOk: boolean;
+    tokenOk: boolean;
     amountOk: boolean;
   };
 
 async function verifyActivationTxBestEffort(
   txid: string,
   treasuryAddress: string,
-  activationFeeRequiredSats: bigint,
+  activationFeeRequiredTokenAmount: bigint,
 ): Promise<VerificationResult> {
   try {
     const treasuryScript = (await addressToScriptPubKey(treasuryAddress)).toLowerCase();
@@ -212,17 +234,25 @@ async function verifyActivationTxBestEffort(
       (output) => output.scriptPubKey.toLowerCase() === treasuryScript,
     );
     const treasuryOk = treasuryOutputs.length > 0;
-    const amountOk = treasuryOutputs.some((output) => output.valueSats >= activationFeeRequiredSats);
+    const dustOk = treasuryOutputs.some((output) => output.valueSats >= ACTIVATION_FEE_TOKEN_DUST_SATS);
+    const tokenOk = treasuryOutputs.some(
+      (output) => output.token?.protocol === ACTIVATION_FEE_TOKEN_PROTOCOL && output.token.tokenId === ACTIVATION_FEE_TOKEN_ID,
+    );
+    const amountOk = treasuryOutputs.some(
+      (output) => output.token?.amount !== undefined && output.token.amount >= activationFeeRequiredTokenAmount,
+    );
     const confirmations = Math.max(
       Number.isFinite(tx.confirmations) ? Math.floor(tx.confirmations) : 0,
       tx.height >= 0 ? 1 : 0,
     );
-    if (!treasuryOk || !amountOk) {
+    if (!treasuryOk || !dustOk || !tokenOk || !amountOk) {
       return {
         status: 'invalid',
         error: 'activation-fee-output-mismatch',
         confirmations,
         treasuryOk,
+        dustOk,
+        tokenOk,
         amountOk,
       };
     }
@@ -232,10 +262,19 @@ async function verifyActivationTxBestEffort(
         warning: 'activation-fee-unconfirmed',
         confirmations,
         treasuryOk,
+        dustOk,
+        tokenOk,
         amountOk,
       };
     }
-    return { status: 'verified', confirmations, treasuryOk: true, amountOk: true };
+    return {
+      status: 'verified',
+      confirmations,
+      treasuryOk: true,
+      dustOk: true,
+      tokenOk: true,
+      amountOk: true,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn('[activation] chronik unavailable', { txid, message });
@@ -244,6 +283,8 @@ async function verifyActivationTxBestEffort(
       warning: 'chronik-unavailable',
       confirmations: 0,
       treasuryOk: false,
+      dustOk: false,
+      tokenOk: false,
       amountOk: false,
     };
   }
@@ -481,14 +522,22 @@ export const buildActivationHandler: Parameters<typeof router.post>[1] = async (
 
     const payerAddress = validateAddress(req.body?.payerAddress as string, 'payerAddress');
     const activationFeeRequired = toCampaignActivationFeeRequired(campaign);
-    const amount = BigInt(activationFeeRequired * 100);
+    const amount = BigInt(ACTIVATION_FEE_TOKEN_AMOUNT_RAW);
     const activationFeeTxid = getActivationFeeTxid(campaign);
     const persistedOutputs =
       Array.isArray(campaign.activationOfferOutputs) && campaign.activationOfferOutputs.length > 0
         ? campaign.activationOfferOutputs
         : null;
     const treasuryAddress = campaign.activationTreasuryAddressUsed || TREASURY_ADDRESS;
-    const outputs = persistedOutputs ?? [{ address: treasuryAddress, valueSats: Number(amount) }];
+    const outputs = persistedOutputs ?? [{
+      address: treasuryAddress,
+      valueSats: Number(ACTIVATION_FEE_TOKEN_DUST_SATS),
+      token: {
+        protocol: ACTIVATION_FEE_TOKEN_PROTOCOL,
+        tokenId: ACTIVATION_FEE_TOKEN_ID,
+        tokenAmount: ACTIVATION_FEE_TOKEN_AMOUNT_RAW,
+      },
+    }];
     const userPrompt = 'Pagar fee de activación';
     const shouldLogOfferCreated =
       campaign.status === 'pending_fee'
@@ -568,7 +617,7 @@ export const confirmActivationHandler: Parameters<typeof router.post>[1] = async
       typeof req.body?.payerAddress === 'string' && req.body.payerAddress.trim()
         ? validateAddress(req.body.payerAddress, 'payerAddress')
         : null;
-    const activationFeeRequiredSats = BigInt(toCampaignActivationFeeRequired(campaign) * 100);
+    const activationFeeRequiredTokenAmount = BigInt(ACTIVATION_FEE_TOKEN_AMOUNT_RAW);
     const treasuryAddress =
       campaign.activationTreasuryAddressUsed
       || campaign.treasuryAddressUsed
@@ -589,7 +638,7 @@ export const confirmActivationHandler: Parameters<typeof router.post>[1] = async
       treasuryAddressUsed: treasuryAddress,
     });
 
-    const verification = await verifyActivationTxBestEffort(txid, treasuryAddress, activationFeeRequiredSats);
+    const verification = await verifyActivationTxBestEffort(txid, treasuryAddress, activationFeeRequiredTokenAmount);
     if (process.env.NODE_ENV !== 'production') {
       console.debug('[activation] confirm', {
         id: campaign.id,
@@ -597,6 +646,8 @@ export const confirmActivationHandler: Parameters<typeof router.post>[1] = async
         result: verification.status,
         confs: verification.confirmations,
         treasuryOk: verification.treasuryOk,
+        dustOk: verification.dustOk,
+        tokenOk: verification.tokenOk,
         amountOk: verification.amountOk,
       });
     }
@@ -662,12 +713,12 @@ export const activationStatusHandler: Parameters<typeof router.get>[1] = async (
     let warning: string | undefined;
     const feeTxid = campaign.activationFeeTxid ?? campaign.activation?.feeTxid ?? null;
     if (feeTxid && verificationStatus === 'pending_verification') {
-      const activationFeeRequiredSats = BigInt(toCampaignActivationFeeRequired(campaign) * 100);
+      const activationFeeRequiredTokenAmount = BigInt(ACTIVATION_FEE_TOKEN_AMOUNT_RAW);
       const treasuryAddress =
         campaign.activationTreasuryAddressUsed
         || campaign.treasuryAddressUsed
         || TREASURY_ADDRESS;
-      const verification = await verifyActivationTxBestEffort(feeTxid, treasuryAddress, activationFeeRequiredSats);
+      const verification = await verifyActivationTxBestEffort(feeTxid, treasuryAddress, activationFeeRequiredTokenAmount);
       if (process.env.NODE_ENV !== 'production') {
         console.debug('[activation] status', {
           id: campaign.id,
@@ -675,6 +726,8 @@ export const activationStatusHandler: Parameters<typeof router.get>[1] = async (
           result: verification.status,
           confs: verification.confirmations,
           treasuryOk: verification.treasuryOk,
+          dustOk: verification.dustOk,
+          tokenOk: verification.tokenOk,
           amountOk: verification.amountOk,
         });
       }

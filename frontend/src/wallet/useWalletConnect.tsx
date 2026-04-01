@@ -39,13 +39,29 @@ type WalletConnectState = {
     offerId: string,
     chainId: string,
     options?: {
-      outputs?: Array<{ address: string; valueSats: number }>;
+      outputs?: Array<{
+        address: string;
+        valueSats: number;
+        token?: {
+          protocol: 'ALP';
+          tokenId: string;
+          tokenAmount: string;
+        };
+      }>;
       userPrompt?: string;
     }
   ) => Promise<unknown>;
   requestSignAndBroadcastIntent: (args: {
     offerId: string;
-    outputs: Array<{ address: string; valueSats: string | number | bigint }>;
+    outputs: Array<{
+      address: string;
+      valueSats: string | number | bigint;
+      token?: {
+        protocol: 'ALP';
+        tokenId: string;
+        tokenAmount: string;
+      };
+    }>;
     message?: string;
     userPrompt?: string;
   }) => Promise<{ txid: string }>;
@@ -297,7 +313,15 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
     offerId: string,
     chainId: string,
     options?: {
-      outputs?: Array<{ address: string; valueSats: number }>;
+      outputs?: Array<{
+        address: string;
+        valueSats: number;
+        token?: {
+          protocol: 'ALP';
+          tokenId: string;
+          tokenAmount: string;
+        };
+      }>;
       userPrompt?: string;
     }
   ) => {
@@ -330,7 +354,15 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const requestSignAndBroadcastIntent = async (args: {
     offerId: string;
-    outputs: Array<{ address: string; valueSats: string | number | bigint }>;
+    outputs: Array<{
+      address: string;
+      valueSats: string | number | bigint;
+      token?: {
+        protocol: 'ALP';
+        tokenId: string;
+        tokenAmount: string;
+      };
+    }>;
     message?: string;
     userPrompt?: string;
   }): Promise<{ txid: string }> => {
@@ -352,6 +384,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
         address: output.address,
         valueSats:
           typeof output.valueSats === 'bigint' ? output.valueSats.toString() : String(output.valueSats),
+        ...(output.token ? { token: output.token } : {}),
       }));
       const result = await client.request({
         topic: activeTopic,

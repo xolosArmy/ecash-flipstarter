@@ -115,7 +115,15 @@ export interface CampaignActivationBuildResponse {
   mode: 'intent' | 'tx';
   activationFeeRequired: number;
   treasuryAddress: string;
-  outputs: Array<{ address: string; valueSats: number }>;
+  outputs: Array<{
+    address: string;
+    valueSats: number;
+    token?: {
+      protocol: 'ALP';
+      tokenId: string;
+      tokenAmount: string;
+    };
+  }>;
   userPrompt: string;
   feeSats: string;
   payerAddress: string;

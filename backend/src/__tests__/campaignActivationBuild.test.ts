@@ -27,7 +27,10 @@ vi.mock('../blockchain/ecashClient', () => ({
 
 vi.mock('../blockchain/txBuilder', () => ({
   buildPayoutTx: vi.fn(),
+  buildFinalizeTx: vi.fn(),
   derivePrivKeyFromSeed: vi.fn(),
+  serializeTx: vi.fn(),
+  signP2pkhInput: vi.fn(),
   signHybridPayoutTx: vi.fn(),
 }));
 
@@ -78,7 +81,12 @@ describe('buildActivationHandler', () => {
     expect(res.body.outputs).toEqual([
       {
         address: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
-        valueSats: 80000000,
+        valueSats: 546,
+        token: {
+          protocol: 'ALP',
+          tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+          tokenAmount: '160000',
+        },
       },
     ]);
     expect(setActivationOfferMock).toHaveBeenCalledWith(
@@ -90,7 +98,12 @@ describe('buildActivationHandler', () => {
         outputs: [
           {
             address: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
-            valueSats: 80000000,
+            valueSats: 546,
+            token: {
+              protocol: 'ALP',
+              tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+              tokenAmount: '160000',
+            },
           },
         ],
         treasuryAddressUsed: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
@@ -109,11 +122,16 @@ describe('buildActivationHandler', () => {
       activationOfferOutputs: [
         {
           address: 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk',
-          valueSats: 80000000,
+          valueSats: 546,
+          token: {
+            protocol: 'ALP',
+            tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+            tokenAmount: '160000',
+          },
         },
       ],
       activation: {
-        feeSats: '80000000',
+        feeSats: '160000',
         wcOfferId: 'persisted-offer',
       },
     });
@@ -144,7 +162,15 @@ describe('confirmActivationHandler', () => {
       txid: 'a'.repeat(64),
       confirmations: 2,
       height: 900000,
-      outputs: [{ scriptPubKey: '76a914abcd', valueSats: 80000000n }],
+      outputs: [{
+        scriptPubKey: '76a914abcd',
+        valueSats: 546n,
+        token: {
+          protocol: 'ALP',
+          tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+          amount: 160000n,
+        },
+      }],
     });
     getCampaignMock
       .mockResolvedValueOnce(BASE_CAMPAIGN)
@@ -187,7 +213,15 @@ describe('confirmActivationHandler', () => {
       txid: 'b'.repeat(64),
       confirmations: 0,
       height: -1,
-      outputs: [{ scriptPubKey: '76a914abcd', valueSats: 80000000n }],
+      outputs: [{
+        scriptPubKey: '76a914abcd',
+        valueSats: 546n,
+        token: {
+          protocol: 'ALP',
+          tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+          amount: 160000n,
+        },
+      }],
     });
     getCampaignMock
       .mockResolvedValueOnce(BASE_CAMPAIGN)
@@ -338,7 +372,15 @@ describe('activationStatusHandler', () => {
       txid: 'f'.repeat(64),
       confirmations: 0,
       height: -1,
-      outputs: [{ scriptPubKey: '76a914abcd', valueSats: 80000000n }],
+      outputs: [{
+        scriptPubKey: '76a914abcd',
+        valueSats: 546n,
+        token: {
+          protocol: 'ALP',
+          tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+          amount: 160000n,
+        },
+      }],
     });
     getCampaignMock
       .mockResolvedValueOnce({
@@ -374,7 +416,15 @@ describe('activationStatusHandler', () => {
       txid: '1'.repeat(64),
       confirmations: 1,
       height: 900001,
-      outputs: [{ scriptPubKey: '76a914abcd', valueSats: 80000000n }],
+      outputs: [{
+        scriptPubKey: '76a914abcd',
+        valueSats: 546n,
+        token: {
+          protocol: 'ALP',
+          tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
+          amount: 160000n,
+        },
+      }],
     });
     getCampaignMock
       .mockResolvedValueOnce({

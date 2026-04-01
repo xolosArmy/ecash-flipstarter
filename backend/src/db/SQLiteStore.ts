@@ -54,7 +54,15 @@ export type StoredCampaign = {
   activationFeeVerificationStatus?: ActivationFeeVerificationStatus;
   activationFeeVerifiedAt?: string | null;
   activationOfferMode?: 'tx' | 'intent' | null;
-  activationOfferOutputs?: Array<{ address: string; valueSats: number }> | null;
+  activationOfferOutputs?: Array<{
+    address: string;
+    valueSats: number;
+    token?: {
+      protocol: 'ALP';
+      tokenId: string;
+      tokenAmount: string;
+    };
+  }> | null;
   activationTreasuryAddressUsed?: string | null;
   payout?: {
     wcOfferId?: string | null;
@@ -490,7 +498,7 @@ export async function upsertCampaign(campaign: StoredCampaign, database?: Databa
   }
 }
 
-function parseActivationOfferOutputs(raw: string | null): Array<{ address: string; valueSats: number }> | null {
+function parseActivationOfferOutputs(raw: string | null): StoredCampaign['activationOfferOutputs'] {
   if (!raw || !raw.trim()) return null;
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -500,12 +508,39 @@ function parseActivationOfferOutputs(raw: string | null): Array<{ address: strin
         if (!entry || typeof entry !== 'object') return null;
         const address = (entry as { address?: unknown }).address;
         const valueSats = (entry as { valueSats?: unknown }).valueSats;
+        const token = (entry as { token?: unknown }).token;
         if (typeof address !== 'string') return null;
         const valueNumber = Number(valueSats);
         if (!Number.isFinite(valueNumber) || valueNumber <= 0) return null;
-        return { address, valueSats: Math.floor(valueNumber) };
+        const parsedToken =
+          token && typeof token === 'object'
+            ? {
+                protocol: (token as { protocol?: unknown }).protocol === 'ALP' ? 'ALP' as const : null,
+                tokenId:
+                  typeof (token as { tokenId?: unknown }).tokenId === 'string'
+                    ? ((token as { tokenId?: string }).tokenId ?? '').toLowerCase()
+                    : null,
+                tokenAmount:
+                  typeof (token as { tokenAmount?: unknown }).tokenAmount === 'string'
+                    ? (token as { tokenAmount?: string }).tokenAmount
+                    : null,
+              }
+            : null;
+        return {
+          address,
+          valueSats: Math.floor(valueNumber),
+          ...(parsedToken?.protocol && parsedToken.tokenId && parsedToken.tokenAmount
+            ? {
+                token: {
+                  protocol: parsedToken.protocol,
+                  tokenId: parsedToken.tokenId,
+                  tokenAmount: parsedToken.tokenAmount,
+                },
+              }
+            : {}),
+        };
       })
-      .filter((entry): entry is { address: string; valueSats: number } => entry !== null);
+      .filter((entry): entry is NonNullable<StoredCampaign['activationOfferOutputs']>[number] => entry !== null);
     return outputs.length > 0 ? outputs : null;
   } catch {
     return null;

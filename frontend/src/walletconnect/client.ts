@@ -270,7 +270,15 @@ export async function requestSignAndBroadcastTransaction(
   offerId: string,
   chainId: string,
   options?: {
-    outputs?: Array<{ address: string; valueSats: number }>;
+    outputs?: Array<{
+      address: string;
+      valueSats: number;
+      token?: {
+        protocol: 'ALP';
+        tokenId: string;
+        tokenAmount: string;
+      };
+    }>;
     userPrompt?: string;
   },
 ): Promise<unknown> {
@@ -295,7 +303,7 @@ export async function requestSignAndBroadcastTransaction(
     mode?: unknown;
     rawHex?: unknown;
     outpoints?: unknown;
-    outputs?: Array<{ valueSats?: unknown }>;
+    outputs?: Array<{ valueSats?: unknown; token?: { tokenAmount?: unknown } }>;
   };
   const requestOutputs = Array.isArray(requestPayload.outputs) ? requestPayload.outputs : [];
   const totalSats = requestOutputs.reduce((sum, output) => {
