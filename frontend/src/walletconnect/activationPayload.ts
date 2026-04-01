@@ -15,6 +15,7 @@ type ActivationBuildLike = {
     token?: {
       protocol?: unknown;
       tokenId?: unknown;
+      amount?: unknown;
       tokenAmount?: unknown;
     };
   }>;
@@ -30,7 +31,7 @@ export type ParsedEcashOutput = {
   token?: {
     protocol: 'ALP';
     tokenId: string;
-    tokenAmount: string;
+    amount: string;
   };
 };
 
@@ -74,7 +75,7 @@ function parseOutputs(outputs: unknown): ParsedEcashOutput[] {
       address?: unknown;
       valueSats?: unknown;
       value?: unknown;
-      token?: { protocol?: unknown; tokenId?: unknown; tokenAmount?: unknown };
+      token?: { protocol?: unknown; tokenId?: unknown; amount?: unknown; tokenAmount?: unknown };
     };
     const address = typeof record.address === 'string' ? record.address.trim() : '';
     const valueSource = record.valueSats ?? record.value;
@@ -89,9 +90,13 @@ function parseOutputs(outputs: unknown): ParsedEcashOutput[] {
     if (hasToken) {
       const protocol = record.token?.protocol;
       const tokenId = typeof record.token?.tokenId === 'string' ? record.token.tokenId.trim().toLowerCase() : '';
-      const tokenAmount =
-        typeof record.token?.tokenAmount === 'string' ? record.token.tokenAmount.trim() : '';
-      if (protocol !== 'ALP' || !tokenId || !/^\d+$/.test(tokenAmount)) {
+      const amount =
+        typeof record.token?.amount === 'string'
+          ? record.token.amount.trim()
+          : typeof record.token?.tokenAmount === 'string'
+          ? record.token.tokenAmount.trim()
+          : '';
+      if (protocol !== 'ALP' || !tokenId || !/^\d+$/.test(amount)) {
         throw new Error(`outputs[${index}].token es inválido.`);
       }
       return {
@@ -100,7 +105,7 @@ function parseOutputs(outputs: unknown): ParsedEcashOutput[] {
         token: {
           protocol: 'ALP' as const,
           tokenId,
-          tokenAmount,
+          amount,
         },
       };
     }

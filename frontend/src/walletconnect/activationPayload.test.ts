@@ -32,7 +32,7 @@ describe('activationPayload helpers', () => {
         token: {
           protocol: 'ALP',
           tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
-          tokenAmount: '160000',
+          amount: '160000',
         },
       }],
       message: 'hola',
@@ -44,7 +44,7 @@ describe('activationPayload helpers', () => {
       token: {
         protocol: 'ALP',
         tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
-        tokenAmount: '160000',
+        amount: '160000',
       },
     }]);
     expect(parsed.totalSats).toBe(546);

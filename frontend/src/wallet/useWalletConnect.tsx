@@ -45,7 +45,7 @@ type WalletConnectState = {
         token?: {
           protocol: 'ALP';
           tokenId: string;
-          tokenAmount: string;
+          amount: string;
         };
       }>;
       userPrompt?: string;
@@ -59,7 +59,7 @@ type WalletConnectState = {
       token?: {
         protocol: 'ALP';
         tokenId: string;
-        tokenAmount: string;
+        amount: string;
       };
     }>;
     message?: string;
@@ -319,7 +319,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
         token?: {
           protocol: 'ALP';
           tokenId: string;
-          tokenAmount: string;
+          amount: string;
         };
       }>;
       userPrompt?: string;
@@ -360,7 +360,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
       token?: {
         protocol: 'ALP';
         tokenId: string;
-        tokenAmount: string;
+        amount: string;
       };
     }>;
     message?: string;
@@ -384,7 +384,14 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
         address: output.address,
         valueSats:
           typeof output.valueSats === 'bigint' ? output.valueSats.toString() : String(output.valueSats),
-        ...(output.token ? { token: output.token } : {}),
+        ...(output.token
+          ? {
+              token: {
+                tokenId: output.token.tokenId,
+                amount: output.token.amount,
+              },
+            }
+          : {}),
       }));
       const result = await client.request({
         topic: activeTopic,

@@ -62,7 +62,7 @@ type CampaignApiRecord = {
     token?: {
       protocol: 'ALP';
       tokenId: string;
-      tokenAmount: string;
+      amount: string;
     };
   }> | null;
   activationTreasuryAddressUsed?: string | null;
@@ -535,7 +535,7 @@ export const buildActivationHandler: Parameters<typeof router.post>[1] = async (
       token: {
         protocol: ACTIVATION_FEE_TOKEN_PROTOCOL,
         tokenId: ACTIVATION_FEE_TOKEN_ID,
-        tokenAmount: ACTIVATION_FEE_TOKEN_AMOUNT_RAW,
+        amount: ACTIVATION_FEE_TOKEN_AMOUNT_RAW,
       },
     }];
     const userPrompt = 'Pagar fee de activación';

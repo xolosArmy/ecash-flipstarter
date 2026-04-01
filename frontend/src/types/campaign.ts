@@ -41,7 +41,7 @@ export interface CampaignSummary {
     token?: {
       protocol: 'ALP';
       tokenId: string;
-      tokenAmount: string;
+      amount: string;
     };
   }> | null;
   activationTreasuryAddressUsed?: string | null;

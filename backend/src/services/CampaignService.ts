@@ -35,7 +35,7 @@ type ActivationOfferOutput = {
   token?: {
     protocol: 'ALP';
     tokenId: string;
-    tokenAmount: string;
+    amount: string;
   };
 };
 type ActivationVerificationState = 'none' | 'pending_verification' | 'verified' | 'invalid';

@@ -85,7 +85,7 @@ describe('buildActivationHandler', () => {
         token: {
           protocol: 'ALP',
           tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
-          tokenAmount: '160000',
+          amount: '160000',
         },
       },
     ]);
@@ -102,7 +102,7 @@ describe('buildActivationHandler', () => {
             token: {
               protocol: 'ALP',
               tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
-              tokenAmount: '160000',
+              amount: '160000',
             },
           },
         ],
@@ -126,7 +126,7 @@ describe('buildActivationHandler', () => {
           token: {
             protocol: 'ALP',
             tokenId: 'c923bd0f09c630c5e9980cf518c8d34b6353802a3cb7c3f34fa7cc85c9305908',
-            tokenAmount: '160000',
+            amount: '160000',
           },
         },
       ],

@@ -50,7 +50,7 @@ export interface CampaignSummary {
     token?: {
       protocol: 'ALP';
       tokenId: string;
-      tokenAmount: string;
+      amount: string;
     };
   }> | null;
   activationTreasuryAddressUsed?: string | null;
@@ -94,7 +94,7 @@ export interface BuiltTxResponse {
     token?: {
       protocol: 'ALP';
       tokenId: string;
-      tokenAmount: string;
+      amount: string;
     };
   }>;
   userPrompt?: string;

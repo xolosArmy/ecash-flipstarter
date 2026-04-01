@@ -276,7 +276,7 @@ export async function requestSignAndBroadcastTransaction(
       token?: {
         protocol: 'ALP';
         tokenId: string;
-        tokenAmount: string;
+        amount: string;
       };
     }>;
     userPrompt?: string;
@@ -303,7 +303,7 @@ export async function requestSignAndBroadcastTransaction(
     mode?: unknown;
     rawHex?: unknown;
     outpoints?: unknown;
-    outputs?: Array<{ valueSats?: unknown; token?: { tokenAmount?: unknown } }>;
+    outputs?: Array<{ valueSats?: unknown; token?: { amount?: unknown; tokenAmount?: unknown } }>;
   };
   const requestOutputs = Array.isArray(requestPayload.outputs) ? requestPayload.outputs : [];
   const totalSats = requestOutputs.reduce((sum, output) => {

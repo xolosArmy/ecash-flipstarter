@@ -121,7 +121,7 @@ export interface CampaignActivationBuildResponse {
     token?: {
       protocol: 'ALP';
       tokenId: string;
-      tokenAmount: string;
+      amount: string;
     };
   }>;
   userPrompt: string;

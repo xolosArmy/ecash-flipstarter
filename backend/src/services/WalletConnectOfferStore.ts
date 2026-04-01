@@ -11,7 +11,7 @@ export type WalletConnectOffer = {
     token?: {
       protocol: 'ALP';
       tokenId: string;
-      tokenAmount: string;
+      amount: string;
     };
   }>;
   userPrompt?: string;

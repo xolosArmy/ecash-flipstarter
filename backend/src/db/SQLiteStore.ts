@@ -60,7 +60,7 @@ export type StoredCampaign = {
     token?: {
       protocol: 'ALP';
       tokenId: string;
-      tokenAmount: string;
+      amount: string;
     };
   }> | null;
   activationTreasuryAddressUsed?: string | null;
@@ -520,8 +520,10 @@ function parseActivationOfferOutputs(raw: string | null): StoredCampaign['activa
                   typeof (token as { tokenId?: unknown }).tokenId === 'string'
                     ? ((token as { tokenId?: string }).tokenId ?? '').toLowerCase()
                     : null,
-                tokenAmount:
-                  typeof (token as { tokenAmount?: unknown }).tokenAmount === 'string'
+                amount:
+                  typeof (token as { amount?: unknown }).amount === 'string'
+                    ? (token as { amount?: string }).amount
+                    : typeof (token as { tokenAmount?: unknown }).tokenAmount === 'string'
                     ? (token as { tokenAmount?: string }).tokenAmount
                     : null,
               }
@@ -529,12 +531,12 @@ function parseActivationOfferOutputs(raw: string | null): StoredCampaign['activa
         return {
           address,
           valueSats: Math.floor(valueNumber),
-          ...(parsedToken?.protocol && parsedToken.tokenId && parsedToken.tokenAmount
+          ...(parsedToken?.protocol && parsedToken.tokenId && parsedToken.amount
             ? {
                 token: {
                   protocol: parsedToken.protocol,
                   tokenId: parsedToken.tokenId,
-                  tokenAmount: parsedToken.tokenAmount,
+                  amount: parsedToken.amount,
                 },
               }
             : {}),
