@@ -121,6 +121,18 @@ export class FinalizeService {
     });
 
     const rawHex = built.rawHex;
+
+    console.log('\n=== [DEBUG-V1] PRE-BROADCAST ===');
+    console.log('Campaign ID:', campaignId);
+    console.log(
+      'Covenant UTXO:',
+      `${covenantUtxo.txid}:${covenantUtxo.vout} (Valor: ${covenantUtxo.value})`,
+    );
+    console.log('Pledges Calculados (raisedSats):', raisedSats);
+    console.log('Meta (goalSats):', goalSats);
+    console.log('Raw TX Hex:', rawHex);
+    console.log('================================\n');
+
     const broadcast = await this.deps.broadcastRawTx(rawHex);
     const tracked = covenantIndexInstance.getCovenantRef(campaignId);
     covenantIndexInstance.setCovenantRef({

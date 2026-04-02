@@ -540,12 +540,26 @@ async function buildFinalizeTxV1(params: FinalizeTxParams): Promise<BuiltTx> {
       const sighash = sha256d(preimage.bytes);
       const sig = eccInstance.ecdsaSign(beneficiarySk, sighash);
       const flaggedSig = flagSignature(sig, SINGLE_ANYONECANPAY_BIP143);
-      return EcashScript.fromOps([
+      const unlockingScript = EcashScript.fromOps([
         pushBytesOp(flaggedSig),
         pushBytesOp(beneficiaryPk),
         OP_1,
         pushBytesOp(preimage.redeemScript.bytecode),
       ]);
+
+      console.log('\n=== [DEBUG-V1] SIGNATORY ===');
+      console.log('1. SIGHASH:', Buffer.from(sighash).toString('hex'));
+      console.log(
+        '2. RedeemScript (Candado):',
+        Buffer.from(preimage.redeemScript.bytecode).toString('hex'),
+      );
+      console.log(
+        '3. UnlockingScript (Llave):',
+        Buffer.from(unlockingScript.bytecode).toString('hex'),
+      );
+      console.log('============================\n');
+
+      return unlockingScript;
     },
   };
 
