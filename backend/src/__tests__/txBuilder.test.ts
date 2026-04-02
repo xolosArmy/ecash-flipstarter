@@ -4,12 +4,10 @@ import {
   buildPayoutTx,
   buildPledgeTx,
   buildRefundTx,
-  buildFinalizeUnlockingScriptV1,
   buildPledgeUnlockingScriptV1,
   buildRefundUnlockingScriptV1,
   computeEcashSigHash,
   signHybridPayoutTx,
-  signFinalizeInputV1,
   signRefundInputV1,
 } from '../blockchain/txBuilder';
 import { addressToScriptPubKey } from '../blockchain/ecashClient';
@@ -115,7 +113,7 @@ describe('V1 covenant spends', () => {
   const beneficiaryPrivKey = Buffer.from('01'.repeat(32), 'hex');
   const oraclePrivKey = Buffer.from('02'.repeat(32), 'hex');
 
-  it('finalize scriptSig contains signature, pubkey, selector 0x01 and redeemScript', async () => {
+  it('builds a signed V1 finalize tx and preserves the expected spend shape', async () => {
     const built = await buildFinalizeTx({
       covenantUtxo: {
         txid: '33'.repeat(32),
@@ -127,22 +125,25 @@ describe('V1 covenant spends', () => {
       contractVersion: TEYOLIA_COVENANT_V1,
       redeemScriptHex,
       beneficiaryPrivKey,
+      gasUtxos: [
+        {
+          txid: '88'.repeat(32),
+          vout: 1,
+          value: 700n,
+          scriptPubKey: '76a914' + '11'.repeat(20) + '88ac',
+        },
+      ],
+      gasChangeAddress: beneficiaryAddress,
+      gasPrivKey: Buffer.from('03'.repeat(32), 'hex'),
     });
 
-    const signature = signFinalizeInputV1(
-      {
-        ...built.unsignedTx,
-        inputs: built.unsignedTx.inputs.map((input, index) => (index === 0 ? { ...input, scriptSig: undefined } : input)),
-      },
-      beneficiaryPrivKey,
-      redeemScriptHex,
-      0,
-    );
-    const pubkeyHex = '031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f';
-
-    expect(built.unsignedTx.inputs[0]?.scriptSig).toBe(
-      buildFinalizeUnlockingScriptV1(signature, pubkeyHex, redeemScriptHex),
-    );
+    expect(built.rawHex).toMatch(/^[0-9a-f]+$/);
+    expect(built.unsignedTx.inputs).toHaveLength(2);
+    expect(built.unsignedTx.outputs[0]).toEqual({
+      value: 5000n,
+      scriptPubKey: await addressToScriptPubKey(beneficiaryAddress),
+    });
+    expect(built.fee).toBe(500n);
   });
 
   it('refund scriptSig contains oracle signature, selector 0x02 and redeemScript', async () => {

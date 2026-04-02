@@ -44,7 +44,7 @@ afterEach(() => {
 });
 
 describe('FinalizeService V1 integration', () => {
-  it('passes V1 metadata to buildFinalizeTx and signs auxiliary gas inputs', async () => {
+  it('passes V1 metadata to buildFinalizeTx and broadcasts the signed tx directly', async () => {
     const getCampaign = vi.fn().mockResolvedValue({
       id: campaignId,
       goal: '1000',
@@ -76,8 +76,6 @@ describe('FinalizeService V1 integration', () => {
       fee: 500n,
     };
     const buildFinalizeTx = vi.fn().mockResolvedValue(builtFinalizeTx);
-    const signP2pkhInput = vi.fn().mockReturnValue('signed-gas-script');
-    const serializeTx = vi.fn().mockReturnValue('finalized-hex');
     const broadcastRawTx = vi.fn().mockResolvedValue({ txid: 'aa'.repeat(32) });
     const getUtxosForAddress = vi.fn()
       .mockResolvedValueOnce([{ ...trackedCovenant }])
@@ -94,8 +92,6 @@ describe('FinalizeService V1 integration', () => {
       campaignService: { getCampaign, markPayoutComplete },
       getUtxosForAddress,
       buildFinalizeTx,
-      signP2pkhInput,
-      serializeTx,
       broadcastRawTx,
       legacyFinalizeCampaign: vi.fn(),
     });
@@ -109,13 +105,9 @@ describe('FinalizeService V1 integration', () => {
       redeemScriptHex: '51',
       beneficiaryPubKey,
       gasChangeAddress: beneficiaryAddress,
+      gasPrivKey: Buffer.from(gasPrivKeyHex, 'hex'),
     }));
-    expect(signP2pkhInput).toHaveBeenCalledWith(
-      builtFinalizeTx.unsignedTx,
-      Buffer.from(gasPrivKeyHex, 'hex'),
-      1,
-    );
-    expect(broadcastRawTx).toHaveBeenCalledWith('finalized-hex');
+    expect(broadcastRawTx).toHaveBeenCalledWith('unsigned-finalize');
     expect(markPayoutComplete).toHaveBeenCalledWith(campaignId, 'aa'.repeat(32), null);
     expect(result).toMatchObject({ status: 'paid_out', txid: 'aa'.repeat(32) });
   });
@@ -143,8 +135,6 @@ describe('FinalizeService V1 integration', () => {
       },
       getUtxosForAddress: vi.fn(),
       buildFinalizeTx: vi.fn(),
-      signP2pkhInput: vi.fn(),
-      serializeTx: vi.fn(),
       broadcastRawTx: vi.fn(),
       legacyFinalizeCampaign,
     });
@@ -173,8 +163,6 @@ describe('FinalizeService V1 integration', () => {
       },
       getUtxosForAddress: vi.fn(),
       buildFinalizeTx: vi.fn(),
-      signP2pkhInput: vi.fn(),
-      serializeTx: vi.fn(),
       broadcastRawTx: vi.fn(),
       legacyFinalizeCampaign: vi.fn(),
     });

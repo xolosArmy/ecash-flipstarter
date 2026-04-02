@@ -1,4 +1,4 @@
-import { buildFinalizeTx, serializeTx, signP2pkhInput, type BuiltTx } from '../blockchain/txBuilder';
+import { buildFinalizeTx, type BuiltTx } from '../blockchain/txBuilder';
 import { broadcastRawTx, getUtxosForAddress } from '../blockchain/ecashClient';
 import type { Utxo } from '../blockchain/types';
 import { coerceAmountToSats } from '../utils/ecashUnits';
@@ -20,8 +20,6 @@ type FinalizeDependencies = {
   campaignService: Pick<CampaignService, 'getCampaign' | 'markPayoutComplete'>;
   getUtxosForAddress: typeof getUtxosForAddress;
   buildFinalizeTx: typeof buildFinalizeTx;
-  signP2pkhInput: typeof signP2pkhInput;
-  serializeTx: typeof serializeTx;
   broadcastRawTx: typeof broadcastRawTx;
   legacyFinalizeCampaign: (campaignId: string) => Promise<AutoPayoutResult>;
 };
@@ -30,8 +28,6 @@ const defaultDependencies: FinalizeDependencies = {
   campaignService: new CampaignService(),
   getUtxosForAddress,
   buildFinalizeTx,
-  signP2pkhInput,
-  serializeTx,
   broadcastRawTx,
   legacyFinalizeCampaign: (campaignId: string) => new AutoPayoutService().finalizeCampaign(campaignId),
 };
@@ -120,10 +116,11 @@ export class FinalizeService {
       beneficiaryPubKey,
       gasUtxos,
       gasChangeAddress: gasUtxos.length > 0 ? gasWalletAddress : undefined,
+      gasPrivKey,
       fixedFee: 500n,
     });
 
-    const rawHex = signFinalizeAuxiliaryInputs(built, gasPrivKey, this.deps);
+    const rawHex = built.rawHex;
     const broadcast = await this.deps.broadcastRawTx(rawHex);
     const tracked = covenantIndexInstance.getCovenantRef(campaignId);
     covenantIndexInstance.setCovenantRef({
@@ -202,23 +199,4 @@ function selectGasUtxos(utxos: Utxo[], feeTarget: bigint): Utxo[] {
     }
   }
   throw new Error('gas-wallet-empty-or-insufficient-utxo');
-}
-
-function signFinalizeAuxiliaryInputs(
-  built: BuiltTx,
-  gasPrivKey: Buffer | null,
-  deps: Pick<FinalizeDependencies, 'signP2pkhInput' | 'serializeTx'>
-): string {
-  if (!gasPrivKey) {
-    return built.rawHex;
-  }
-
-  for (let inputIndex = 1; inputIndex < built.unsignedTx.inputs.length; inputIndex += 1) {
-    built.unsignedTx.inputs[inputIndex]!.scriptSig = deps.signP2pkhInput(
-      built.unsignedTx,
-      gasPrivKey,
-      inputIndex,
-    );
-  }
-  return deps.serializeTx(built.unsignedTx);
 }

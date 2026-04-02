@@ -2,6 +2,19 @@ import crypto from 'crypto';
 import { HDKey } from '@scure/bip32';
 import { mnemonicToSeedSync } from '@scure/bip39';
 import { secp256k1 } from '@noble/curves/secp256k1';
+import {
+  Ecc,
+  Script as EcashScript,
+  TxBuilder,
+  type TxBuilderInput,
+  P2PKHSignatory,
+  SINGLE_ANYONECANPAY_BIP143,
+  ALL_BIP143,
+  pushBytesOp,
+  OP_1,
+  sha256d,
+  flagSignature,
+} from '@ecash/lib';
 import { TEYOLIA_COVENANT_V1 } from '../covenants/scriptCompiler';
 import { addressToScriptPubKey } from './ecashClient';
 import type { Utxo, UnsignedTx } from './types';
@@ -30,6 +43,7 @@ export interface FinalizeTxParams {
   beneficiaryPubKey?: string;
   gasUtxos?: Utxo[];
   gasChangeAddress?: string;
+  gasPrivKey?: Buffer | string | null;
   fixedFee?: bigint;
 }
 
@@ -477,6 +491,8 @@ async function buildPledgeTxV1(params: PledgeTxParams): Promise<BuiltTx> {
 }
 
 async function buildFinalizeTxV1(params: FinalizeTxParams): Promise<BuiltTx> {
+  const ecc = new Ecc();
+  const feeTarget = params.fixedFee ?? MIN_ABSOLUTE_FEE;
   const gasUtxos = (params.gasUtxos ?? []).map((utxo) => {
     if (hasTokenData(utxo)) {
       throw new Error('token-utxo-not-supported');
@@ -486,9 +502,11 @@ async function buildFinalizeTxV1(params: FinalizeTxParams): Promise<BuiltTx> {
     }
     return { ...utxo, sequence: FINAL_SEQUENCE };
   });
-  const beneficiaryScript = await addressToScriptPubKey(params.beneficiaryAddress);
-  const feeTarget = params.fixedFee ?? MIN_ABSOLUTE_FEE;
   const gasTotal = gasUtxos.reduce((acc, utxo) => acc + utxo.value, 0n);
+  if (gasTotal > 0n && !params.gasPrivKey) {
+    throw new Error('gas-wallet-signing-key-missing');
+  }
+
   const covenantLoss = gasTotal >= feeTarget ? 0n : feeTarget - gasTotal;
   if (covenantLoss > 1000n) {
     throw new Error('finalize-fee-cap-exceeded');
@@ -499,36 +517,97 @@ async function buildFinalizeTxV1(params: FinalizeTxParams): Promise<BuiltTx> {
     throw new Error('covenant-funds-empty');
   }
 
-  const outputs: UnsignedTx['outputs'] = [{ value: beneficiaryAmount, scriptPubKey: beneficiaryScript }];
-  let gasChange = gasTotal > feeTarget ? gasTotal - feeTarget : 0n;
-  if (gasChange > 0n) {
-    if (!params.gasChangeAddress) {
-      throw new Error('gas-change-address-required');
-    }
-    const gasChangeScript = await addressToScriptPubKey(params.gasChangeAddress);
-    if (gasChange >= 546n) {
-      outputs.push({ value: gasChange, scriptPubKey: gasChangeScript });
-    } else {
-      gasChange = 0n;
+  const toUint8Array = (value: Buffer | string): Uint8Array =>
+    typeof value === 'string' ? new Uint8Array(Buffer.from(value, 'hex')) : new Uint8Array(value);
+
+  const beneficiarySk = toUint8Array(params.beneficiaryPrivKey!);
+  const beneficiaryPk = toUint8Array(
+    Buffer.from(normalizePublicKey(params.beneficiaryPrivKey!, params.beneficiaryPubKey), 'hex'),
+  );
+  const redeemScript = new EcashScript(toUint8Array(params.redeemScriptHex!));
+
+  const covenantInput: TxBuilderInput = {
+    input: {
+      prevOut: { txid: params.covenantUtxo.txid, outIdx: params.covenantUtxo.vout },
+      sequence: FINAL_SEQUENCE,
+      signData: {
+        value: Number(params.covenantUtxo.value),
+        redeemScript,
+      },
+    },
+    signatory: (eccInstance: any, input: any) => {
+      const preimage = input.sigHashPreimage(SINGLE_ANYONECANPAY_BIP143);
+      const sighash = sha256d(preimage.bytes);
+      const sig = eccInstance.ecdsaSign(beneficiarySk, sighash);
+      const flaggedSig = flagSignature(sig, SINGLE_ANYONECANPAY_BIP143);
+      return EcashScript.fromOps([
+        pushBytesOp(flaggedSig),
+        pushBytesOp(beneficiaryPk),
+        OP_1,
+        pushBytesOp(preimage.redeemScript.bytecode),
+      ]);
+    },
+  };
+
+  const gasInputs: TxBuilderInput[] = [];
+  if (gasUtxos.length > 0 && params.gasPrivKey) {
+    const gasSk = toUint8Array(params.gasPrivKey);
+    const gasPk = toUint8Array(Buffer.from(normalizePublicKey(params.gasPrivKey), 'hex'));
+
+    for (const utxo of gasUtxos) {
+      gasInputs.push({
+        input: {
+          prevOut: { txid: utxo.txid, outIdx: utxo.vout },
+          sequence: utxo.sequence ?? FINAL_SEQUENCE,
+          signData: {
+            value: Number(utxo.value),
+            outputScript: new EcashScript(toUint8Array(utxo.scriptPubKey)),
+          },
+        },
+        signatory: P2PKHSignatory(gasSk, gasPk, ALL_BIP143),
+      });
     }
   }
 
-  const covenantInput: UnsignedTx['inputs'][number] = {
-    ...params.covenantUtxo,
-    sequence: FINAL_SEQUENCE,
-  };
-  const unsignedTx: UnsignedTx = {
-    inputs: [covenantInput, ...gasUtxos],
+  const beneficiaryScript = await addressToScriptPubKey(params.beneficiaryAddress);
+  const outputs: any[] = [
+    {
+      value: Number(beneficiaryAmount),
+      script: new EcashScript(toUint8Array(beneficiaryScript)),
+    },
+  ];
+
+  let gasChangeScript: string | undefined;
+  if (gasInputs.length > 0) {
+    if (!params.gasChangeAddress) {
+      throw new Error('gas-change-address-required');
+    }
+    gasChangeScript = await addressToScriptPubKey(params.gasChangeAddress);
+    outputs.push(new EcashScript(toUint8Array(gasChangeScript)));
+  }
+
+  const txBuild = new TxBuilder({
+    inputs: [covenantInput, ...gasInputs],
     outputs,
+  });
+  const signedTx = txBuild.sign(ecc, Number(MIN_RELAY_FEE_PER_KB), 546);
+
+  const unsignedTx: UnsignedTx = {
+    inputs: signedTx.inputs.map((input, index) => ({
+      ...(index === 0 ? params.covenantUtxo : gasUtxos[index - 1]!),
+      sequence: input.sequence ?? FINAL_SEQUENCE,
+      scriptSig: input.script?.toHex(),
+    })),
+    outputs: signedTx.outputs.map((output) => ({
+      value: BigInt(output.value),
+      scriptPubKey: output.script.toHex(),
+    })),
   };
-  const beneficiaryPubKey = normalizePublicKey(params.beneficiaryPrivKey!, params.beneficiaryPubKey);
-  const signature = signFinalizeInputV1(unsignedTx, params.beneficiaryPrivKey!, params.redeemScriptHex!, 0);
-  covenantInput.scriptSig = buildFinalizeUnlockingScriptV1(signature, beneficiaryPubKey, params.redeemScriptHex!);
 
   return {
     unsignedTx,
-    rawHex: serializeUnsignedTx(unsignedTx),
-    fee: params.covenantUtxo.value + gasTotal - outputs.reduce((acc, output) => acc + output.value, 0n),
+    rawHex: Buffer.from(signedTx.ser()).toString('hex'),
+    fee: feeTarget,
   };
 }
 
