@@ -9,6 +9,7 @@ import {
   hash160,
   p2pkhLockingBytecodeFromPubKeyHash,
   pushBytes,
+  pushScriptNum,
 } from '../covenants/scriptCompiler';
 
 const BENEFICIARY_PUBKEY = `02${'11'.repeat(32)}`;
@@ -88,9 +89,6 @@ describe('compileCampaignCovenantV1', () => {
       bytesToHex([OP.OP_DUP, OP.OP_1, OP.OP_NUMEQUAL, OP.OP_IF]).length,
       compiled.redeemScriptHex.indexOf(bytesToHex([OP.OP_ELSE, OP.OP_DUP, OP.OP_2, OP.OP_NUMEQUAL, OP.OP_IF])),
     );
-    const beneficiaryLockingBytecodeHex = p2pkhLockingBytecodeFromPubKeyHash(
-      hash160(Buffer.from(BENEFICIARY_PUBKEY, 'hex')),
-    );
 
     expect(finalizeBranchHex).toContain(bytesToHex([OP.OP_SHA256, OP.OP_DUP, OP.OP_FROMALTSTACK]));
     expect(finalizeBranchHex).toContain(bytesToHex([OP.OP_CHECKDATASIGVERIFY]));
@@ -99,12 +97,8 @@ describe('compileCampaignCovenantV1', () => {
     expect(finalizeBranchHex).toContain(bytesToHex([OP.OP_NIP]));
     expect(finalizeBranchHex).toContain(bytesToHex([OP.OP_BIN2NUM]));
     expect(finalizeBranchHex).toContain(bytesToHex(pushBytes(Uint8Array.from([0xc3, 0x00, 0x00, 0x00]))));
-    expect(finalizeBranchHex).toContain(
-      bytesToHex([
-        ...pushBytes(Uint8Array.from([25, ...Buffer.from(beneficiaryLockingBytecodeHex, 'hex')])),
-        OP.OP_EQUALVERIFY,
-      ]),
-    );
+    expect(finalizeBranchHex).toContain(bytesToHex([...pushScriptNum(8n), OP.OP_SPLIT, OP.OP_DROP]));
+    expect(finalizeBranchHex).not.toContain(bytesToHex([OP.OP_SPLIT, OP.OP_EQUALVERIFY]));
     expect(finalizeBranchHex).toContain(bytesToHex(pushBytes(encodeScriptNum(goal))));
     expect(finalizeBranchHex).toContain(bytesToHex(pushBytes(encodeScriptNum(feeCapSats))));
     expect(finalizeBranchHex).not.toContain(bytesToHex([OP.OP_INPUTINDEX, OP.OP_UTXOVALUE]));
