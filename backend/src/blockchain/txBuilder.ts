@@ -498,7 +498,10 @@ async function buildPledgeTxV1(params: PledgeTxParams): Promise<BuiltTx> {
 
 async function buildFinalizeTxV1(params: FinalizeTxParams): Promise<BuiltTx> {
   const ecc = new Ecc();
-  const feeTarget = params.fixedFee ?? MIN_ABSOLUTE_FEE;
+  // The preimage-based V1 finalize path now produces a much larger tx
+  // (~881 bytes observed), so use a 1000 sat operational fixed fee target
+  // to guarantee relay without introducing a two-pass re-sign flow.
+  const feeTarget = params.fixedFee ?? 1000n;
   const gasUtxos = (params.gasUtxos ?? []).map((utxo) => {
     if (hasTokenData(utxo)) {
       throw new Error('token-utxo-not-supported');

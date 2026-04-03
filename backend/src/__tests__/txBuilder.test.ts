@@ -181,7 +181,7 @@ describe('V1 covenant spends', () => {
       value: 5000n,
       scriptPubKey: await addressToScriptPubKey(beneficiaryAddress),
     });
-    expect(built.fee).toBe(500n);
+    expect(built.fee).toBe(1000n);
   });
 
   it('refund scriptSig contains oracle signature, selector 0x02 and redeemScript', async () => {
