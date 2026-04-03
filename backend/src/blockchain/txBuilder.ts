@@ -321,12 +321,12 @@ export function buildFinalizeUnlockingScriptV1(
   beneficiaryPubKeyHex: string,
   redeemScriptHex: string
 ): string {
-  return serializeScriptChunks([
-    pushHexChunk(beneficiarySignatureHex),
-    pushHexChunk(beneficiaryPubKeyHex),
-    pushHexChunk('01'),
-    pushHexChunk(redeemScriptHex),
-  ]);
+  return EcashScript.fromOps([
+    pushBytesOp(new Uint8Array(Buffer.from(beneficiarySignatureHex, 'hex'))),
+    pushBytesOp(new Uint8Array(Buffer.from(beneficiaryPubKeyHex, 'hex'))),
+    OP_1,
+    pushBytesOp(new Uint8Array(Buffer.from(redeemScriptHex, 'hex'))),
+  ]).toHex();
 }
 
 export function buildRefundUnlockingScriptV1(
@@ -538,7 +538,7 @@ async function buildFinalizeTxV1(params: FinalizeTxParams): Promise<BuiltTx> {
     signatory: (eccInstance: any, input: any) => {
       const preimage = input.sigHashPreimage(SINGLE_ANYONECANPAY_BIP143);
       const sighash = sha256d(preimage.bytes);
-      const sig = eccInstance.ecdsaSign(beneficiarySk, sighash);
+      const sig = eccInstance.schnorrSign(beneficiarySk, sighash);
       const flaggedSig = flagSignature(sig, SINGLE_ANYONECANPAY_BIP143);
       const unlockingScript = EcashScript.fromOps([
         pushBytesOp(flaggedSig),
@@ -547,17 +547,16 @@ async function buildFinalizeTxV1(params: FinalizeTxParams): Promise<BuiltTx> {
         pushBytesOp(preimage.redeemScript.bytecode),
       ]);
 
-      console.log('\n=== [DEBUG-V1] SIGNATORY ===');
-      console.log('1. SIGHASH:', Buffer.from(sighash).toString('hex'));
+      console.log('[DEBUG-V1] finalize preimage hex:', Buffer.from(preimage.bytes).toString('hex'));
+      console.log('[DEBUG-V1] finalize sighash hex:', Buffer.from(sighash).toString('hex'));
       console.log(
-        '2. RedeemScript (Candado):',
+        '[DEBUG-V1] finalize redeemScript hex:',
         Buffer.from(preimage.redeemScript.bytecode).toString('hex'),
       );
       console.log(
-        '3. UnlockingScript (Llave):',
+        '[DEBUG-V1] finalize unlockingScript hex:',
         Buffer.from(unlockingScript.bytecode).toString('hex'),
       );
-      console.log('============================\n');
 
       return unlockingScript;
     },
@@ -617,10 +616,13 @@ async function buildFinalizeTxV1(params: FinalizeTxParams): Promise<BuiltTx> {
       scriptPubKey: output.script.toHex(),
     })),
   };
+  const rawHex = Buffer.from(signedTx.ser()).toString('hex');
+
+  console.log('[DEBUG-V1] finalize final raw tx hex before broadcast:', rawHex);
 
   return {
     unsignedTx,
-    rawHex: Buffer.from(signedTx.ser()).toString('hex'),
+    rawHex,
     fee: feeTarget,
   };
 }

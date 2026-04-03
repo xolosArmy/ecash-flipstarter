@@ -3,6 +3,7 @@ import {
   buildFinalizeTx,
   buildPayoutTx,
   buildPledgeTx,
+  buildFinalizeUnlockingScriptV1,
   buildRefundTx,
   buildPledgeUnlockingScriptV1,
   buildRefundUnlockingScriptV1,
@@ -11,7 +12,7 @@ import {
   signRefundInputV1,
 } from '../blockchain/txBuilder';
 import { addressToScriptPubKey } from '../blockchain/ecashClient';
-import { TEYOLIA_COVENANT_V1 } from '../covenants/scriptCompiler';
+import { TEYOLIA_COVENANT_V1, compileCampaignCovenantV1 } from '../covenants/scriptCompiler';
 
 describe('buildPledgeTx', () => {
   it('routes campaign output first and contributor change last', async () => {
@@ -114,6 +115,14 @@ describe('V1 covenant spends', () => {
   const oraclePrivKey = Buffer.from('02'.repeat(32), 'hex');
 
   it('builds a signed V1 finalize tx and preserves the expected spend shape', async () => {
+    const covenant = compileCampaignCovenantV1({
+      goal: 4000n,
+      expirationTime: 123456n,
+      beneficiaryPubKey:
+        '031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f',
+      refundOraclePubKey:
+        '024d4b6cd1361032ca9bd2aeb9d900aa4d45d9ea5d0a1c6b7b29f1974f2d4d9f12',
+    });
     const built = await buildFinalizeTx({
       covenantUtxo: {
         txid: '33'.repeat(32),
@@ -123,8 +132,10 @@ describe('V1 covenant spends', () => {
       },
       beneficiaryAddress,
       contractVersion: TEYOLIA_COVENANT_V1,
-      redeemScriptHex,
+      redeemScriptHex: covenant.redeemScriptHex,
       beneficiaryPrivKey,
+      beneficiaryPubKey:
+        '031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f',
       gasUtxos: [
         {
           txid: '88'.repeat(32),
@@ -139,6 +150,23 @@ describe('V1 covenant spends', () => {
 
     expect(built.rawHex).toMatch(/^[0-9a-f]+$/);
     expect(built.unsignedTx.inputs).toHaveLength(2);
+    const scriptSig = built.unsignedTx.inputs[0]?.scriptSig ?? '';
+    const expectedPubKeyHex =
+      '031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f';
+    const flaggedSigHex = scriptSig.slice(2, 2 + 130);
+    expect(scriptSig).toBe(
+      buildFinalizeUnlockingScriptV1(
+        flaggedSigHex,
+        expectedPubKeyHex,
+        covenant.redeemScriptHex,
+      ),
+    );
+    expect(flaggedSigHex).toHaveLength(130);
+    expect(Buffer.from(flaggedSigHex, 'hex')).toHaveLength(65);
+    expect(flaggedSigHex.endsWith('c3')).toBe(true);
+    expect(scriptSig).toContain(`21${expectedPubKeyHex}51`);
+    expect(scriptSig.slice(2 + 130, 2 + 130 + 68)).toBe(`21${expectedPubKeyHex}`);
+    expect(scriptSig.slice(2 + 130 + 68, 2 + 130 + 68 + 2)).toBe('51');
     expect(built.unsignedTx.outputs[0]).toEqual({
       value: 5000n,
       scriptPubKey: await addressToScriptPubKey(beneficiaryAddress),
