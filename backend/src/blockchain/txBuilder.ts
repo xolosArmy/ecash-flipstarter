@@ -317,13 +317,19 @@ export function buildPledgeUnlockingScriptV1(redeemScriptHex: string): string {
 }
 
 export function buildFinalizeUnlockingScriptV1(
+  beneficiaryFlaggedSignatureHex: string,
   beneficiarySignatureHex: string,
-  beneficiaryPubKeyHex: string,
+  preimageHex: string,
+  preimageSha256Hex: string,
+  output0Hex: string,
   redeemScriptHex: string
 ): string {
   return EcashScript.fromOps([
+    pushBytesOp(new Uint8Array(Buffer.from(beneficiaryFlaggedSignatureHex, 'hex'))),
     pushBytesOp(new Uint8Array(Buffer.from(beneficiarySignatureHex, 'hex'))),
-    pushBytesOp(new Uint8Array(Buffer.from(beneficiaryPubKeyHex, 'hex'))),
+    pushBytesOp(new Uint8Array(Buffer.from(preimageHex, 'hex'))),
+    pushBytesOp(new Uint8Array(Buffer.from(preimageSha256Hex, 'hex'))),
+    pushBytesOp(new Uint8Array(Buffer.from(output0Hex, 'hex'))),
     OP_1,
     pushBytesOp(new Uint8Array(Buffer.from(redeemScriptHex, 'hex'))),
   ]).toHex();
@@ -521,9 +527,6 @@ async function buildFinalizeTxV1(params: FinalizeTxParams): Promise<BuiltTx> {
     typeof value === 'string' ? new Uint8Array(Buffer.from(value, 'hex')) : new Uint8Array(value);
 
   const beneficiarySk = toUint8Array(params.beneficiaryPrivKey!);
-  const beneficiaryPk = toUint8Array(
-    Buffer.from(normalizePublicKey(params.beneficiaryPrivKey!, params.beneficiaryPubKey), 'hex'),
-  );
   const redeemScript = new EcashScript(toUint8Array(params.redeemScriptHex!));
 
   const covenantInput: TxBuilderInput = {
@@ -537,17 +540,26 @@ async function buildFinalizeTxV1(params: FinalizeTxParams): Promise<BuiltTx> {
     },
     signatory: (eccInstance: any, input: any) => {
       const preimage = input.sigHashPreimage(SINGLE_ANYONECANPAY_BIP143);
+      const preimageHash = crypto.createHash('sha256').update(preimage.bytes).digest();
       const sighash = sha256d(preimage.bytes);
       const sig = eccInstance.schnorrSign(beneficiarySk, sighash);
       const flaggedSig = flagSignature(sig, SINGLE_ANYONECANPAY_BIP143);
+      const output0Hex = serializeTxOutputHex({
+        value: beneficiaryAmount,
+        scriptPubKey: beneficiaryScript,
+      });
       const unlockingScript = EcashScript.fromOps([
         pushBytesOp(flaggedSig),
-        pushBytesOp(beneficiaryPk),
+        pushBytesOp(sig),
+        pushBytesOp(preimage.bytes),
+        pushBytesOp(preimageHash),
+        pushBytesOp(new Uint8Array(Buffer.from(output0Hex, 'hex'))),
         OP_1,
         pushBytesOp(preimage.redeemScript.bytecode),
       ]);
 
       console.log('[DEBUG-V1] finalize preimage hex:', Buffer.from(preimage.bytes).toString('hex'));
+      console.log('[DEBUG-V1] finalize preimage sha256 hex:', Buffer.from(preimageHash).toString('hex'));
       console.log('[DEBUG-V1] finalize sighash hex:', Buffer.from(sighash).toString('hex'));
       console.log(
         '[DEBUG-V1] finalize redeemScript hex:',
@@ -851,12 +863,22 @@ function hashOutputs(outputs: UnsignedTx['outputs'], inputIndex: number, baseTyp
 function serializeAndHashOutputs(outputs: UnsignedTx['outputs']): number[] {
   const bytes: number[] = [];
   for (const output of outputs) {
-    writeUInt64LE(bytes, output.value);
-    const scriptBytes = hexToBytes(output.scriptPubKey);
-    writeVarInt(bytes, scriptBytes.length);
-    bytes.push(...scriptBytes);
+    bytes.push(...serializeTxOutputBytes(output));
   }
   return [...hash256(Buffer.from(bytes))];
+}
+
+function serializeTxOutputHex(output: UnsignedTx['outputs'][number]): string {
+  return Buffer.from(serializeTxOutputBytes(output)).toString('hex');
+}
+
+function serializeTxOutputBytes(output: UnsignedTx['outputs'][number]): number[] {
+  const bytes: number[] = [];
+  writeUInt64LE(bytes, output.value);
+  const scriptBytes = hexToBytes(output.scriptPubKey);
+  writeVarInt(bytes, scriptBytes.length);
+  bytes.push(...scriptBytes);
+  return bytes;
 }
 
 function asPrivKeyBuffer(privateKey: Buffer | string): Buffer {

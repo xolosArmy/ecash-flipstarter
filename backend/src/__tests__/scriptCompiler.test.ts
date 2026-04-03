@@ -73,6 +73,43 @@ describe('compileCampaignCovenantV1', () => {
     expect(compiled.redeemScriptHex).toContain(bytesToHex(pushBytes(encodeScriptNum(goal))));
     expect(compiled.redeemScriptHex).toContain(bytesToHex(pushBytes(encodeScriptNum(expirationTime))));
   });
+
+  it('rewrites finalize as a preimage-based branch without BCH native introspection opcodes', () => {
+    const goal = 125_001n;
+    const feeCapSats = 1_000n;
+    const compiled = compileCampaignCovenantV1({
+      goal,
+      expirationTime: 1_735_689_601n,
+      beneficiaryPubKey: BENEFICIARY_PUBKEY,
+      refundOraclePubKey: REFUND_ORACLE_PUBKEY,
+      feeCapSats,
+    });
+    const finalizeBranchHex = compiled.redeemScriptHex.slice(
+      bytesToHex([OP.OP_DUP, OP.OP_1, OP.OP_NUMEQUAL, OP.OP_IF]).length,
+      compiled.redeemScriptHex.indexOf(bytesToHex([OP.OP_ELSE, OP.OP_DUP, OP.OP_2, OP.OP_NUMEQUAL, OP.OP_IF])),
+    );
+    const beneficiaryLockingBytecodeHex = p2pkhLockingBytecodeFromPubKeyHash(
+      hash160(Buffer.from(BENEFICIARY_PUBKEY, 'hex')),
+    );
+
+    expect(finalizeBranchHex).toContain(bytesToHex([OP.OP_SHA256, OP.OP_DUP, OP.OP_FROMALTSTACK]));
+    expect(finalizeBranchHex).toContain(bytesToHex([OP.OP_CHECKDATASIGVERIFY]));
+    expect(finalizeBranchHex).toContain(bytesToHex([OP.OP_HASH256, OP.OP_ROT, OP.OP_EQUALVERIFY]));
+    expect(finalizeBranchHex).toContain(bytesToHex([OP.OP_SPLIT]));
+    expect(finalizeBranchHex).toContain(bytesToHex([OP.OP_NIP]));
+    expect(finalizeBranchHex).toContain(bytesToHex([OP.OP_BIN2NUM]));
+    expect(finalizeBranchHex).toContain(bytesToHex(pushBytes(Uint8Array.from([0xc3, 0x00, 0x00, 0x00]))));
+    expect(finalizeBranchHex).toContain(
+      bytesToHex([
+        ...pushBytes(Uint8Array.from([25, ...Buffer.from(beneficiaryLockingBytecodeHex, 'hex')])),
+        OP.OP_EQUALVERIFY,
+      ]),
+    );
+    expect(finalizeBranchHex).toContain(bytesToHex(pushBytes(encodeScriptNum(goal))));
+    expect(finalizeBranchHex).toContain(bytesToHex(pushBytes(encodeScriptNum(feeCapSats))));
+    expect(finalizeBranchHex).not.toContain(bytesToHex([OP.OP_INPUTINDEX, OP.OP_UTXOVALUE]));
+    expect(finalizeBranchHex).not.toContain(bytesToHex([OP.OP_OUTPUTVALUE, OP.OP_OUTPUTBYTECODE]));
+  });
 });
 
 describe('compileCampaignScript', () => {

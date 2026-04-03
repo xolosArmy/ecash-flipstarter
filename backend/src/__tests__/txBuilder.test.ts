@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { describe, expect, it } from 'vitest';
 import {
   buildFinalizeTx,
@@ -140,7 +141,7 @@ describe('V1 covenant spends', () => {
         {
           txid: '88'.repeat(32),
           vout: 1,
-          value: 700n,
+          value: 2000n,
           scriptPubKey: '76a914' + '11'.repeat(20) + '88ac',
         },
       ],
@@ -151,22 +152,31 @@ describe('V1 covenant spends', () => {
     expect(built.rawHex).toMatch(/^[0-9a-f]+$/);
     expect(built.unsignedTx.inputs).toHaveLength(2);
     const scriptSig = built.unsignedTx.inputs[0]?.scriptSig ?? '';
-    const expectedPubKeyHex =
-      '031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f';
-    const flaggedSigHex = scriptSig.slice(2, 2 + 130);
+    const { dataHex: flaggedSigHex, nextOffset: afterFlaggedSig } = readPushHex(scriptSig, 0);
+    const { dataHex: rawSigHex, nextOffset: afterRawSig } = readPushHex(scriptSig, afterFlaggedSig);
+    const { dataHex: preimageHex, nextOffset: afterPreimage } = readPushHex(scriptSig, afterRawSig);
+    const { dataHex: preimageSha256Hex, nextOffset: afterPreimageSha256 } = readPushHex(scriptSig, afterPreimage);
+    const { dataHex: output0Hex, nextOffset: afterOutput0 } = readPushHex(scriptSig, afterPreimageSha256);
+
     expect(scriptSig).toBe(
       buildFinalizeUnlockingScriptV1(
         flaggedSigHex,
-        expectedPubKeyHex,
+        rawSigHex,
+        preimageHex,
+        preimageSha256Hex,
+        output0Hex,
         covenant.redeemScriptHex,
       ),
     );
+    expect(scriptSig.slice(afterOutput0, afterOutput0 + 2)).toBe('51');
     expect(flaggedSigHex).toHaveLength(130);
+    expect(rawSigHex).toHaveLength(128);
     expect(Buffer.from(flaggedSigHex, 'hex')).toHaveLength(65);
+    expect(Buffer.from(rawSigHex, 'hex')).toHaveLength(64);
     expect(flaggedSigHex.endsWith('c3')).toBe(true);
-    expect(scriptSig).toContain(`21${expectedPubKeyHex}51`);
-    expect(scriptSig.slice(2 + 130, 2 + 130 + 68)).toBe(`21${expectedPubKeyHex}`);
-    expect(scriptSig.slice(2 + 130 + 68, 2 + 130 + 68 + 2)).toBe('51');
+    expect(preimageSha256Hex).toBe(crypto.createHash('sha256').update(Buffer.from(preimageHex, 'hex')).digest('hex'));
+    expect(Buffer.from(output0Hex, 'hex')).toHaveLength(34);
+    expect(output0Hex).toBe(`881300000000000019${await addressToScriptPubKey(beneficiaryAddress)}`);
     expect(built.unsignedTx.outputs[0]).toEqual({
       value: 5000n,
       scriptPubKey: await addressToScriptPubKey(beneficiaryAddress),
@@ -262,6 +272,29 @@ describe('V1 covenant spends', () => {
     expect(built.unsignedTx.outputs[0]?.value).toBe(5000n);
   });
 });
+
+function readPushHex(scriptHex: string, offset: number): { dataHex: string; nextOffset: number } {
+  const opcode = parseInt(scriptHex.slice(offset, offset + 2), 16);
+  if (Number.isNaN(opcode)) {
+    throw new Error('invalid-script-offset');
+  }
+
+  let size = opcode;
+  let cursor = offset + 2;
+  if (opcode === 0x4c) {
+    size = parseInt(scriptHex.slice(cursor, cursor + 2), 16);
+    cursor += 2;
+  } else if (opcode === 0x4d) {
+    size = parseInt(scriptHex.slice(cursor + 2, cursor + 4) + scriptHex.slice(cursor, cursor + 2), 16);
+    cursor += 4;
+  }
+
+  const dataHex = scriptHex.slice(cursor, cursor + size * 2);
+  return {
+    dataHex,
+    nextOffset: cursor + size * 2,
+  };
+}
 
 describe('buildPayoutTx', () => {
   it('pays the beneficiary with a single output and disables treasury cut', async () => {

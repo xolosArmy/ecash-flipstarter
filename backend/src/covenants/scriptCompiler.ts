@@ -20,20 +20,31 @@ export const OP = {
   OP_ELSE: 0x67,
   OP_ENDIF: 0x68,
   OP_VERIFY: 0x69,
+  OP_TOALTSTACK: 0x6b,
+  OP_FROMALTSTACK: 0x6c,
   OP_DROP: 0x75,
   OP_DUP: 0x76,
+  OP_NIP: 0x77,
+  OP_OVER: 0x78,
+  OP_ROT: 0x7b,
+  OP_SWAP: 0x7c,
+  OP_SPLIT: 0x7f,
+  OP_BIN2NUM: 0x81,
   OP_EQUAL: 0x87,
   OP_EQUALVERIFY: 0x88,
+  OP_NOT: 0x91,
   OP_SUB: 0x94,
   OP_NUMEQUAL: 0x9c,
   OP_NUMEQUALVERIFY: 0x9d,
-  OP_LESSTHANOREQUAL: 0xa1,
+  OP_LESSTHAN: 0x9f,
   OP_GREATERTHAN: 0xa0,
-  OP_GREATERTHANOREQUAL: 0xa2,
+  OP_SHA256: 0xa8,
   OP_HASH160: 0xa9,
+  OP_HASH256: 0xaa,
   OP_CHECKSIG: 0xac,
   OP_CHECKSIGVERIFY: 0xad,
   OP_CHECKLOCKTIMEVERIFY: 0xb1,
+  OP_CHECKDATASIGVERIFY: 0xbb,
   OP_INPUTINDEX: 0xc0,
   OP_ACTIVEBYTECODE: 0xc1,
   OP_TXVERSION: 0xc2,
@@ -182,33 +193,69 @@ export function compileCampaignCovenantV1(
   const refundOraclePubKey = expectHexBytes(params.refundOraclePubKey, [33, 65], 'refundOraclePubKey');
   const beneficiaryLockingBytecodeHex = p2pkhLockingBytecodeFromPubKeyHash(hash160(beneficiaryPubKey));
   const beneficiaryLockingBytecode = hexToBytes(beneficiaryLockingBytecodeHex);
+  const sighashSingleAnyoneCanPayForkIdLe = Uint8Array.from([0xc3, 0x00, 0x00, 0x00]);
+  const beneficiaryOutputSuffix = Uint8Array.from([beneficiaryLockingBytecode.length, ...beneficiaryLockingBytecode]);
 
   // Unlocking shape for the next step:
   // pledge   -> <0x03>
-  // finalize -> <beneficiary_sig> <beneficiary_pubkey> <0x01>
+  // finalize -> <beneficiary_sig+hashtype> <beneficiary_sig> <preimage> <sha256(preimage)> <output0> <0x01>
   // refund   -> <oracle_sig> <0x02>
-  const finalizeBranch = compileScript(
+  const buildFinalizeBranch = (preimagePrefixLength: number) => compileScript(
     OP.OP_DROP,
-    pushBytes(beneficiaryPubKey),
+    OP.OP_TOALTSTACK,
+    OP.OP_TOALTSTACK,
+    OP.OP_DUP,
+    OP.OP_SHA256,
+    OP.OP_DUP,
+    OP.OP_FROMALTSTACK,
     OP.OP_EQUALVERIFY,
+    OP.OP_SWAP,
+    OP.OP_TOALTSTACK,
+    pushBytes(beneficiaryPubKey),
+    OP.OP_CHECKDATASIGVERIFY,
     pushBytes(beneficiaryPubKey),
     OP.OP_CHECKSIGVERIFY,
-    OP.OP_INPUTINDEX,
-    OP.OP_UTXOVALUE,
-    pushScriptNum(goal),
-    OP.OP_GREATERTHANOREQUAL,
-    OP.OP_VERIFY,
-    pushScriptNum(0n),
-    OP.OP_OUTPUTBYTECODE,
-    pushBytes(beneficiaryLockingBytecode),
+    OP.OP_FROMALTSTACK,
+    OP.OP_FROMALTSTACK,
+    OP.OP_TOALTSTACK,
+    pushScriptNum(preimagePrefixLength),
+    OP.OP_SPLIT,
+    OP.OP_NIP,
+    pushScriptNum(8n),
+    OP.OP_SPLIT,
+    pushScriptNum(4n),
+    OP.OP_SPLIT,
+    OP.OP_NIP,
+    pushScriptNum(32n),
+    OP.OP_SPLIT,
+    pushScriptNum(4n),
+    OP.OP_SPLIT,
+    OP.OP_NIP,
+    pushBytes(sighashSingleAnyoneCanPayForkIdLe),
     OP.OP_EQUALVERIFY,
-    OP.OP_INPUTINDEX,
-    OP.OP_UTXOVALUE,
+    OP.OP_FROMALTSTACK,
+    OP.OP_DUP,
+    OP.OP_HASH256,
+    OP.OP_ROT,
+    OP.OP_EQUALVERIFY,
+    pushScriptNum(8n),
+    OP.OP_SPLIT,
+    pushBytes(beneficiaryOutputSuffix),
+    OP.OP_EQUALVERIFY,
+    OP.OP_SWAP,
+    OP.OP_BIN2NUM,
+    OP.OP_SWAP,
+    OP.OP_BIN2NUM,
+    OP.OP_OVER,
+    pushScriptNum(goal),
+    OP.OP_LESSTHAN,
+    OP.OP_NOT,
+    OP.OP_VERIFY,
+    OP.OP_SWAP,
     pushScriptNum(feeCapSats),
     OP.OP_SUB,
-    pushScriptNum(0n),
-    OP.OP_OUTPUTVALUE,
-    OP.OP_LESSTHANOREQUAL,
+    OP.OP_LESSTHAN,
+    OP.OP_NOT,
     OP.OP_VERIFY,
     OP.OP_1,
   );
@@ -248,12 +295,12 @@ export function compileCampaignCovenantV1(
     OP.OP_1,
   );
 
-  const redeemScript = compileScript(
+  const buildRedeemScript = (preimagePrefixLength: number) => compileScript(
     OP.OP_DUP,
     pushScriptNum(1n),
     OP.OP_NUMEQUAL,
     OP.OP_IF,
-    finalizeBranch,
+    buildFinalizeBranch(preimagePrefixLength),
     OP.OP_ELSE,
     OP.OP_DUP,
     pushScriptNum(2n),
@@ -267,6 +314,17 @@ export function compileCampaignCovenantV1(
     OP.OP_ENDIF,
     OP.OP_ENDIF,
   );
+
+  let redeemScript = buildRedeemScript(0);
+  for (let i = 0; i < 3; i += 1) {
+    const preimagePrefixLength = 4 + 32 + 32 + 36 + 1 + redeemScript.length;
+    const nextRedeemScript = buildRedeemScript(preimagePrefixLength);
+    if (nextRedeemScript.length === redeemScript.length) {
+      redeemScript = nextRedeemScript;
+      break;
+    }
+    redeemScript = nextRedeemScript;
+  }
 
   const redeemScriptHex = bytesToHex(redeemScript);
   const p2sh = p2shLockingBytecodeFromRedeemScript(redeemScript);
