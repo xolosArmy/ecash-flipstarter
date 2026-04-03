@@ -104,6 +104,30 @@ describe('compileCampaignCovenantV1', () => {
     expect(finalizeBranchHex).not.toContain(bytesToHex([OP.OP_INPUTINDEX, OP.OP_UTXOVALUE]));
     expect(finalizeBranchHex).not.toContain(bytesToHex([OP.OP_OUTPUTVALUE, OP.OP_OUTPUTBYTECODE]));
   });
+
+  it('uses a minimal refund branch with CLTV and oracle checks only', () => {
+    const expirationTime = 1_735_689_601n;
+    const compiled = compileCampaignCovenantV1({
+      goal: 125_001n,
+      expirationTime,
+      beneficiaryPubKey: BENEFICIARY_PUBKEY,
+      refundOraclePubKey: REFUND_ORACLE_PUBKEY,
+    });
+    const refundBranchHex = compiled.redeemScriptHex.slice(
+      compiled.redeemScriptHex.indexOf(bytesToHex([OP.OP_ELSE, OP.OP_DUP, OP.OP_2, OP.OP_NUMEQUAL, OP.OP_IF]))
+        + bytesToHex([OP.OP_ELSE, OP.OP_DUP, OP.OP_2, OP.OP_NUMEQUAL, OP.OP_IF]).length,
+      compiled.redeemScriptHex.indexOf(bytesToHex([OP.OP_ELSE, OP.OP_3, OP.OP_NUMEQUALVERIFY])),
+    );
+
+    expect(refundBranchHex).toContain(bytesToHex([OP.OP_DROP]));
+    expect(refundBranchHex).toContain(bytesToHex(pushBytes(encodeScriptNum(expirationTime))));
+    expect(refundBranchHex).toContain(bytesToHex([OP.OP_CHECKLOCKTIMEVERIFY, OP.OP_DROP]));
+    expect(refundBranchHex).toContain(bytesToHex(pushBytes(Buffer.from(REFUND_ORACLE_PUBKEY, 'hex'))));
+    expect(refundBranchHex).toContain(bytesToHex([OP.OP_CHECKSIGVERIFY, OP.OP_1]));
+    expect(refundBranchHex).not.toContain(bytesToHex([OP.OP_TXOUTPUTCOUNT]));
+    expect(refundBranchHex).not.toContain(bytesToHex([OP.OP_OUTPUTBYTECODE]));
+    expect(refundBranchHex).not.toContain(bytesToHex([OP.OP_INPUTINDEX, OP.OP_UTXOBYTECODE]));
+  });
 });
 
 describe('compileCampaignScript', () => {

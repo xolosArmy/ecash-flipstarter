@@ -213,6 +213,7 @@ describe('V1 covenant spends', () => {
     expect(built.unsignedTx.inputs[0]?.scriptSig).toBe(
       buildRefundUnlockingScriptV1(signature, redeemScriptHex),
     );
+    expect(signature.endsWith('41')).toBe(true);
   });
 
   it('refund uses the requested locktime and a non-final sequence when CLTV applies', async () => {
@@ -254,6 +255,36 @@ describe('V1 covenant spends', () => {
     };
 
     expect(computeEcashSigHash(tx, 0, redeemScriptHex)).toBe(computeEcashSigHash(tx, 0, redeemScriptHex));
+  });
+
+  it('refund signature changes when non-covered finalize-style assumptions no longer apply and outputs change', () => {
+    const tx = {
+      inputs: [
+        {
+          txid: '66'.repeat(32),
+          vout: 0,
+          value: 5000n,
+          scriptPubKey: covenantScriptPubKey,
+          sequence: 0xfffffffe,
+        },
+      ],
+      outputs: [
+        { value: 2000n, scriptPubKey: '76a914' + '11'.repeat(20) + '88ac' },
+        { value: 2500n, scriptPubKey: covenantScriptPubKey },
+      ],
+      locktime: 123456,
+    };
+    const changedOutputsTx = {
+      ...tx,
+      outputs: [
+        { value: 2001n, scriptPubKey: '76a914' + '11'.repeat(20) + '88ac' },
+        { value: 2499n, scriptPubKey: covenantScriptPubKey },
+      ],
+    };
+
+    expect(signRefundInputV1(tx, oraclePrivKey, redeemScriptHex)).not.toBe(
+      signRefundInputV1(changedOutputsTx, oraclePrivKey, redeemScriptHex),
+    );
   });
 
   it('legacy campaigns keep using the old finalize path', async () => {

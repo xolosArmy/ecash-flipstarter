@@ -396,7 +396,13 @@ export function signRefundInputV1(
   redeemScriptHex: string,
   inputIndex = 0
 ): string {
-  return signEcashInput(unsignedTx, refundOraclePrivKey, redeemScriptHex, inputIndex);
+  return signEcashInput(
+    unsignedTx,
+    refundOraclePrivKey,
+    redeemScriptHex,
+    inputIndex,
+    SIGHASH_ALL_FORKID,
+  );
 }
 
 export function signP2pkhInput(
@@ -784,17 +790,18 @@ function signEcashInput(
   unsignedTx: UnsignedTx,
   privateKey: Buffer | string,
   redeemScriptHex: string,
-  inputIndex: number
+  inputIndex: number,
+  sighashType = SIGHASH_SINGLE_ANYONECANPAY_FORKID,
 ): string {
   const privKey = asPrivKeyBuffer(privateKey);
   const sighash = Buffer.from(
-    computeEcashSigHash(unsignedTx, inputIndex, redeemScriptHex, SIGHASH_SINGLE_ANYONECANPAY_FORKID),
+    computeEcashSigHash(unsignedTx, inputIndex, redeemScriptHex, sighashType),
     'hex',
   );
   const sig64 = secp256k1.sign(sighash, privKey).toCompactRawBytes();
   return Buffer.concat([
     toDerSignature(sig64),
-    Buffer.from([SIGHASH_SINGLE_ANYONECANPAY_FORKID]),
+    Buffer.from([sighashType]),
   ]).toString('hex');
 }
 

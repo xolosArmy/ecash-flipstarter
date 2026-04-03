@@ -268,16 +268,6 @@ export function compileCampaignCovenantV1(
     OP.OP_DROP,
     pushBytes(refundOraclePubKey),
     OP.OP_CHECKSIGVERIFY,
-    OP.OP_TXOUTPUTCOUNT,
-    pushScriptNum(1n),
-    OP.OP_GREATERTHAN,
-    OP.OP_IF,
-    pushScriptNum(1n),
-    OP.OP_OUTPUTBYTECODE,
-    OP.OP_INPUTINDEX,
-    OP.OP_UTXOBYTECODE,
-    OP.OP_EQUALVERIFY,
-    OP.OP_ENDIF,
     OP.OP_1,
   );
 
