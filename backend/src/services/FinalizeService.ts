@@ -117,7 +117,7 @@ export class FinalizeService {
       gasUtxos,
       gasChangeAddress: gasUtxos.length > 0 ? gasWalletAddress : undefined,
       gasPrivKey,
-      fixedFee: 500n,
+      fixedFee: 1000n,
     });
 
     const rawHex = built.rawHex;
