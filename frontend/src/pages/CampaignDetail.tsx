@@ -8,6 +8,7 @@ import {
   fetchCampaignPledges,
   fetchCampaignSummary,
   finalizeCampaign,
+  refundCampaign,
 } from '../api/client';
 import type { AuditLog } from '../api/types';
 import type { CampaignSummary } from '../types/campaign';
@@ -49,8 +50,13 @@ export const CampaignDetail: React.FC = () => {
   const [activationMessage, setActivationMessage] = useState('');
   const [payoutError, setPayoutError] = useState('');
   const [payoutMessage, setPayoutMessage] = useState('');
+  const [refundAddress, setRefundAddress] = useState('');
+  const [refundAmount, setRefundAmount] = useState('');
+  const [refundError, setRefundError] = useState('');
+  const [refundMessage, setRefundMessage] = useState('');
   const [activating, setActivating] = useState(false);
   const [payingOut, setPayingOut] = useState(false);
+  const [refunding, setRefunding] = useState(false);
   const [messages, setMessages] = useState<Array<{ amount: number; timestamp: string; message: string }>>([]);
   const [history, setHistory] = useState<AuditLog[]>([]);
   const {
@@ -167,6 +173,12 @@ export const CampaignDetail: React.FC = () => {
     if (!addresses.length) return;
     setPayerAddress(normalizeEcashAddress(addresses[0]));
   }, [addresses, payerAddress]);
+
+  useEffect(() => {
+    if (!campaign) return;
+    setRefundAddress((current) => current.trim() || campaign.beneficiaryAddress?.trim() || '');
+    setRefundAmount((current) => current.trim() || String(campaign.totalPledged || 0));
+  }, [campaign]);
 
   useEffect(() => {
     if (!id) return undefined;
@@ -343,6 +355,37 @@ export const CampaignDetail: React.FC = () => {
     }
   };
 
+  const executeRefund = async () => {
+    if (!id || refunding) return;
+    setRefundError('');
+    setRefundMessage('');
+    setRefunding(true);
+    showToast('Solicitando refund al backend...', 'info');
+    try {
+      const result = await refundCampaign(id, {
+        refundAddress,
+        refundAmount,
+      });
+      const refreshed = await fetchCampaignSummary(id);
+      setCampaign(refreshed);
+      window.dispatchEvent(
+        new CustomEvent('campaign:summary:refresh', {
+          detail: { campaignId: id, summary: refreshed },
+        }),
+      );
+      window.dispatchEvent(new Event('campaigns:refresh'));
+      setRefundMessage(`Refund enviado. Txid: ${result.txid}`);
+      showToast('Refund enviado', 'success');
+      refreshCampaign();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'No se pudo ejecutar el refund.';
+      setRefundError(message);
+      showToast('No se pudo ejecutar el refund', 'error');
+    } finally {
+      setRefunding(false);
+    }
+  };
+
   if (!id) return <p>Campaña no encontrada.</p>;
   if (loadingCampaign) return <p>Loading campaign...</p>;
   if (campaignError) return <p>{campaignError}</p>;
@@ -475,6 +518,36 @@ export const CampaignDetail: React.FC = () => {
           </button>
           {payoutMessage && <p>{payoutMessage}</p>}
           {payoutError && <p style={{ color: '#b00020' }}>{payoutError}</p>}
+        </section>
+      )}
+      {campaign.status === 'expired' && (
+        <section style={{ border: '1px solid #fee2e2', borderRadius: 8, padding: 12, marginTop: 12 }}>
+          <h3>Refund</h3>
+          <p>
+            La API actual requiere dirección y monto explícitos para ejecutar el refund de una campaña expirada.
+          </p>
+          <label style={{ display: 'grid', gap: 4, marginBottom: 8 }}>
+            Refund Address
+            <input
+              value={refundAddress}
+              onChange={(event) => setRefundAddress(event.target.value)}
+              placeholder="ecash:..."
+            />
+          </label>
+          <label style={{ display: 'grid', gap: 4 }}>
+            Refund Amount (sats)
+            <input
+              value={refundAmount}
+              onChange={(event) => setRefundAmount(event.target.value)}
+              inputMode="numeric"
+              placeholder="0"
+            />
+          </label>
+          <button type="button" onClick={executeRefund} disabled={refunding} style={{ marginTop: 12 }}>
+            {refunding ? 'Procesando refund...' : 'Ejecutar refund'}
+          </button>
+          {refundMessage && <p>{refundMessage}</p>}
+          {refundError && <p style={{ color: '#b00020' }}>{refundError}</p>}
         </section>
       )}
       {campaign.status === 'paid_out' && <p>Esta campaña ya fue pagada.</p>}

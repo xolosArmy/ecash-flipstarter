@@ -252,6 +252,30 @@ export async function finalizeCampaign(campaignId: string): Promise<FinalizeCamp
   });
 }
 
+export interface RefundCampaignPayload {
+  refundAddress: string;
+  refundAmount: string | number | bigint;
+}
+
+export interface RefundCampaignResponse {
+  txid: string;
+  rawHex?: string;
+  hex?: string;
+}
+
+export async function refundCampaign(
+  campaignId: string,
+  payload: RefundCampaignPayload,
+): Promise<RefundCampaignResponse> {
+  return jsonFetch<RefundCampaignResponse>(`/campaign/${campaignId}/refund`, {
+    method: 'POST',
+    body: JSON.stringify({
+      refundAddress: payload.refundAddress,
+      refundAmount: String(payload.refundAmount),
+    }),
+  });
+}
+
 export async function createPledgeTx(
   campaignId: string,
   contributorAddress: string,
