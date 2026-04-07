@@ -311,7 +311,7 @@ export async function derivePrivKeyFromSeed(mnemonic: string, index = 0): Promis
 
 export function buildPledgeUnlockingScriptV1(redeemScriptHex: string): string {
   return serializeScriptChunks([
-    pushHexChunk('03'),
+    '53', // OP_3
     pushHexChunk(redeemScriptHex),
   ]);
 }
@@ -341,7 +341,7 @@ export function buildRefundUnlockingScriptV1(
 ): string {
   return serializeScriptChunks([
     pushHexChunk(oracleSignatureHex),
-    pushHexChunk('02'),
+    '52', // OP_2
     pushHexChunk(redeemScriptHex),
   ]);
 }
