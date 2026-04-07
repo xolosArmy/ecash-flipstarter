@@ -96,15 +96,26 @@ export class RefundService {
       mismatchError: 'refund-oracle-signing-key-mismatch',
     });
 
+    const fixedFee = 500n;
+
+    const maxRefundAmount = covenantUtxo.value - fixedFee;
+    if (maxRefundAmount <= 0n) {
+      throw new Error('refund-insufficient-for-fee');
+    }
+
+    const safeRefundAmount = refundAmount > maxRefundAmount
+      ? maxRefundAmount
+      : refundAmount;
+
     return this.deps.buildRefundTx({
       covenantUtxo,
       refundAddress,
-      refundAmount,
+      refundAmount: safeRefundAmount,
       contractVersion: campaign.contractVersion ?? undefined,
       redeemScriptHex,
       refundOraclePrivKey,
       expirationTime,
-      fixedFee: 500n,
+      fixedFee,
     });
   }
 }
