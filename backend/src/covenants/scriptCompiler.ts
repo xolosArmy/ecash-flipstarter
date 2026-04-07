@@ -78,6 +78,14 @@ export interface CompiledCampaignScript {
 
 type ScriptChunk = number | Uint8Array | number[];
 
+function normalizeExpirationTime(value: bigint | number | string): bigint {
+  let expirationTime = toBigInt(value);
+  if (expirationTime > 0xffffffffn) {
+    expirationTime /= 1000n;
+  }
+  return expirationTime;
+}
+
 export function hexToBytes(hex: string): Uint8Array {
   const normalized = normalizeHex(hex);
   const bytes = new Uint8Array(normalized.length / 2);
@@ -183,7 +191,7 @@ export function compileCampaignCovenantV1(
   beneficiaryLockingBytecodeHex: string;
 } {
   const goal = toBigInt(params.goal);
-  const expirationTime = toBigInt(params.expirationTime);
+  const expirationTime = normalizeExpirationTime(params.expirationTime);
   const feeCapSats = toBigInt(params.feeCapSats ?? 1000n);
   if (goal < 0n) throw new Error('campaign-goal-negative');
   if (expirationTime < 0n) throw new Error('campaign-expiration-negative');
@@ -341,7 +349,7 @@ export function compileCampaignScript(campaign: CampaignDefinition): CompiledCam
       beneficiaryLockingBytecodeHex: compiled.beneficiaryLockingBytecodeHex,
       constructorArgs: {
         goal: toBigInt(params.goal).toString(),
-        expirationTime: toBigInt(params.expirationTime).toString(),
+        expirationTime: normalizeExpirationTime(params.expirationTime).toString(),
         beneficiaryPubKey: normalizeHex(params.beneficiaryPubKey),
         refundOraclePubKey: normalizeHex(params.refundOraclePubKey),
         feeCapSats: toBigInt(params.feeCapSats ?? 1000n).toString(),

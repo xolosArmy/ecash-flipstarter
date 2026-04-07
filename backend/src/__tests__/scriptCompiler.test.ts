@@ -75,6 +75,20 @@ describe('compileCampaignCovenantV1', () => {
     expect(compiled.redeemScriptHex).toContain(bytesToHex(pushBytes(encodeScriptNum(expirationTime))));
   });
 
+  it('normalizes millisecond expirations to seconds before encoding the refund branch', () => {
+    const expirationTimeMs = 1_775_234_960_697n;
+    const expirationTimeSeconds = 1_775_234_960n;
+    const compiled = compileCampaignCovenantV1({
+      goal: 125_001n,
+      expirationTime: expirationTimeMs,
+      beneficiaryPubKey: BENEFICIARY_PUBKEY,
+      refundOraclePubKey: REFUND_ORACLE_PUBKEY,
+    });
+
+    expect(compiled.redeemScriptHex).toContain(bytesToHex(pushBytes(encodeScriptNum(expirationTimeSeconds))));
+    expect(compiled.redeemScriptHex).not.toContain(bytesToHex(pushBytes(encodeScriptNum(expirationTimeMs))));
+  });
+
   it('rewrites finalize as a preimage-based branch without BCH native introspection opcodes', () => {
     const goal = 125_001n;
     const feeCapSats = 1_000n;
