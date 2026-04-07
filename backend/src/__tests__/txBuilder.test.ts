@@ -236,6 +236,26 @@ describe('V1 covenant spends', () => {
     expect(built.unsignedTx.inputs[0]?.sequence).toBe(0xfffffffe);
   });
 
+  it('refund normalizes millisecond locktimes to seconds', async () => {
+    const built = await buildRefundTx({
+      covenantUtxo: {
+        txid: '56'.repeat(32),
+        vout: 2,
+        value: 6000n,
+        scriptPubKey: covenantScriptPubKey,
+      },
+      refundAddress,
+      refundAmount: 2000n,
+      contractVersion: TEYOLIA_COVENANT_V1,
+      redeemScriptHex,
+      refundOraclePrivKey: oraclePrivKey,
+      expirationTime: 1_775_234_960_697n,
+    });
+
+    expect(built.unsignedTx.locktime).toBe(1_775_234_960);
+    expect(built.unsignedTx.inputs[0]?.sequence).toBe(0xfffffffe);
+  });
+
   it('computes a deterministic eCash sighash for V1 signing', () => {
     const tx = {
       inputs: [

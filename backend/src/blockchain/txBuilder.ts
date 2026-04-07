@@ -909,7 +909,10 @@ function normalizeLocktime(locktime: bigint | number | undefined): number {
   if (locktime === undefined) {
     throw new Error('refund-expiration-required');
   }
-  const value = typeof locktime === 'bigint' ? locktime : BigInt(locktime);
+  let value = typeof locktime === 'bigint' ? locktime : BigInt(locktime);
+  if (value > 0xffffffffn) {
+    value /= 1000n;
+  }
   if (value < 0n || value > 0xffffffffn) {
     throw new Error('invalid-locktime');
   }
