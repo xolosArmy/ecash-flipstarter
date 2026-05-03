@@ -71,6 +71,26 @@ a {
   font-weight: 700;
 }
 
+
+.teyolia-nav a:hover {
+  text-decoration: underline;
+  opacity: 0.8;
+}
+
+.teyolia-nav-wallet {
+  color: var(--gold);
+  border: 1px solid var(--gold);
+  padding: 2px 8px;
+  border-radius: 6px;
+  margin-left: 8px;
+  transition: all 0.2s ease-in-out;
+}
+
+.teyolia-nav-wallet:hover {
+  background: rgba(217, 179, 106, 0.15);
+  text-decoration: none;
+}
+
 .teyolia-page {
   border: 1px solid rgba(217, 179, 106, 0.25);
   border-radius: 14px;

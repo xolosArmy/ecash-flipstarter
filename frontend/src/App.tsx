@@ -51,6 +51,14 @@ export const App: React.FC = () => {
                 <Link to="/">Inicio</Link>
                 <Link to="/campaigns/create">Crear campaña</Link>
                 <Link to="/mis-campanas">Mis campañas</Link>
+                <a
+                  href="https://cartera.xolosarmy.xyz"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="teyolia-nav-wallet"
+                >
+                  Abrir Tonalli
+                </a>
               </nav>
             </header>
             <main className="teyolia-page">
