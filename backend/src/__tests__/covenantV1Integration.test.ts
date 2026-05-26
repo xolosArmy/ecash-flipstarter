@@ -28,6 +28,20 @@ const trackedCovenant = {
 
 const originalEnv = { ...process.env };
 
+
+const pledgeStoreMocks = vi.hoisted(() => ({
+  getPledgeByIdMock: vi.fn(),
+  getConfirmedTotalByCampaignMock: vi.fn(),
+  markPledgeRefundedMock: vi.fn(),
+}));
+
+vi.mock('../store/simplePledges', () => ({
+  getPledgeById: pledgeStoreMocks.getPledgeByIdMock,
+  getConfirmedTotalByCampaign: pledgeStoreMocks.getConfirmedTotalByCampaignMock,
+  markPledgeRefunded: pledgeStoreMocks.markPledgeRefundedMock,
+}));
+
+
 beforeEach(() => {
   vi.restoreAllMocks();
   process.env.TEYOLIA_BENEFICIARY_PRIVKEY = beneficiaryPrivKeyHex;
@@ -35,6 +49,9 @@ beforeEach(() => {
   process.env.TEYOLIA_GAS_WALLET_ADDRESS = beneficiaryAddress;
   process.env.TEYOLIA_REFUND_ORACLE_PRIVKEY = oraclePrivKeyHex;
   covenantIndexInstance.setCovenantRef({ ...trackedCovenant });
+  pledgeStoreMocks.getPledgeByIdMock.mockReset();
+  pledgeStoreMocks.getConfirmedTotalByCampaignMock.mockReset();
+  pledgeStoreMocks.markPledgeRefundedMock.mockReset();
 });
 
 afterEach(() => {
@@ -186,11 +203,22 @@ describe('RefundService V1 integration', () => {
       fee: 500n,
     });
     const broadcastRawTx = vi.fn().mockResolvedValue({ txid: 'cc'.repeat(32) });
+    pledgeStoreMocks.getPledgeByIdMock.mockResolvedValue({
+      pledgeId: 'pledge-refund-1',
+      campaignId,
+      amount: 1000,
+      contributorAddress: refundAddress,
+      status: 'confirmed',
+    });
+    pledgeStoreMocks.getConfirmedTotalByCampaignMock.mockResolvedValue(1000);
+    pledgeStoreMocks.markPledgeRefundedMock.mockResolvedValue({ pledgeId: 'pledge-refund-1' });
+
     const service = new RefundService({
       campaignService: {
         getCampaign: vi.fn().mockResolvedValue({
           id: campaignId,
-          goal: '1000',
+          goal: '5000',
+          status: 'expired',
           contractVersion: TEYOLIA_COVENANT_V1,
           redeemScriptHex: '51',
           expirationTime: '1735689600',
@@ -204,7 +232,7 @@ describe('RefundService V1 integration', () => {
       broadcastRawTx,
     });
 
-    const result = await service.refundCampaign(campaignId, refundAddress, 1000n);
+    const result = await service.refundCampaign({ campaignId, pledgeId: 'pledge-refund-1' });
 
     expect(buildRefundTx).toHaveBeenCalledWith(expect.objectContaining({
       covenantUtxo: expect.objectContaining({ txid: trackedCovenant.txid, vout: trackedCovenant.vout }),

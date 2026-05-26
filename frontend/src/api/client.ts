@@ -253,8 +253,7 @@ export async function finalizeCampaign(campaignId: string): Promise<FinalizeCamp
 }
 
 export interface RefundCampaignPayload {
-  refundAddress: string;
-  refundAmount: string | number | bigint;
+  pledgeId: string;
 }
 
 export interface RefundCampaignResponse {
@@ -269,10 +268,7 @@ export async function refundCampaign(
 ): Promise<RefundCampaignResponse> {
   return jsonFetch<RefundCampaignResponse>(`/campaign/${campaignId}/refund`, {
     method: 'POST',
-    body: JSON.stringify({
-      refundAddress: payload.refundAddress,
-      refundAmount: String(payload.refundAmount),
-    }),
+    body: JSON.stringify({ pledgeId: payload.pledgeId }),
   });
 }
 
@@ -350,6 +346,7 @@ export async function confirmLatestPendingPledgeTx(
 
 export interface CampaignPledgesResponse {
   totalPledged: number;
+  pendingTotalPledged: number;
   pledgeCount: number;
   pledges: Array<{
     txid: string | null;
@@ -357,12 +354,17 @@ export interface CampaignPledgesResponse {
     amount: number;
     timestamp: string;
     message?: string;
+    status?: 'intent' | 'broadcasted' | 'seen_mempool' | 'confirmed' | 'finalized' | 'expired' | 'refunded' | 'invalid';
+    statusReason?: string | null;
   }>;
 }
 
 type CampaignPledgesApiPayload =
   | CampaignPledgesResponse
   | CampaignPledgesResponse['pledges'];
+
+const CONFIRMED_PLEDGE_STATUSES = new Set(['confirmed', 'finalized']);
+const PENDING_PLEDGE_STATUSES = new Set(['intent', 'broadcasted', 'seen_mempool']);
 
 function normalizeCampaignPledgesPayload(payload: CampaignPledgesApiPayload): CampaignPledgesResponse {
   if (Array.isArray(payload)) {
@@ -372,10 +374,18 @@ function normalizeCampaignPledgesPayload(payload: CampaignPledgesApiPayload): Ca
       amount: Number(pledge.amount) || 0,
       timestamp: pledge.timestamp,
       message: pledge.message,
+      status: pledge.status,
+      statusReason: pledge.statusReason ?? null,
     }));
-    const totalPledged = pledges.reduce((sum, pledge) => sum + pledge.amount, 0);
+    const totalPledged = pledges
+      .filter((pledge) => CONFIRMED_PLEDGE_STATUSES.has(String(pledge.status ?? 'intent')))
+      .reduce((sum, pledge) => sum + pledge.amount, 0);
+    const pendingTotalPledged = pledges
+      .filter((pledge) => PENDING_PLEDGE_STATUSES.has(String(pledge.status ?? 'intent')))
+      .reduce((sum, pledge) => sum + pledge.amount, 0);
     return {
       totalPledged,
+      pendingTotalPledged,
       pledgeCount: pledges.length,
       pledges,
     };
@@ -388,21 +398,24 @@ function normalizeCampaignPledgesPayload(payload: CampaignPledgesApiPayload): Ca
       amount: Number(pledge.amount) || 0,
       timestamp: pledge.timestamp,
       message: pledge.message,
+      status: pledge.status,
+      statusReason: pledge.statusReason ?? null,
     }));
     return {
-      totalPledged: Number(payload.totalPledged) || pledges.reduce((sum, pledge) => sum + pledge.amount, 0),
+      totalPledged: Number(payload.totalPledged) || pledges.filter((pledge) => CONFIRMED_PLEDGE_STATUSES.has(String(pledge.status ?? 'intent'))).reduce((sum, pledge) => sum + pledge.amount, 0),
+      pendingTotalPledged: Number((payload as CampaignPledgesResponse).pendingTotalPledged) || pledges.filter((pledge) => PENDING_PLEDGE_STATUSES.has(String(pledge.status ?? 'intent'))).reduce((sum, pledge) => sum + pledge.amount, 0),
       pledgeCount: Number(payload.pledgeCount) || pledges.length,
       pledges,
     };
   }
 
-  return { totalPledged: 0, pledgeCount: 0, pledges: [] };
+  return { totalPledged: 0, pendingTotalPledged: 0, pledgeCount: 0, pledges: [] };
 }
 
 export async function fetchCampaignPledges(campaignId: string): Promise<CampaignPledgesResponse> {
   const requiredCampaignId = campaignId?.trim();
   if (!requiredCampaignId) {
-    return { totalPledged: 0, pledgeCount: 0, pledges: [] };
+    return { totalPledged: 0, pendingTotalPledged: 0, pledgeCount: 0, pledges: [] };
   }
 
   const url = `${BASE_URL}/campaigns/${requiredCampaignId}/pledges`;
@@ -413,13 +426,13 @@ export async function fetchCampaignPledges(campaignId: string): Promise<Campaign
     });
 
     if (!res.ok) {
-      return { totalPledged: 0, pledgeCount: 0, pledges: [] };
+      return { totalPledged: 0, pendingTotalPledged: 0, pledgeCount: 0, pledges: [] };
     }
 
     const payload = (await res.json()) as CampaignPledgesApiPayload;
     return normalizeCampaignPledgesPayload(payload);
   } catch (_err) {
-    return { totalPledged: 0, pledgeCount: 0, pledges: [] };
+    return { totalPledged: 0, pendingTotalPledged: 0, pledgeCount: 0, pledges: [] };
   }
 }
 

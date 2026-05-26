@@ -6,10 +6,13 @@ export interface Pledge {
   amount: number;
   timestamp: string;
   message?: string;
+  status?: 'intent' | 'broadcasted' | 'seen_mempool' | 'confirmed' | 'finalized' | 'expired' | 'refunded' | 'invalid';
+  statusReason?: string | null;
 }
 
 export interface CampaignPledgeSummary {
   totalPledged: number;
+  pendingTotalPledged?: number;
   pledgeCount: number;
   pledges: Pledge[];
 }
@@ -42,6 +45,7 @@ export interface CampaignSummary {
   payout?: CampaignPayout;
   treasuryAddressUsed?: string | null;
   totalPledged: number;
+  pendingTotalPledged?: number;
   pledgeCount: number;
   status:
     | 'draft'

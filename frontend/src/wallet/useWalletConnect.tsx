@@ -116,21 +116,24 @@ function formatInvalidEcashSessionMessage(session: SessionTypes.Struct): string 
 }
 
 export function normalizeWalletConnectOutputs(outputs: TokenOutputLike[]): WalletConnectTokenOutput[] {
-  return normalizeTokenOutputs(outputs, {
+  const normalized: WalletConnectTokenOutput[] = [];
+  for (const output of normalizeTokenOutputs(outputs, {
     fallbackProtocol: true,
     stringifyValueSats: true,
-  }).map((output) => ({
-    address: output.address,
-    valueSats: String(output.valueSats),
-    ...(output.token
-      ? {
-          token: normalizeAlpTokenPayload(output.token, { fallbackProtocol: true }),
-        }
-      : {}),
-  })).filter((output): output is WalletConnectTokenOutput => {
-    if (!output.token) return true;
-    return output.token.protocol === 'ALP' && Boolean(output.token.tokenId) && Boolean(output.token.amount);
-  });
+  })) {
+    const token = output.token
+      ? normalizeAlpTokenPayload(output.token, { fallbackProtocol: true })
+      : undefined;
+    if (output.token && !token) {
+      continue;
+    }
+    normalized.push({
+      address: output.address,
+      valueSats: String(output.valueSats),
+      ...(token ? { token } : {}),
+    });
+  }
+  return normalized;
 }
 
 export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -339,8 +342,8 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
     try {
       const normalizedOutputs = options?.outputs ? normalizeWalletConnectOutputs(options.outputs) : undefined;
       const result = await requestSignAndBroadcastTransaction(topic, offerId, chainId || CHAIN_ID, {
-        ...options,
         ...(normalizedOutputs ? { outputs: normalizedOutputs } : {}),
+        ...(options?.userPrompt ? { userPrompt: options.userPrompt } : {}),
       });
       setStatus('connected');
       return result;

@@ -7,11 +7,13 @@ const APP_URL =
   (import.meta.env.VITE_WC_APP_URL as string | undefined) ||
   (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173');
 
+type WalletConnectCore = InstanceType<typeof Core>;
+
 type WcSingletonState = {
-  core?: Core;
+  core?: WalletConnectCore;
   web3wallet?: SignClient;
   inited?: boolean;
-  initPromise?: Promise<SignClient>;
+  initPromise?: Promise<SignClient> | null;
 };
 
 declare global {
@@ -32,7 +34,7 @@ function getSingletonState(): WcSingletonState {
   return globalThis.__TEYOLIA_WC__;
 }
 
-export function getWcCore(): Core | null {
+export function getWcCore(): WalletConnectCore | null {
   return getSingletonState().core ?? null;
 }
 

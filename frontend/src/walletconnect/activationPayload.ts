@@ -86,7 +86,8 @@ function parseOutputs(outputs: unknown): ParsedEcashOutput[] {
       },
       { fallbackProtocol: true },
     );
-    if (!normalized || typeof normalized.valueSats !== 'number') {
+    const normalizedValueSats = normalized ? Number(normalized.valueSats) : NaN;
+    if (!normalized || !Number.isFinite(normalizedValueSats) || !Number.isInteger(normalizedValueSats)) {
       if (typeof record.address !== 'string' || !record.address.trim()) {
         throw new Error(`outputs[${index}].address es inválido.`);
       }
@@ -95,7 +96,10 @@ function parseOutputs(outputs: unknown): ParsedEcashOutput[] {
     if (record.token && !normalized.token) {
       throw new Error(`outputs[${index}].token es inválido.`);
     }
-    return normalized;
+    return {
+      ...normalized,
+      valueSats: normalizedValueSats,
+    };
   });
 }
 

@@ -1,5 +1,6 @@
 import type { SessionTypes } from '@walletconnect/types';
 import { ensureWcInitialized, getWeb3Wallet } from './wcSingleton';
+import type { WalletConnectTokenOutput } from '../types/tokenOutput';
 import { extractWalletTxid } from './txid';
 
 const PROJECT_ID = import.meta.env.VITE_WC_PROJECT_ID as string | undefined;
@@ -11,13 +12,21 @@ export const WC_METHOD = 'ecash_signAndBroadcastTransaction' as const;
 export const WC_METHOD_ALIAS = 'ecash_signAndBroadcast' as const;
 const STORAGE_TOPIC = 'wc_topic';
 
-export const OPTIONAL_NAMESPACES = {
+type WalletConnectOptionalNamespaces = {
+  [namespace: string]: {
+    chains: string[];
+    methods: string[];
+    events: string[];
+  };
+};
+
+export const OPTIONAL_NAMESPACES: WalletConnectOptionalNamespaces = {
   [WC_NAMESPACE]: {
     chains: [CHAIN_ID, CHAIN_ID_ALIAS],
     methods: [WC_METHOD, WC_METHOD_ALIAS, 'ecash_getAddresses'],
     events: ['accountsChanged'],
   },
-} as const;
+};
 
 let subscribed = false;
 const sessionDeleteHandlers = new Set<(topic?: string) => void>();
@@ -70,7 +79,7 @@ function notifySessionDelete(topic?: string) {
 
 export function getEcashAccounts(session?: SessionTypes.Struct): string[] {
   const parsedAccounts = getParsedEcashAccounts(session);
-  const preferredOrder = [CHAIN_ID, CHAIN_ID_ALIAS];
+  const preferredOrder: string[] = [CHAIN_ID, CHAIN_ID_ALIAS];
   const sorted = [...parsedAccounts].sort((left, right) => {
     const leftIndex = preferredOrder.indexOf(left.chainId);
     const rightIndex = preferredOrder.indexOf(right.chainId);
@@ -174,12 +183,12 @@ function supportsEcashMethod(session: SessionTypes.Struct): boolean {
 }
 
 export function isEcashSessionValid(session: SessionTypes.Struct): boolean {
-  const allowedChains = [CHAIN_ID, CHAIN_ID_ALIAS];
+  const allowedChains: string[] = [CHAIN_ID, CHAIN_ID_ALIAS];
   return supportsEcashMethod(session) && supportsEcashChain(session, allowedChains);
 }
 
 function sessionSupportsRequiredCapabilities(session: SessionTypes.Struct, chainId?: string): boolean {
-  const allowedChains = chainId ? [chainId, CHAIN_ID, CHAIN_ID_ALIAS] : [CHAIN_ID, CHAIN_ID_ALIAS];
+  const allowedChains: string[] = chainId ? [chainId, CHAIN_ID, CHAIN_ID_ALIAS] : [CHAIN_ID, CHAIN_ID_ALIAS];
   return supportsEcashMethod(session) && supportsEcashChain(session, [...new Set(allowedChains)]);
 }
 
@@ -195,7 +204,7 @@ export function assertSessionSupportsEcashSign(session: SessionTypes.Struct, cha
 }
 
 function resolveEcashChainForRequest(session: SessionTypes.Struct, requestedChainId?: string): string {
-  const allowedChains = [CHAIN_ID, CHAIN_ID_ALIAS];
+  const allowedChains: string[] = [CHAIN_ID, CHAIN_ID_ALIAS];
   if (requestedChainId && allowedChains.includes(requestedChainId) && supportsEcashChain(session, [requestedChainId])) {
     return requestedChainId;
   }
@@ -270,15 +279,7 @@ export async function requestSignAndBroadcastTransaction(
   offerId: string,
   chainId: string,
   options?: {
-    outputs?: Array<{
-      address: string;
-      valueSats: number | string;
-      token?: {
-        protocol: 'ALP';
-        tokenId: string;
-        amount: string;
-      };
-    }>;
+    outputs?: WalletConnectTokenOutput[];
     userPrompt?: string;
   },
 ): Promise<unknown> {

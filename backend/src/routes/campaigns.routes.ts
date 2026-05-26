@@ -1,7 +1,11 @@
 import { Router } from 'express';
 import { CampaignService } from '../services/CampaignService';
 import { validateAddress } from '../utils/validation';
-import { getPledgesByCampaign } from '../store/simplePledges';
+import {
+  CONFIRMED_PLEDGE_STATUSES,
+  PENDING_PLEDGE_STATUSES,
+  getPledgesByCampaign,
+} from '../store/simplePledges';
 import { addressToScriptPubKey, getTransactionInfo } from '../blockchain/ecashClient';
 import { walletConnectOfferStore } from '../services/WalletConnectOfferStore';
 import {
@@ -80,9 +84,25 @@ function validateCampaignIdParam(raw: unknown): string {
   return campaignId;
 }
 
-async function getTotalPledged(campaignId: string): Promise<number> {
+async function getCampaignPledgeTotals(campaignId: string): Promise<{
+  pledges: Awaited<ReturnType<typeof getPledgesByCampaign>>;
+  totalPledged: number;
+  pendingTotalPledged: number;
+  pledgeCount: number;
+}> {
   const pledges = await getPledgesByCampaign(campaignId);
-  return pledges.reduce((total, pledge) => total + pledge.amount, 0);
+  const totalPledged = pledges
+    .filter((pledge) => CONFIRMED_PLEDGE_STATUSES.includes(pledge.status))
+    .reduce((total, pledge) => total + pledge.amount, 0);
+  const pendingTotalPledged = pledges
+    .filter((pledge) => PENDING_PLEDGE_STATUSES.includes(pledge.status))
+    .reduce((total, pledge) => total + pledge.amount, 0);
+  return {
+    pledges,
+    totalPledged,
+    pendingTotalPledged,
+    pledgeCount: pledges.length,
+  };
 }
 
 function toCampaignActivationFeeRequired(campaign: CampaignApiRecord): number {
@@ -149,7 +169,7 @@ function deriveCampaignStatus(campaign: CampaignApiRecord, totalPledged: number)
   return 'active';
 }
 
-function toSummary(campaign: CampaignApiRecord, totalPledged: number) {
+function toSummary(campaign: CampaignApiRecord, totalPledged: number, pendingTotalPledged = 0) {
   const status = deriveCampaignStatus(campaign, totalPledged);
   const activationFeeRequired = toCampaignActivationFeeRequired(campaign);
   const activationFeeTxid = getActivationFeeTxid(campaign);
@@ -158,6 +178,7 @@ function toSummary(campaign: CampaignApiRecord, totalPledged: number) {
   return {
     ...campaign,
     totalPledged,
+    pendingTotalPledged,
     pledgeCount: 0,
     status,
     activationFeeRequired,
@@ -284,11 +305,11 @@ async function verifyActivationTxBestEffort(
 }
 
 async function toActivationResponse(campaignId: string, campaign: CampaignApiRecord, warning?: string, txid?: string) {
-  const totalPledged = await getTotalPledged(campaign.id);
-  const summary = toSummary(campaign, totalPledged);
+  const totals = await getCampaignPledgeTotals(campaign.id);
+  const summary = toSummary(campaign, totals.totalPledged, totals.pendingTotalPledged);
   return {
     ...summary,
-    pledgeCount: (await getPledgesByCampaign(campaign.id)).length,
+    pledgeCount: totals.pledgeCount,
     campaignId,
     txid: txid ?? summary.activationFeeTxid ?? null,
     feeTxid: summary.activationFeeTxid ?? undefined,
@@ -884,13 +905,12 @@ router.post('/campaigns/:id/payout/confirm', async (req, res) => {
       return res.status(404).json({ error: 'campaign-not-found' });
     }
 
-    const pledges = await getPledgesByCampaign(campaign.id);
-    const totalPledged = pledges.reduce((total, pledge) => total + pledge.amount, 0);
-    const summary = toSummary(updated, totalPledged);
+    const totals = await getCampaignPledgeTotals(campaign.id);
+    const summary = toSummary(updated, totals.totalPledged, totals.pendingTotalPledged);
 
     return res.json({
       ...summary,
-      pledgeCount: pledges.length,
+      pledgeCount: totals.pledgeCount,
     });
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
@@ -900,27 +920,34 @@ router.post('/campaigns/:id/payout/confirm', async (req, res) => {
 router.get('/campaigns/:id/pledges', async (req, res) => {
   const campaignId = String(req.params.id ?? '').trim();
   if (!campaignId || campaignId === 'undefined') {
-    return res.status(200).json([]);
+    return res.status(200).json({ totalPledged: 0, pendingTotalPledged: 0, pledgeCount: 0, pledges: [] });
   }
 
   try {
-    const pledges = await getPledgesByCampaign(campaignId);
-    return res.status(200).json(pledges.map((pledge) => ({
-      pledgeId: pledge.pledgeId,
-      txid: pledge.txid,
-      wcOfferId: pledge.wcOfferId ?? null,
-      contributorAddress: pledge.contributorAddress,
-      amount: pledge.amount,
-      timestamp: pledge.timestamp,
-      message: pledge.message,
-    })));
+    const totals = await getCampaignPledgeTotals(campaignId);
+    return res.status(200).json({
+      totalPledged: totals.totalPledged,
+      pendingTotalPledged: totals.pendingTotalPledged,
+      pledgeCount: totals.pledgeCount,
+      pledges: totals.pledges.map((pledge) => ({
+        pledgeId: pledge.pledgeId,
+        txid: pledge.txid,
+        wcOfferId: pledge.wcOfferId ?? null,
+        contributorAddress: pledge.contributorAddress,
+        amount: pledge.amount,
+        timestamp: pledge.timestamp,
+        message: pledge.message,
+        status: pledge.status,
+        statusReason: pledge.statusReason ?? null,
+      })),
+    });
   } catch (err) {
     // TODO: return a typed error response once frontend flow can tolerate non-200 replies.
     console.error('[campaigns/:id/pledges] failed to fetch pledges', {
       campaignId,
       error: (err as Error).message,
     });
-    return res.status(200).json([]);
+    return res.status(200).json({ totalPledged: 0, pendingTotalPledged: 0, pledgeCount: 0, pledges: [] });
   }
 });
 
@@ -931,13 +958,12 @@ router.get('/campaigns/:id/summary', async (req, res) => {
       return res.status(404).json({ error: 'Campaign not found' });
     }
 
-    const pledges = await getPledgesByCampaign(req.params.id);
-    const totalPledged = pledges.reduce((total, pledge) => total + pledge.amount, 0);
-    const summary = toSummary(campaign, totalPledged);
+    const totals = await getCampaignPledgeTotals(req.params.id);
+    const summary = toSummary(campaign, totals.totalPledged, totals.pendingTotalPledged);
 
     return res.json({
       ...summary,
-      pledgeCount: pledges.length,
+      pledgeCount: totals.pledgeCount,
     });
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
@@ -977,8 +1003,8 @@ export async function getCampaignStatusById(campaignId: string): Promise<Campaig
   if (!campaign) {
     return null;
   }
-  const totalPledged = await getTotalPledged(campaignId);
-  return deriveCampaignStatus(campaign, totalPledged);
+  const totals = await getCampaignPledgeTotals(campaignId);
+  return deriveCampaignStatus(campaign, totals.totalPledged);
 }
 
 export default router;

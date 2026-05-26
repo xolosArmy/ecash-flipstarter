@@ -95,6 +95,12 @@ export async function openDatabase(dbPath?: string): Promise<Database> {
     dbPromise = open({
       filename: effectivePath,
       driver: sqlite3.Database,
+    }).then(async (database) => {
+      await database.exec(`
+        PRAGMA foreign_keys = ON;
+        PRAGMA journal_mode = WAL;
+      `);
+      return database;
     });
     dbPromisePath = effectivePath;
   }
@@ -174,6 +180,17 @@ export async function initializeDatabase(database?: Database): Promise<void> {
      SET status = 'created'
      WHERE status IS NULL OR TRIM(status) = ''`,
   );
+
+  await ensureCampaignIndexes(db);
+}
+
+async function ensureCampaignIndexes(db: Database): Promise<void> {
+  await db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
+    CREATE INDEX IF NOT EXISTS idx_campaigns_campaign_address ON campaigns(campaignAddress);
+    CREATE INDEX IF NOT EXISTS idx_campaigns_covenant_address ON campaigns(covenantAddress);
+    CREATE INDEX IF NOT EXISTS idx_campaigns_script_hash ON campaigns(scriptHash);
+  `);
 }
 
 async function ensureCampaignColumns(db: Database): Promise<void> {

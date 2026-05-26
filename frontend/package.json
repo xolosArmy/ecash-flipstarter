@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:wc-sanity": "node scripts/wc-sanity-check.mjs",
-    "test:walletconnect:sanity": "node scripts/walletconnect-sanity.mjs" 
+    "test:walletconnect:sanity": "node scripts/walletconnect-sanity.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@walletconnect/sign-client": "^2.18.0",

@@ -8,10 +8,12 @@ function uniqueId(prefix: string): string {
 
 beforeAll(() => {
   process.env.TEYOLIA_SQLITE_PATH = makeTestDbPath();
+  process.env.TEYOLIA_BENEFICIARY_PUBKEY = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798';
 });
 
 afterAll(() => {
   delete process.env.TEYOLIA_SQLITE_PATH;
+  delete process.env.TEYOLIA_BENEFICIARY_PUBKEY;
 });
 
 beforeEach(() => {
@@ -35,6 +37,7 @@ describe('activation fee rules', () => {
       goal: 1000n,
       expirationTime: BigInt(Date.now() + 7 * 24 * 60 * 60 * 1000),
       beneficiaryAddress: 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk',
+      contractVersion: 'legacy-placeholder',
     });
 
     await expect(service.updateCampaignStatus(campaignId, 'active')).rejects.toThrow('activation-fee-unpaid');
@@ -54,6 +57,7 @@ describe('activation fee rules', () => {
       goal: 1000n,
       expirationTime: BigInt(Date.now() + 7 * 24 * 60 * 60 * 1000),
       beneficiaryAddress: 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk',
+      contractVersion: 'legacy-placeholder',
     });
 
     await service.markActivationFeePaid(campaignId, 'a'.repeat(64), {
@@ -81,6 +85,7 @@ describe('activation fee rules', () => {
       goal: 1000n,
       expirationTime: BigInt(Date.now() + 7 * 24 * 60 * 60 * 1000),
       beneficiaryAddress: 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk',
+      contractVersion: 'legacy-placeholder',
     });
 
     const txid = 'b'.repeat(64);
@@ -113,6 +118,7 @@ describe('activation fee rules', () => {
       goal: 1000n,
       expirationTime: BigInt(Date.now() + 7 * 24 * 60 * 60 * 1000),
       beneficiaryAddress: 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk',
+      contractVersion: 'legacy-placeholder',
     });
 
     const txid = 'c'.repeat(64);
@@ -140,6 +146,7 @@ describe('activation fee rules', () => {
       goal: 1000n,
       expirationTime: BigInt(Date.now() + 7 * 24 * 60 * 60 * 1000),
       beneficiaryAddress: 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk',
+      contractVersion: 'legacy-placeholder',
     });
 
     await service.setActivationOffer(campaignId, 'offer-1', 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk', {

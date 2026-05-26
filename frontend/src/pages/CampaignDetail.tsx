@@ -50,8 +50,8 @@ export const CampaignDetail: React.FC = () => {
   const [activationMessage, setActivationMessage] = useState('');
   const [payoutError, setPayoutError] = useState('');
   const [payoutMessage, setPayoutMessage] = useState('');
-  const [refundAddress, setRefundAddress] = useState('');
-  const [refundAmount, setRefundAmount] = useState('');
+  const [selectedRefundPledgeId, setSelectedRefundPledgeId] = useState('');
+  const [pledges, setPledges] = useState<Array<{ pledgeId?: string; amount: number; contributorAddress: string; status?: string; timestamp: string }>>([]);
   const [refundError, setRefundError] = useState('');
   const [refundMessage, setRefundMessage] = useState('');
   const [activating, setActivating] = useState(false);
@@ -86,8 +86,12 @@ export const CampaignDetail: React.FC = () => {
           })
           .slice(0, 20);
         setMessages(nextMessages);
+        setPledges(response.pledges);
       })
-      .catch(() => setMessages([]));
+      .catch(() => {
+        setMessages([]);
+        setPledges([]);
+      });
   }, []);
 
   const loadHistory = useCallback((campaignId: string) => {
@@ -175,10 +179,9 @@ export const CampaignDetail: React.FC = () => {
   }, [addresses, payerAddress]);
 
   useEffect(() => {
-    if (!campaign) return;
-    setRefundAddress((current) => current.trim() || campaign.beneficiaryAddress?.trim() || '');
-    setRefundAmount((current) => current.trim() || String(campaign.totalPledged || 0));
-  }, [campaign]);
+    const refundable = pledges.find((pledge) => pledge.pledgeId && pledge.status === 'confirmed');
+    setSelectedRefundPledgeId((current) => current || refundable?.pledgeId || '');
+  }, [pledges]);
 
   useEffect(() => {
     if (!id) return undefined;
@@ -362,9 +365,11 @@ export const CampaignDetail: React.FC = () => {
     setRefunding(true);
     showToast('Solicitando refund al backend...', 'info');
     try {
+      if (!selectedRefundPledgeId) {
+        throw new Error('pledge-id-required');
+      }
       const result = await refundCampaign(id, {
-        refundAddress,
-        refundAmount,
+        pledgeId: selectedRefundPledgeId,
       });
       const refreshed = await fetchCampaignSummary(id);
       setCampaign(refreshed);
@@ -396,6 +401,7 @@ export const CampaignDetail: React.FC = () => {
       ? Math.min(100, Math.round((campaign.totalPledged / campaign.goal) * 100))
       : 0;
   const activationFeeTxid = campaign.activationFeeTxid || campaign.activation?.feeTxid || null;
+  const pendingTotalPledged = campaign.pendingTotalPledged ?? 0;
   const activationFeePaid = campaign.activationFeePaid ?? Boolean(activationFeeTxid);
   const activationFeeLabel = '1,600.00 RMZ';
   const payoutTxid = campaign.payout?.txid || null;
@@ -445,8 +451,11 @@ export const CampaignDetail: React.FC = () => {
         </p>
       )}
       <p>
-        Progreso: <AmountDisplay sats={campaign.totalPledged} /> / <AmountDisplay sats={campaign.goal} /> ({percent}%)
+        Progreso confirmado: <AmountDisplay sats={campaign.totalPledged} /> / <AmountDisplay sats={campaign.goal} /> ({percent}%)
       </p>
+      {pendingTotalPledged > 0 && (
+        <p>Pledges pendientes/iniciados: <AmountDisplay sats={pendingTotalPledged} /></p>
+      )}
       {campaign.description && (
         <section style={{ marginBottom: 12 }}>
           <h3>Descripción</h3>
@@ -524,27 +533,23 @@ export const CampaignDetail: React.FC = () => {
         <section style={{ border: '1px solid #fee2e2', borderRadius: 8, padding: 12, marginTop: 12 }}>
           <h3>Refund</h3>
           <p>
-            La API actual requiere dirección y monto explícitos para ejecutar el refund de una campaña expirada.
+            Los refunds públicos están cerrados por defecto. Si el backend los habilita para desarrollo, el refund solo puede regresar a la dirección original del pledge verificado.
           </p>
           <label style={{ display: 'grid', gap: 4, marginBottom: 8 }}>
-            Refund Address
-            <input
-              value={refundAddress}
-              onChange={(event) => setRefundAddress(event.target.value)}
-              placeholder="ecash:..."
-            />
+            Pledge verificado
+            <select value={selectedRefundPledgeId} onChange={(event) => setSelectedRefundPledgeId(event.target.value)}>
+              <option value="">Selecciona un pledge confirmado</option>
+              {pledges
+                .filter((pledge) => pledge.pledgeId && pledge.status === 'confirmed')
+                .map((pledge) => (
+                  <option key={pledge.pledgeId} value={pledge.pledgeId}>
+                    {pledge.contributorAddress} · {pledge.amount} sats · {new Date(pledge.timestamp).toLocaleString()}
+                  </option>
+                ))}
+            </select>
           </label>
-          <label style={{ display: 'grid', gap: 4 }}>
-            Refund Amount (sats)
-            <input
-              value={refundAmount}
-              onChange={(event) => setRefundAmount(event.target.value)}
-              inputMode="numeric"
-              placeholder="0"
-            />
-          </label>
-          <button type="button" onClick={executeRefund} disabled={refunding} style={{ marginTop: 12 }}>
-            {refunding ? 'Procesando refund...' : 'Ejecutar refund'}
+          <button type="button" onClick={executeRefund} disabled={refunding || !selectedRefundPledgeId} style={{ marginTop: 12 }}>
+            {refunding ? 'Procesando refund...' : 'Solicitar refund verificado'}
           </button>
           {refundMessage && <p>{refundMessage}</p>}
           {refundError && <p style={{ color: '#b00020' }}>{refundError}</p>}

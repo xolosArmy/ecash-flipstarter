@@ -10,7 +10,8 @@
     "dev:backend": "npm --prefix backend run dev",
     "dev:frontend": "npm --prefix frontend run dev",
     "build": "npm --prefix backend run build && npm --prefix frontend run build",
-    "test": "npm --prefix backend run test"
+    "test": "npm --prefix backend run test && npm --prefix frontend run test",
+    "typecheck": "npm --prefix backend run typecheck && npm --prefix frontend run typecheck"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

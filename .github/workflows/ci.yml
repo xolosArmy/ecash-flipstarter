@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint backend
+        run: |
+          if [ -f backend/eslint.config.js ] || [ -f backend/eslint.config.mjs ] || [ -f backend/.eslintrc ] || [ -f backend/.eslintrc.js ] || [ -f backend/.eslintrc.cjs ] || [ -f backend/.eslintrc.json ]; then
+            npm --prefix backend run lint
+          else
+            echo "Backend lint not configured; skipping."
+          fi
+
+      - name: Lint frontend
+        run: |
+          if [ -f frontend/eslint.config.js ] || [ -f frontend/eslint.config.mjs ] || [ -f frontend/.eslintrc ] || [ -f frontend/.eslintrc.js ] || [ -f frontend/.eslintrc.cjs ] || [ -f frontend/.eslintrc.json ]; then
+            npm --prefix frontend run lint
+          else
+            echo "Frontend lint not configured; skipping."
+          fi
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build

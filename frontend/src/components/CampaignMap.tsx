@@ -20,6 +20,14 @@ const defaultIcon = L.icon({
 
 L.Marker.prototype.options.icon = defaultIcon;
 
+function hasLocation(location: CampaignSummary['location']): location is { latitude: number; longitude: number } {
+  return Boolean(location)
+    && typeof location === 'object'
+    && location !== null
+    && Number.isFinite(location.latitude)
+    && Number.isFinite(location.longitude);
+}
+
 function createPopupContent(campaign: CampaignSummary): HTMLElement {
   const container = document.createElement('div');
 
@@ -80,10 +88,7 @@ export const CampaignMap: React.FC = () => {
   }, []);
 
   const activeWithLocation = useMemo(
-    () =>
-      campaigns.filter(
-        (campaign) => (!campaign.status || campaign.status === 'active') && campaign.location,
-      ),
+    () => campaigns.filter((campaign) => (!campaign.status || campaign.status === 'active') && hasLocation(campaign.location)),
     [campaigns],
   );
 
@@ -124,7 +129,7 @@ export const CampaignMap: React.FC = () => {
     const bounds = L.latLngBounds([]);
     activeWithLocation.forEach((campaign) => {
       const location = campaign.location;
-      if (!location) return;
+      if (!hasLocation(location)) return;
       const marker = L.marker([location.latitude, location.longitude]);
       marker.bindPopup(createPopupContent(campaign));
       marker.addTo(markers);

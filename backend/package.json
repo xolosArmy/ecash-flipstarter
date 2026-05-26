@@ -18,7 +18,8 @@
     "migrate:campaigns": "ts-node src/scripts/migrateCampaigns.ts",
     "migrate:campaigns:js": "node scripts/migrateCampaigns.js",
     "test": "vitest run",
-    "lint": "echo \"TODO: add eslint\""
+    "lint": "echo \"TODO: add eslint\"",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@ecash/lib": "1.5.1-rc3",

@@ -9,11 +9,11 @@ const MARKDOWN_LINK_REGEX = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/gi;
 
 function escapeHtml(input: string): string {
   return input
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function isDirectImgurImage(url: string): boolean {
@@ -54,7 +54,7 @@ export function parseLimitedMarkdown(input: string): ParsedDescription {
   const withRawUrls = linkifyEscapedText(withMarkdownLinks);
   const lines = withRawUrls.split(/\r?\n/).map((line) => {
     for (const [token, anchor] of markdownTokens.entries()) {
-      line = line.replaceAll(token, anchor);
+      line = line.split(token).join(anchor);
     }
     return line || '&nbsp;';
   });
