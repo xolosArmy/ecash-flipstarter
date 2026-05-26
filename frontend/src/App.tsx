@@ -55,11 +55,7 @@ export const App: React.FC = () => {
                   href="https://cartera.xolosarmy.xyz"
                   target="_blank"
                   rel="noreferrer"
-<<<<<<< HEAD
                   className="teyolia-nav-wallet"
-=======
-                  className="teyolia-wallet-link"
->>>>>>> 755a9f5 (Harden pledge verification, refunds, and decentralization roadmap)
                 >
                   Abrir Tonalli
                 </a>

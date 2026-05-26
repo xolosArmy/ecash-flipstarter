@@ -71,7 +71,6 @@ a {
   font-weight: 700;
 }
 
-<<<<<<< HEAD
 
 .teyolia-nav a:hover {
   text-decoration: underline;
@@ -88,22 +87,6 @@ a {
 }
 
 .teyolia-nav-wallet:hover {
-=======
-.teyolia-nav a:hover {
-  text-decoration: underline;
-  opacity: 0.85;
-}
-
-.teyolia-wallet-link {
-  color: var(--gold);
-  border: 1px solid var(--gold);
-  border-radius: 6px;
-  padding: 2px 8px;
-  transition: background 0.2s ease-in-out, opacity 0.2s ease-in-out;
-}
-
-.teyolia-wallet-link:hover {
->>>>>>> 755a9f5 (Harden pledge verification, refunds, and decentralization roadmap)
   background: rgba(217, 179, 106, 0.15);
   text-decoration: none;
 }
