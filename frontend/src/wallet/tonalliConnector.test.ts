@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { decodeBase64Url, signAndBroadcastWithTonalli } from './tonalliConnector';
 
-const ORIGIN = 'https://cartera.xolosarmy.xyz';
+const ORIGIN = 'http://localhost:5174';
 const TXID_ONE = 'a'.repeat(64);
 const TXID_TWO = 'b'.repeat(64);
 
@@ -102,6 +102,18 @@ describe('signAndBroadcastWithTonalli', () => {
     });
 
     const requestId = getRequestIdFromPopup(openMock);
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: ORIGIN,
+        data: {
+          type: 'TONALLI_SIGN_RESULT',
+          requestId: 'wrong-request-id',
+          ok: true,
+          txid: TXID_ONE,
+        },
+      })
+    );
 
     window.dispatchEvent(
       new MessageEvent('message', {
