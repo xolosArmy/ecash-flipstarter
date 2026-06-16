@@ -21,6 +21,15 @@ export type PledgeVerificationOutcome =
       expectedCampaignScriptPubKey: string;
     }
   | {
+      status: 'broadcasted';
+      txid: string;
+      reason: string;
+      confirmations: 0;
+      expectedAmountSats: bigint;
+      actualAmountSats: 0n;
+      expectedCampaignScriptPubKey: string;
+    }
+  | {
       status: 'invalid';
       txid: string;
       reason: string;
@@ -115,7 +124,7 @@ export class PledgeVerificationService {
       tx = await this.deps.getTransactionInfo(args.txid);
     } catch {
       return {
-        status: 'invalid',
+        status: 'broadcasted',
         txid: args.txid,
         reason: 'txid-not-found',
         expectedAmountSats: args.expectedAmountSats,

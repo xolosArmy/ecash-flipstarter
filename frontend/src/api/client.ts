@@ -57,6 +57,11 @@ function normalizeCampaignRecord<T extends { activationOfferOutputs?: TokenOutpu
   };
 }
 
+function wait(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 export async function fetchCampaigns(): Promise<ApiCampaignSummary[]> {
   const campaigns = await jsonFetch<ApiCampaignSummary[]>(`/campaigns`);
   return campaigns.map((campaign) => normalizeCampaignRecord(campaign));
@@ -319,29 +324,57 @@ export async function confirmPledgeTx(
   );
 }
 
-export async function confirmLatestPendingPledgeTx(
-  campaignId: string,
-  txid: string,
-  wcOfferId?: string,
-): Promise<{
+export type PledgeConfirmResponse = {
   pledgeId: string;
   txid: string;
   contributorAddress: string;
   amount: number;
   timestamp: string;
   message?: string;
-}> {
-  return jsonFetch<{
-    pledgeId: string;
-    txid: string;
-    contributorAddress: string;
-    amount: number;
-    timestamp: string;
-    message?: string;
-  }>(`/campaigns/${campaignId}/pledge/confirm`, {
+  status?: string;
+  pledgeStatus?: string;
+  reason?: string;
+};
+
+export type PendingPledgeVerificationResponse = PledgeConfirmResponse & {
+  status: 'pending_verification';
+  reason: string;
+};
+
+export function isPendingPledgeVerification(
+  response: PledgeConfirmResponse,
+): response is PendingPledgeVerificationResponse {
+  return response.status === 'pending_verification';
+}
+
+export async function confirmLatestPendingPledgeTx(
+  campaignId: string,
+  txid: string,
+  wcOfferId?: string,
+): Promise<PledgeConfirmResponse> {
+  return jsonFetch<PledgeConfirmResponse>(`/campaigns/${campaignId}/pledge/confirm`, {
     method: 'POST',
     body: JSON.stringify({ txid, wcOfferId }),
   });
+}
+
+export async function confirmLatestPendingPledgeTxWithRetry(
+  campaignId: string,
+  txid: string,
+  wcOfferId?: string,
+  options: { retryDelayMs?: number; timeoutMs?: number } = {},
+): Promise<PledgeConfirmResponse> {
+  const retryDelayMs = options.retryDelayMs ?? 3_000;
+  const timeoutMs = options.timeoutMs ?? 90_000;
+  let response = await confirmLatestPendingPledgeTx(campaignId, txid, wcOfferId);
+
+  for (let elapsed = 0; isPendingPledgeVerification(response) && elapsed < timeoutMs; elapsed += retryDelayMs) {
+    await wait(retryDelayMs);
+    response = await confirmLatestPendingPledgeTx(campaignId, txid, wcOfferId);
+    if (retryDelayMs <= 0) break;
+  }
+
+  return response;
 }
 
 export interface CampaignPledgesResponse {

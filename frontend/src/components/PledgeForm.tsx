@@ -1,5 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { confirmLatestPendingPledgeTx, createPledgeTx, fetchCampaign } from '../api/client';
+import {
+  confirmLatestPendingPledgeTxWithRetry,
+  createPledgeTx,
+  fetchCampaign,
+  isPendingPledgeVerification,
+} from '../api/client';
 import type { BuiltTxResponse } from '../api/types';
 import { useWalletConnect } from '../wallet/useWalletConnect';
 import { useToast } from './ToastProvider';
@@ -215,12 +220,20 @@ export const PledgeForm: React.FC<Props> = ({
       });
       console.info('[PLEDGE][WC] txid', txid);
 
-      await confirmLatestPendingPledgeTx(campaignId, txid, wcOfferId);
+      setStatusMessage('Transaction broadcasted. Waiting for network verification...');
+      const confirmation = await confirmLatestPendingPledgeTxWithRetry(campaignId, txid, wcOfferId);
       setBroadcastResult(`Transacción enviada: ${txid}`);
-      setStatusMessage(`Transacción enviada: ${txid}`);
       localStorage.setItem(`tonalli:txid:${campaignId}`, txid);
       setLastTxid(txid);
       onBroadcastSuccess?.();
+
+      if (isPendingPledgeVerification(confirmation)) {
+        setStatusMessage('Verification pending. You can refresh later.');
+        showToast('Verification pending. You can refresh later.', 'info');
+        return;
+      }
+
+      setStatusMessage(`Transacción enviada: ${txid}`);
       showToast('Pledge enviado on-chain', 'success');
     } catch (err) {
       console.error('[PLEDGE] error', err);

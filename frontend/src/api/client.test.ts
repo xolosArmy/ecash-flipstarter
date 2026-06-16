@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { confirmActivationTx } from './client';
+import { confirmActivationTx, confirmLatestPendingPledgeTx, confirmLatestPendingPledgeTxWithRetry } from './client';
 
 describe('confirmActivationTx', () => {
   afterEach(() => {
@@ -25,5 +25,66 @@ describe('confirmActivationTx', () => {
         }),
       }),
     );
+  });
+});
+
+
+describe('confirmLatestPendingPledgeTx', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('returns pending_verification without throwing for 202 responses', async () => {
+    const txid = 'b'.repeat(64);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 202,
+      json: async () => ({
+        status: 'pending_verification',
+        reason: 'txid-not-found',
+        pledgeId: 'pledge-1',
+        txid,
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(confirmLatestPendingPledgeTx('camp-1', txid, 'offer-1')).resolves.toMatchObject({
+      status: 'pending_verification',
+      reason: 'txid-not-found',
+      txid,
+    });
+  });
+
+  it('polls pending_verification and returns a later confirmed response', async () => {
+    const txid = 'c'.repeat(64);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 202,
+        json: async () => ({
+          status: 'pending_verification',
+          reason: 'txid-not-found',
+          pledgeId: 'pledge-1',
+          txid,
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: 'confirmed',
+          pledgeId: 'pledge-1',
+          txid,
+          contributorAddress: 'ecash:qz2708636snqhsxu8wnlka78h6fdp77ar59jrf5035',
+          amount: 1000,
+          timestamp: '2026-06-16T00:00:00.000Z',
+        }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      confirmLatestPendingPledgeTxWithRetry('camp-1', txid, 'offer-1', { retryDelayMs: 0, timeoutMs: 1 }),
+    ).resolves.toMatchObject({ status: 'confirmed', txid });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

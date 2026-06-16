@@ -144,7 +144,7 @@ describe('pledge and refund security', () => {
     expect(await simplePledges.getConfirmedTotalByCampaign(CAMPAIGN_ID)).toBe(1000);
   });
 
-  it('a nonexistent txid cannot mark a pledge as confirmed', async () => {
+  it('a txid not indexed immediately after broadcast stays pending verification', async () => {
     const { simplePledges, pledgeRoutes } = await importPledgeModules({ txInfo: new Error('not-found') });
     await saveIntentPledge(simplePledges, 'pledge-missing-1', 1000);
 
@@ -154,11 +154,52 @@ describe('pledge and refund security', () => {
       body: { pledgeId: 'pledge-missing-1', txid: TXID },
     }, res);
 
-    expect(res.statusCode).toBe(400);
-    expect(res.body.error).toBe('txid-not-found');
+    expect(res.statusCode).toBe(202);
+    expect(res.body).toMatchObject({
+      status: 'pending_verification',
+      reason: 'txid-not-found',
+      pledgeId: 'pledge-missing-1',
+      txid: TXID,
+      pledgeStatus: 'broadcasted',
+    });
     const pledge = await simplePledges.getPledgeById('pledge-missing-1');
-    expect(pledge?.status).toBe('invalid');
+    expect(pledge?.status).toBe('broadcasted');
+    expect(pledge?.txid).toBe(TXID);
     expect(await simplePledges.getConfirmedTotalByCampaign(CAMPAIGN_ID)).toBe(0);
+    expect(await simplePledges.getPendingTotalByCampaign(CAMPAIGN_ID)).toBe(1000);
+  });
+
+  it('a later valid Chronik lookup promotes a pending pledge to confirmed', async () => {
+    const { simplePledges, pledgeRoutes, getTransactionInfoMock } = await importPledgeModules({ txInfo: new Error('not-found') });
+    await saveIntentPledge(simplePledges, 'pledge-promote-1', 1000);
+
+    const pending = createMockRes();
+    await pledgeRoutes.confirmPledgeHandler({
+      params: { id: CAMPAIGN_ID },
+      body: { pledgeId: 'pledge-promote-1', txid: TXID },
+    }, pending);
+    expect(pending.statusCode).toBe(202);
+
+    getTransactionInfoMock.mockReset();
+    getTransactionInfoMock.mockResolvedValue({
+      txid: TXID,
+      outputs: [{ valueSats: 1000n, scriptPubKey: CAMPAIGN_SCRIPT }],
+      confirmations: 1,
+      height: 100,
+    });
+
+    const confirmed = createMockRes();
+    await pledgeRoutes.confirmPledgeHandler({
+      params: { id: CAMPAIGN_ID },
+      body: { pledgeId: 'pledge-promote-1', txid: TXID },
+    }, confirmed);
+
+    expect(confirmed.statusCode).toBe(200);
+    expect(confirmed.body.status).toBe('confirmed');
+    const pledge = await simplePledges.getPledgeById('pledge-promote-1');
+    expect(pledge?.status).toBe('confirmed');
+    expect(await simplePledges.getConfirmedTotalByCampaign(CAMPAIGN_ID)).toBe(1000);
+    expect(await simplePledges.getPendingTotalByCampaign(CAMPAIGN_ID)).toBe(0);
   });
 
   it('a txid with insufficient amount cannot mark a pledge as confirmed', async () => {

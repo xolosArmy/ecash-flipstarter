@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   confirmActivationTx,
-  confirmLatestPendingPledgeTx,
+  confirmLatestPendingPledgeTxWithRetry,
+  isPendingPledgeVerification,
   fetchCampaignActivationStatus,
   fetchCampaignSummary,
 } from '../api/client';
@@ -31,6 +32,7 @@ export const TonalliCallback: React.FC = () => {
   const [mode, setMode] = useState<'pledge' | 'activate' | 'payout'>('pledge');
   const [confirming, setConfirming] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  const [pendingVerification, setPendingVerification] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { showToast } = useToast();
 
@@ -61,15 +63,22 @@ export const TonalliCallback: React.FC = () => {
       if (nextTxid && nextCampaignId) {
         setConfirming(true);
         setConfirmed(false);
+        setPendingVerification(false);
         localStorage.setItem(`tonalli:txid:${nextCampaignId}`, nextTxid);
+        let pledgeStillPending = false;
         const summary = nextMode === 'activate'
           ? await confirmActivationTx(nextCampaignId, nextTxid)
           : nextMode === 'payout'
             ? await fetchCampaignSummary(nextCampaignId)
             : await (async () => {
-                await confirmLatestPendingPledgeTx(nextCampaignId, nextTxid);
+                const pledgeConfirmation = await confirmLatestPendingPledgeTxWithRetry(nextCampaignId, nextTxid);
+                const summary = await fetchCampaignSummary(nextCampaignId);
+                if (isPendingPledgeVerification(pledgeConfirmation)) {
+                  pledgeStillPending = true;
+                  return summary;
+                }
                 localStorage.removeItem(`tonalli:pledgeId:${nextCampaignId}`);
-                return fetchCampaignSummary(nextCampaignId);
+                return summary;
               })();
         window.dispatchEvent(
           new CustomEvent('campaign:summary:refresh', {
@@ -79,8 +88,11 @@ export const TonalliCallback: React.FC = () => {
         window.dispatchEvent(new Event('campaigns:refresh'));
         if (!cancelled) {
           setError(null);
-          setConfirmed(true);
-          if (nextMode === 'activate') {
+          setPendingVerification(pledgeStillPending);
+          setConfirmed(!pledgeStillPending);
+          if (pledgeStillPending) {
+            showToast('Verification pending. You can refresh later.', 'info');
+          } else if (nextMode === 'activate') {
             showToast('Campaña activada');
           }
         }
@@ -103,6 +115,7 @@ export const TonalliCallback: React.FC = () => {
             if (!cancelled) {
               setTxid(statusResponse.feeTxid);
               setError(null);
+              setPendingVerification(false);
               setConfirmed(true);
               showToast('Campaña activada');
             }
@@ -118,6 +131,7 @@ export const TonalliCallback: React.FC = () => {
             window.dispatchEvent(new Event('campaigns:refresh'));
             if (!cancelled) {
               setError(null);
+              setPendingVerification(false);
               setConfirmed(true);
               showToast('Campaña activada');
             }
@@ -155,6 +169,9 @@ export const TonalliCallback: React.FC = () => {
     <div>
       <h2>Tonalli Callback</h2>
       {confirming && <p>Confirming {mode} on backend...</p>}
+      {!confirming && pendingVerification && (
+        <p>Verification pending. You can refresh later.</p>
+      )}
       {!confirming && confirmed && (
         <p>
           {mode === 'activate'
@@ -167,7 +184,7 @@ export const TonalliCallback: React.FC = () => {
       {error && <p style={{ color: '#b00020' }}>{error}</p>}
       {txid && (
         <div>
-          <p>Broadcast successful.</p>
+          <p>{pendingVerification ? 'Transaction broadcasted. Waiting for network verification...' : 'Broadcast successful.'}</p>
           <p>TXID: {txid}</p>
           {campaignId && <p>Saved under campaign {campaignId}.</p>}
         </div>

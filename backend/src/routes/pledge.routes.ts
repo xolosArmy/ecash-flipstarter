@@ -115,7 +115,7 @@ export const confirmPledgeHandler = async (req: any, res: any) => {
       pledgeId: pledge.pledgeId,
       txid: verification.status === 'invalid' && verification.reason === 'txid-already-used' ? null : txid,
       status: verification.status,
-      statusReason: verification.status === 'invalid' ? verification.reason : null,
+      statusReason: verification.status === 'invalid' || verification.status === 'broadcasted' ? verification.reason : null,
       confirmedAt: verification.status === 'confirmed' ? new Date().toISOString() : null,
     });
     if (!updated) {
@@ -129,6 +129,23 @@ export const confirmPledgeHandler = async (req: any, res: any) => {
         txid,
         status: updated.status,
         statusReason: updated.statusReason,
+      });
+    }
+
+    if (verification.status === 'broadcasted' || verification.status === 'seen_mempool') {
+      return res.status(202).json({
+        status: 'pending_verification',
+        reason: verification.status === 'broadcasted' ? verification.reason : 'seen-mempool',
+        pledgeId: updated.pledgeId,
+        txid,
+        pledgeStatus: updated.status,
+        contributorAddress: updated.contributorAddress,
+        amount: updated.amount,
+        timestamp: updated.timestamp,
+        message: updated.message,
+        confirmations: verification.confirmations,
+        actualAmountSats: verification.actualAmountSats.toString(),
+        expectedAmountSats: verification.expectedAmountSats.toString(),
       });
     }
 
