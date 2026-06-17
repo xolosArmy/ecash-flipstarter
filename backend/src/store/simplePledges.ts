@@ -3,6 +3,7 @@ import { getDb } from './db';
 export type PledgeStatus =
   | 'intent'
   | 'broadcasted'
+  | 'pending_verification'
   | 'seen_mempool'
   | 'confirmed'
   | 'finalized'
@@ -26,7 +27,7 @@ export type SimplePledge = {
 };
 
 export const CONFIRMED_PLEDGE_STATUSES: readonly PledgeStatus[] = ['confirmed', 'finalized'];
-export const PENDING_PLEDGE_STATUSES: readonly PledgeStatus[] = ['intent', 'broadcasted', 'seen_mempool'];
+export const PENDING_PLEDGE_STATUSES: readonly PledgeStatus[] = ['intent', 'broadcasted', 'pending_verification', 'seen_mempool'];
 
 function isConfirmedStatus(status: PledgeStatus): boolean {
   return CONFIRMED_PLEDGE_STATUSES.includes(status);
@@ -64,6 +65,7 @@ function mapVerificationEvent(status: PledgeStatus): string {
     case 'invalid':
       return 'PLEDGE_INVALID';
     case 'broadcasted':
+    case 'pending_verification':
       return 'PLEDGE_BROADCASTED';
     case 'expired':
       return 'PLEDGE_EXPIRED';
@@ -186,7 +188,7 @@ export async function getPendingTotalByCampaign(campaignId: string): Promise<num
 export async function updatePledgeVerification(args: {
   pledgeId: string;
   txid: string | null;
-  status: Extract<PledgeStatus, 'broadcasted' | 'seen_mempool' | 'confirmed' | 'invalid'>;
+  status: Extract<PledgeStatus, 'broadcasted' | 'pending_verification' | 'seen_mempool' | 'confirmed' | 'invalid'>;
   statusReason?: string | null;
   confirmedAt?: string | null;
 }): Promise<SimplePledge | null> {

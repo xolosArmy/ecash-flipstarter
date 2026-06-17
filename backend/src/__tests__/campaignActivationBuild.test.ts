@@ -8,6 +8,8 @@ const createOfferMock = vi.fn().mockReturnValue({
   offerId: 'offer-123',
 });
 const getPledgesByCampaignMock = vi.fn().mockResolvedValue([]);
+const getPledgeByTxidMock = vi.fn().mockResolvedValue(null);
+const updatePledgeVerificationMock = vi.fn();
 
 vi.mock('../services/CampaignService', () => ({
   CampaignService: class {
@@ -35,7 +37,11 @@ vi.mock('../blockchain/txBuilder', () => ({
 }));
 
 vi.mock('../store/simplePledges', () => ({
+  CONFIRMED_PLEDGE_STATUSES: ['confirmed', 'finalized'],
+  PENDING_PLEDGE_STATUSES: ['intent', 'broadcasted', 'pending_verification', 'seen_mempool'],
   getPledgesByCampaign: getPledgesByCampaignMock,
+  getPledgeByTxid: getPledgeByTxidMock,
+  updatePledgeVerification: updatePledgeVerificationMock,
 }));
 
 vi.mock('../services/WalletConnectOfferStore', () => ({
@@ -60,6 +66,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   createOfferMock.mockReturnValue({ offerId: 'offer-123' });
   getPledgesByCampaignMock.mockResolvedValue([]);
+  getPledgeByTxidMock.mockResolvedValue(null);
+  updatePledgeVerificationMock.mockResolvedValue(null);
   getCampaignMock.mockResolvedValue(BASE_CAMPAIGN);
 });
 

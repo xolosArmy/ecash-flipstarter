@@ -102,7 +102,25 @@ describe('pledge and refund security', () => {
     await seedCampaign();
     const simplePledges = await import('../store/simplePledges');
     const pledgeRoutes = await import('../routes/pledge.routes');
-    return { simplePledges, pledgeRoutes, getTransactionInfoMock };
+    const campaignRoutes = await import('../routes/campaigns.routes');
+    return { simplePledges, pledgeRoutes, campaignRoutes, getTransactionInfoMock };
+  }
+
+  function createCampaignApp(campaignRoutes: typeof import('../routes/campaigns.routes')) {
+    const app = express();
+    app.use(express.json());
+    app.use('/api', campaignRoutes.default);
+    return app;
+  }
+
+  async function countAuditEvents(event: string) {
+    const { getDb } = await import('../store/db');
+    const db = await getDb();
+    const row = await db.get<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM audit_logs WHERE campaignId = ? AND event = ?',
+      [CAMPAIGN_ID, event],
+    );
+    return Number(row?.count ?? 0);
   }
 
   async function saveIntentPledge(simplePledges: typeof import('../store/simplePledges'), pledgeId: string, amount = 1000) {
@@ -198,6 +216,151 @@ describe('pledge and refund security', () => {
     expect(confirmed.body.status).toBe('confirmed');
     const pledge = await simplePledges.getPledgeById('pledge-promote-1');
     expect(pledge?.status).toBe('confirmed');
+    expect(await simplePledges.getConfirmedTotalByCampaign(CAMPAIGN_ID)).toBe(1000);
+    expect(await simplePledges.getPendingTotalByCampaign(CAMPAIGN_ID)).toBe(0);
+  });
+
+  it('campaign GET promotes a seen_mempool pledge after Chronik reports confirmations', async () => {
+    const { simplePledges, campaignRoutes } = await importPledgeModules();
+    await simplePledges.savePledge(CAMPAIGN_ID, {
+      pledgeId: 'pledge-auto-seen-1',
+      txid: TXID,
+      wcOfferId: 'wc-auto-seen-1',
+      amount: 1000,
+      contributorAddress: CONTRIBUTOR_ADDRESS,
+      timestamp: new Date().toISOString(),
+      status: 'seen_mempool',
+    });
+
+    const res = await request(createCampaignApp(campaignRoutes)).get(`/api/campaigns/${CAMPAIGN_ID}`);
+
+    expect(res.status).toBe(200);
+    const pledge = await simplePledges.getPledgeById('pledge-auto-seen-1');
+    expect(pledge?.status).toBe('confirmed');
+    expect(pledge?.confirmedAt).toBeTruthy();
+    expect(pledge?.statusReason).toBeNull();
+    expect(await simplePledges.getConfirmedTotalByCampaign(CAMPAIGN_ID)).toBe(1000);
+    expect(await simplePledges.getPendingTotalByCampaign(CAMPAIGN_ID)).toBe(0);
+    expect(await countAuditEvents('PLEDGE_CONFIRMED')).toBe(1);
+  });
+
+  it('legacy invalid txid-not-found pledge is recovered when Chronik later finds a valid tx', async () => {
+    const { simplePledges, campaignRoutes } = await importPledgeModules();
+    await simplePledges.savePledge(CAMPAIGN_ID, {
+      pledgeId: 'pledge-legacy-recover-1',
+      txid: TXID,
+      wcOfferId: 'wc-legacy-recover-1',
+      amount: 1000,
+      contributorAddress: CONTRIBUTOR_ADDRESS,
+      timestamp: new Date().toISOString(),
+      status: 'invalid',
+      statusReason: 'txid-not-found',
+    });
+
+    const res = await request(createCampaignApp(campaignRoutes)).get(`/api/campaigns/${CAMPAIGN_ID}`);
+
+    expect(res.status).toBe(200);
+    const pledge = await simplePledges.getPledgeById('pledge-legacy-recover-1');
+    expect(pledge?.status).toBe('confirmed');
+    expect(pledge?.statusReason).toBeNull();
+    expect(await simplePledges.getConfirmedTotalByCampaign(CAMPAIGN_ID)).toBe(1000);
+  });
+
+  it('broadcasted txid-not-found remains pending when Chronik still cannot find it', async () => {
+    const { simplePledges, campaignRoutes } = await importPledgeModules({ txInfo: new Error('not-found') });
+    await simplePledges.savePledge(CAMPAIGN_ID, {
+      pledgeId: 'pledge-auto-missing-1',
+      txid: TXID,
+      wcOfferId: 'wc-auto-missing-1',
+      amount: 1000,
+      contributorAddress: CONTRIBUTOR_ADDRESS,
+      timestamp: new Date().toISOString(),
+      status: 'broadcasted',
+      statusReason: 'txid-not-found',
+    });
+
+    const res = await request(createCampaignApp(campaignRoutes)).get(`/api/campaigns/${CAMPAIGN_ID}`);
+
+    expect(res.status).toBe(200);
+    const pledge = await simplePledges.getPledgeById('pledge-auto-missing-1');
+    expect(pledge?.status).toBe('broadcasted');
+    expect(pledge?.statusReason).toBe('txid-not-found');
+    expect(await simplePledges.getConfirmedTotalByCampaign(CAMPAIGN_ID)).toBe(0);
+    expect(await simplePledges.getPendingTotalByCampaign(CAMPAIGN_ID)).toBe(1000);
+  });
+
+  it('wrong destination remains invalid during automatic reconciliation', async () => {
+    const { simplePledges, campaignRoutes } = await importPledgeModules({
+      txInfo: { outputs: [{ valueSats: 1000n, scriptPubKey: '76a914' + '22'.repeat(20) + '88ac' }], confirmations: 1, height: 100 },
+    });
+    await simplePledges.savePledge(CAMPAIGN_ID, {
+      pledgeId: 'pledge-auto-wrong-script-1',
+      txid: TXID,
+      wcOfferId: 'wc-auto-wrong-script-1',
+      amount: 1000,
+      contributorAddress: CONTRIBUTOR_ADDRESS,
+      timestamp: new Date().toISOString(),
+      status: 'seen_mempool',
+    });
+
+    const res = await request(createCampaignApp(campaignRoutes)).get(`/api/campaigns/${CAMPAIGN_ID}`);
+
+    expect(res.status).toBe(200);
+    const pledge = await simplePledges.getPledgeById('pledge-auto-wrong-script-1');
+    expect(pledge?.status).toBe('invalid');
+    expect(pledge?.statusReason).toBe('campaign-output-mismatch');
+  });
+
+  it('insufficient amount remains invalid during automatic reconciliation', async () => {
+    const { simplePledges, campaignRoutes } = await importPledgeModules({
+      txInfo: { outputs: [{ valueSats: 500n, scriptPubKey: CAMPAIGN_SCRIPT }], confirmations: 1, height: 100 },
+    });
+    await simplePledges.savePledge(CAMPAIGN_ID, {
+      pledgeId: 'pledge-auto-low-1',
+      txid: TXID,
+      wcOfferId: 'wc-auto-low-1',
+      amount: 1000,
+      contributorAddress: CONTRIBUTOR_ADDRESS,
+      timestamp: new Date().toISOString(),
+      status: 'seen_mempool',
+    });
+
+    const res = await request(createCampaignApp(campaignRoutes)).get(`/api/campaigns/${CAMPAIGN_ID}`);
+
+    expect(res.status).toBe(200);
+    const pledge = await simplePledges.getPledgeById('pledge-auto-low-1');
+    expect(pledge?.status).toBe('invalid');
+    expect(pledge?.statusReason).toBe('pledge-amount-insufficient');
+  });
+
+  it('confirmed total increases and pending total decreases only after confirmation', async () => {
+    const { simplePledges, campaignRoutes, getTransactionInfoMock } = await importPledgeModules({
+      txInfo: { outputs: [{ valueSats: 1000n, scriptPubKey: CAMPAIGN_SCRIPT }], confirmations: 0, height: -1 },
+    });
+    await simplePledges.savePledge(CAMPAIGN_ID, {
+      pledgeId: 'pledge-auto-totals-1',
+      txid: TXID,
+      wcOfferId: 'wc-auto-totals-1',
+      amount: 1000,
+      contributorAddress: CONTRIBUTOR_ADDRESS,
+      timestamp: new Date().toISOString(),
+      status: 'broadcasted',
+      statusReason: 'txid-not-found',
+    });
+
+    const app = createCampaignApp(campaignRoutes);
+    expect((await request(app).get(`/api/campaigns/${CAMPAIGN_ID}`)).status).toBe(200);
+    expect(await simplePledges.getConfirmedTotalByCampaign(CAMPAIGN_ID)).toBe(0);
+    expect(await simplePledges.getPendingTotalByCampaign(CAMPAIGN_ID)).toBe(1000);
+
+    getTransactionInfoMock.mockResolvedValue({
+      txid: TXID,
+      outputs: [{ valueSats: 1000n, scriptPubKey: CAMPAIGN_SCRIPT }],
+      confirmations: 1,
+      height: 100,
+    });
+
+    expect((await request(app).get(`/api/campaigns/${CAMPAIGN_ID}`)).status).toBe(200);
     expect(await simplePledges.getConfirmedTotalByCampaign(CAMPAIGN_ID)).toBe(1000);
     expect(await simplePledges.getPendingTotalByCampaign(CAMPAIGN_ID)).toBe(0);
   });

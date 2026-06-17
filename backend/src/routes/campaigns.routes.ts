@@ -19,6 +19,7 @@ import {
 } from '../config/constants';
 import { coerceAmountToSats } from '../utils/ecashUnits';
 import { FinalizeService } from '../services/FinalizeService';
+import { reconcilePendingPledgesForCampaign } from '../services/PledgeReconciliationService';
 import { normalizeActivationOfferOutputs, type ActivationOfferOutput } from '../types/tokenOutput';
 
 type CampaignStatus =
@@ -76,6 +77,26 @@ const router = Router();
 const service = new CampaignService();
 const finalizeService = new FinalizeService();
 
+async function reconcileCampaignPledgesBestEffort(campaignId: string): Promise<void> {
+  try {
+    await reconcilePendingPledgesForCampaign(campaignId);
+  } catch (err) {
+    console.warn('[pledge-reconcile] failed', {
+      campaignId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+async function reconcileCampaignListBestEffort(campaigns: CampaignApiRecord[]): Promise<void> {
+  await Promise.all(
+    campaigns
+      .map((campaign) => String(campaign.id ?? '').trim())
+      .filter((campaignId) => campaignId && campaignId !== 'undefined')
+      .map((campaignId) => reconcileCampaignPledgesBestEffort(campaignId)),
+  );
+}
+
 function validateCampaignIdParam(raw: unknown): string {
   const campaignId = String(raw ?? '').trim();
   if (!campaignId || !/^[A-Za-z0-9._:-]+$/.test(campaignId)) {
@@ -90,6 +111,7 @@ async function getCampaignPledgeTotals(campaignId: string): Promise<{
   pendingTotalPledged: number;
   pledgeCount: number;
 }> {
+  await reconcileCampaignPledgesBestEffort(campaignId);
   const pledges = await getPledgesByCampaign(campaignId);
   const totalPledged = pledges
     .filter((pledge) => CONFIRMED_PLEDGE_STATUSES.includes(pledge.status))
@@ -385,7 +407,8 @@ async function resolveCampaignByIdentifier(identifier: string): Promise<Campaign
 // GET /api/campaigns
 router.get('/', async (_req, res) => {
   try {
-    const list = await service.listCampaigns();
+    const list = await service.listCampaigns() as CampaignApiRecord[];
+    await reconcileCampaignListBestEffort(list);
     res.json(list);
   } catch (_error) {
     res.status(500).json({ error: 'Failed to fetch campaigns' });
@@ -394,7 +417,8 @@ router.get('/', async (_req, res) => {
 
 router.get('/campaign', async (_req, res) => {
   try {
-    const list = await service.listCampaigns();
+    const list = await service.listCampaigns() as CampaignApiRecord[];
+    await reconcileCampaignListBestEffort(list);
     res.json(list);
   } catch (_error) {
     res.status(500).json({ error: 'Failed to fetch campaigns' });
@@ -403,7 +427,8 @@ router.get('/campaign', async (_req, res) => {
 
 router.get('/campaigns', async (_req, res) => {
   try {
-    let camps = await service.listCampaigns();
+    let camps = await service.listCampaigns() as CampaignApiRecord[];
+    await reconcileCampaignListBestEffort(camps);
     if (camps.length === 0) {
       return res.json((camps || []).filter(isPublicCampaign).map(normalizeCampaign));
     }
@@ -432,6 +457,7 @@ router.get('/campaign/:id', async (req, res) => {
     if (!campaign) {
       return res.status(404).json({ error: 'campaign-not-found' });
     }
+    await reconcileCampaignPledgesBestEffort(String((campaign as CampaignApiRecord).id ?? req.params.id));
     return res.json(campaign);
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
@@ -444,6 +470,7 @@ router.get('/campaigns/slug/:slug', async (req, res) => {
     if (!campaign) {
       return res.status(404).json({ error: 'campaign-not-found' });
     }
+    await reconcileCampaignPledgesBestEffort(String((campaign as CampaignApiRecord).id ?? req.params.slug));
     return res.json(campaign);
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
@@ -456,6 +483,7 @@ router.get('/campaigns/:id', async (req, res) => {
     if (!campaign) {
       return res.status(404).json({ error: 'campaign-not-found' });
     }
+    await reconcileCampaignPledgesBestEffort(String((campaign as CampaignApiRecord).id ?? req.params.id));
     return res.json(campaign);
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
