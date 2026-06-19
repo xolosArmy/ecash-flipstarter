@@ -15,11 +15,21 @@ import {
 import { getPledgeById, getConfirmedTotalByCampaign, markPledgeRefunded } from '../store/simplePledges';
 import { coerceAmountToSats } from '../utils/ecashUnits';
 
+type ReconcilePendingPledges = (
+  campaignId: string,
+) => Promise<{ inspected: number; updated: number; confirmed: number; invalid: number }>;
+
+const reconcilePendingPledges: ReconcilePendingPledges = async (campaignId) => {
+  const { reconcilePendingPledgesForCampaign } = await import('./PledgeReconciliationService');
+  return reconcilePendingPledgesForCampaign(campaignId);
+};
+
 type RefundDependencies = {
   campaignService: Pick<CampaignService, 'getCampaign'>;
   getUtxosForAddress: typeof getUtxosForAddress;
   buildRefundTx: typeof buildRefundTx;
   broadcastRawTx: typeof broadcastRawTx;
+  reconcilePendingPledgesForCampaign?: ReconcilePendingPledges;
 };
 
 const defaultDependencies: RefundDependencies = {
@@ -27,6 +37,7 @@ const defaultDependencies: RefundDependencies = {
   getUtxosForAddress,
   buildRefundTx,
   broadcastRawTx,
+  reconcilePendingPledgesForCampaign: reconcilePendingPledges,
 };
 
 export type BroadcastRefundResult = {
@@ -100,6 +111,7 @@ export class RefundService {
     }
 
     const goalSats = coerceAmountToSats(campaign.goal ?? 0);
+    await (this.deps.reconcilePendingPledgesForCampaign ?? reconcilePendingPledges)(args.campaignId);
     const confirmedTotalSats = BigInt(await getConfirmedTotalByCampaign(args.campaignId));
     if (goalSats > 0n && confirmedTotalSats >= goalSats) {
       throw new Error('refund-not-available-goal-reached');

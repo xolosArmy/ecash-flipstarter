@@ -162,6 +162,151 @@ describe('pledge and refund security', () => {
     expect(await simplePledges.getConfirmedTotalByCampaign(CAMPAIGN_ID)).toBe(1000);
   });
 
+  it('cannot_reconfirm_confirmed_with_different_txid', async () => {
+    const { simplePledges, pledgeRoutes, getTransactionInfoMock } = await importPledgeModules();
+    const confirmedAt = new Date().toISOString();
+    await simplePledges.savePledge(CAMPAIGN_ID, {
+      pledgeId: 'pledge-confirmed-terminal',
+      txid: TXID,
+      wcOfferId: 'wc-confirmed-terminal',
+      amount: 1000,
+      contributorAddress: CONTRIBUTOR_ADDRESS,
+      timestamp: new Date().toISOString(),
+      status: 'confirmed',
+      confirmedAt,
+    });
+
+    const res = createMockRes();
+    await pledgeRoutes.confirmPledgeHandler({
+      params: { id: CAMPAIGN_ID },
+      body: { pledgeId: 'pledge-confirmed-terminal', txid: 'b'.repeat(64) },
+    }, res);
+
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({ error: 'pledge-status-not-confirmable' });
+    expect(getTransactionInfoMock).not.toHaveBeenCalled();
+    expect(await simplePledges.getPledgeById('pledge-confirmed-terminal')).toMatchObject({
+      status: 'confirmed',
+      txid: TXID,
+      confirmedAt,
+    });
+  });
+
+  it('cannot_reconfirm_finalized_with_different_txid', async () => {
+    const { simplePledges, pledgeRoutes, getTransactionInfoMock } = await importPledgeModules();
+    await simplePledges.savePledge(CAMPAIGN_ID, {
+      pledgeId: 'pledge-finalized-terminal',
+      txid: TXID,
+      wcOfferId: 'wc-finalized-terminal',
+      amount: 1000,
+      contributorAddress: CONTRIBUTOR_ADDRESS,
+      timestamp: new Date().toISOString(),
+      status: 'finalized',
+      confirmedAt: new Date().toISOString(),
+    });
+
+    const res = createMockRes();
+    await pledgeRoutes.confirmPledgeHandler({
+      params: { id: CAMPAIGN_ID },
+      body: { pledgeId: 'pledge-finalized-terminal', txid: 'b'.repeat(64) },
+    }, res);
+
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({ error: 'pledge-status-not-confirmable' });
+    expect(getTransactionInfoMock).not.toHaveBeenCalled();
+    expect(await simplePledges.getPledgeById('pledge-finalized-terminal')).toMatchObject({
+      status: 'finalized',
+      txid: TXID,
+    });
+  });
+
+  it('cannot_reconfirm_refunded_pledge', async () => {
+    const { simplePledges, pledgeRoutes, getTransactionInfoMock } = await importPledgeModules();
+    const refundTxid = 'c'.repeat(64);
+    const refundedAt = new Date().toISOString();
+    await simplePledges.savePledge(CAMPAIGN_ID, {
+      pledgeId: 'pledge-refunded-terminal',
+      txid: TXID,
+      wcOfferId: 'wc-refunded-terminal',
+      amount: 1000,
+      contributorAddress: CONTRIBUTOR_ADDRESS,
+      timestamp: new Date().toISOString(),
+      status: 'refunded',
+      confirmedAt: new Date(Date.now() - 60_000).toISOString(),
+      refundTxid,
+      refundedAt,
+    });
+
+    const res = createMockRes();
+    await pledgeRoutes.confirmPledgeHandler({
+      params: { id: CAMPAIGN_ID },
+      body: { pledgeId: 'pledge-refunded-terminal', txid: 'b'.repeat(64) },
+    }, res);
+
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({ error: 'pledge-status-not-confirmable' });
+    expect(getTransactionInfoMock).not.toHaveBeenCalled();
+    expect(await simplePledges.getPledgeById('pledge-refunded-terminal')).toMatchObject({
+      status: 'refunded',
+      txid: TXID,
+      refundTxid,
+      refundedAt,
+    });
+  });
+
+  it('reconfirm_confirmed_same_txid_is_idempotent', async () => {
+    const { simplePledges, pledgeRoutes, getTransactionInfoMock } = await importPledgeModules();
+    const confirmedAt = new Date().toISOString();
+    await simplePledges.savePledge(CAMPAIGN_ID, {
+      pledgeId: 'pledge-confirmed-idempotent',
+      txid: TXID,
+      wcOfferId: 'wc-confirmed-idempotent',
+      amount: 1000,
+      contributorAddress: CONTRIBUTOR_ADDRESS,
+      timestamp: new Date().toISOString(),
+      status: 'confirmed',
+      confirmedAt,
+    });
+    const auditCountBefore = await countAuditEvents('PLEDGE_CONFIRMED');
+
+    const res = createMockRes();
+    await pledgeRoutes.confirmPledgeHandler({
+      params: { id: CAMPAIGN_ID },
+      body: { pledgeId: 'pledge-confirmed-idempotent', txid: TXID },
+    }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      ok: true,
+      status: 'confirmed',
+      pledgeId: 'pledge-confirmed-idempotent',
+      txid: TXID,
+    });
+    expect(getTransactionInfoMock).not.toHaveBeenCalled();
+    expect(await countAuditEvents('PLEDGE_CONFIRMED')).toBe(auditCountBefore);
+    expect(await simplePledges.getPledgeById('pledge-confirmed-idempotent')).toMatchObject({
+      status: 'confirmed',
+      txid: TXID,
+      confirmedAt,
+    });
+  });
+
+  it('confirm_requires_pledgeId_or_wcOfferId', async () => {
+    const { simplePledges, pledgeRoutes, getTransactionInfoMock } = await importPledgeModules();
+    await saveIntentPledge(simplePledges, 'pledge-identity-required', 1000);
+
+    const res = createMockRes();
+    await pledgeRoutes.confirmPledgeHandler({
+      params: { id: CAMPAIGN_ID },
+      body: { txid: TXID },
+    }, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'missing-pledge-identity' });
+    expect(getTransactionInfoMock).not.toHaveBeenCalled();
+    expect((await simplePledges.getPledgeById('pledge-identity-required'))?.status).toBe('intent');
+  });
+
   it('a txid not indexed immediately after broadcast stays pending verification', async () => {
     const { simplePledges, pledgeRoutes } = await importPledgeModules({ txInfo: new Error('not-found') });
     await saveIntentPledge(simplePledges, 'pledge-missing-1', 1000);
@@ -555,6 +700,7 @@ describe('pledge and refund security', () => {
       getUtxosForAddress: vi.fn().mockResolvedValue([{ txid: 'c'.repeat(64), vout: 0, value: 2500n, scriptPubKey: CAMPAIGN_SCRIPT }]),
       buildRefundTx,
       broadcastRawTx: vi.fn().mockResolvedValue({ txid: 'd'.repeat(64) }),
+      reconcilePendingPledgesForCampaign: vi.fn().mockResolvedValue({ inspected: 0, updated: 0, confirmed: 0, invalid: 0 }),
     });
 
     await service.refundCampaign({ campaignId: CAMPAIGN_ID, pledgeId: 'pledge-refund-1' });
@@ -603,6 +749,7 @@ describe('pledge and refund security', () => {
       getUtxosForAddress: vi.fn(),
       buildRefundTx: vi.fn(),
       broadcastRawTx: vi.fn(),
+      reconcilePendingPledgesForCampaign: vi.fn().mockResolvedValue({ inspected: 0, updated: 0, confirmed: 0, invalid: 0 }),
     });
 
     await expect(service.refundCampaign({ campaignId: CAMPAIGN_ID, pledgeId: 'pledge-finalized-1' })).rejects.toThrow(
@@ -648,11 +795,64 @@ describe('pledge and refund security', () => {
       getUtxosForAddress: vi.fn(),
       buildRefundTx: vi.fn(),
       broadcastRawTx: vi.fn(),
+      reconcilePendingPledgesForCampaign: vi.fn().mockResolvedValue({ inspected: 0, updated: 0, confirmed: 0, invalid: 0 }),
     });
 
     await expect(service.refundCampaign({ campaignId: CAMPAIGN_ID, pledgeId: 'pledge-goal-1' })).rejects.toThrow(
       'refund-not-available-goal-reached',
     );
+  });
+
+  it('refund_reconciles_before_goal_check', async () => {
+    vi.resetModules();
+    vi.doUnmock('../services/RefundService');
+    const getConfirmedTotalByCampaign = vi.fn().mockResolvedValue(5000);
+    vi.doMock('../store/simplePledges', () => ({
+      getPledgeById: vi.fn().mockResolvedValue({
+        pledgeId: 'pledge-reconcile-goal',
+        campaignId: CAMPAIGN_ID,
+        amount: 1000,
+        contributorAddress: CONTRIBUTOR_ADDRESS,
+        status: 'confirmed',
+      }),
+      getConfirmedTotalByCampaign,
+      markPledgeRefunded: vi.fn(),
+    }));
+    vi.doMock('../services/CampaignService', () => ({
+      CampaignService: vi.fn().mockImplementation(() => ({
+        getCampaign: vi.fn().mockResolvedValue({
+          id: CAMPAIGN_ID,
+          goal: '5000',
+          contractVersion: 'legacy-placeholder',
+          campaignAddress: CAMPAIGN_ADDRESS,
+          scriptPubKey: CAMPAIGN_SCRIPT,
+          expirationTime: String(Date.now() - 60_000),
+          status: 'expired',
+        }),
+      })),
+      covenantIndexInstance: {
+        getCovenantRef: vi.fn(),
+        setCovenantRef: vi.fn(),
+      },
+    }));
+
+    const reconcile = vi.fn().mockResolvedValue({ inspected: 1, updated: 1, confirmed: 1, invalid: 0 });
+    const buildRefundTx = vi.fn();
+    const { RefundService } = await import('../services/RefundService');
+    const service = new RefundService({
+      campaignService: new (await import('../services/CampaignService')).CampaignService(),
+      getUtxosForAddress: vi.fn(),
+      buildRefundTx,
+      broadcastRawTx: vi.fn(),
+      reconcilePendingPledgesForCampaign: reconcile,
+    });
+
+    await expect(service.refundCampaign({ campaignId: CAMPAIGN_ID, pledgeId: 'pledge-reconcile-goal' })).rejects.toThrow(
+      'refund-not-available-goal-reached',
+    );
+    expect(reconcile).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(reconcile.mock.invocationCallOrder[0]).toBeLessThan(getConfirmedTotalByCampaign.mock.invocationCallOrder[0]);
+    expect(buildRefundTx).not.toHaveBeenCalled();
   });
 
   it('a refund cannot execute before campaign expiry or failure conditions', async () => {
@@ -693,6 +893,7 @@ describe('pledge and refund security', () => {
       getUtxosForAddress: vi.fn(),
       buildRefundTx: vi.fn(),
       broadcastRawTx: vi.fn(),
+      reconcilePendingPledgesForCampaign: vi.fn().mockResolvedValue({ inspected: 0, updated: 0, confirmed: 0, invalid: 0 }),
     });
 
     await expect(service.refundCampaign({ campaignId: CAMPAIGN_ID, pledgeId: 'pledge-refund-2' })).rejects.toThrow(

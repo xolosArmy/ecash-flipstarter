@@ -206,7 +206,11 @@ export async function updatePledgeVerification(args: {
            status = ?,
            statusReason = ?,
            confirmedAt = ?
-       WHERE pledgeId = ?`,
+       WHERE pledgeId = ?
+         AND (
+           status IN ('intent', 'broadcasted', 'pending_verification', 'seen_mempool')
+           OR (status = 'invalid' AND statusReason = 'txid-not-found')
+         )`,
       [
         args.txid,
         args.status,
@@ -241,7 +245,13 @@ export async function updatePledgeVerification(args: {
   } catch (error) {
     await db.exec('ROLLBACK');
     const message = error instanceof Error ? error.message : String(error);
-    if (message.includes('UNIQUE constraint failed: pledges.txid')) {
+    const code = typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code?: unknown }).code ?? '')
+      : '';
+    if (
+      (code.startsWith('SQLITE_CONSTRAINT') || message.includes('UNIQUE constraint failed'))
+      && (message.includes('pledges.txid') || message.includes('idx_pledges_txid_unique_non_null'))
+    ) {
       throw new Error('txid-already-used');
     }
     throw error;

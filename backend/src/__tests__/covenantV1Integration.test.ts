@@ -230,6 +230,7 @@ describe('RefundService V1 integration', () => {
       getUtxosForAddress: vi.fn().mockResolvedValue([{ ...trackedCovenant }]),
       buildRefundTx,
       broadcastRawTx,
+      reconcilePendingPledgesForCampaign: vi.fn().mockResolvedValue({ inspected: 0, updated: 0, confirmed: 0, invalid: 0 }),
     });
 
     const result = await service.refundCampaign({ campaignId, pledgeId: 'pledge-refund-1' });

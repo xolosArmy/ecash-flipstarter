@@ -5,6 +5,7 @@ import { getCampaignStatusById } from './campaigns.routes';
 import { CampaignService } from '../services/CampaignService';
 import { parsePledgeAmountSats, parsePledgeMessage } from './pledgePayload';
 import {
+  getPledgeById,
   getPledgesByCampaign,
   updatePledgeVerification,
   type SimplePledge,
@@ -68,12 +69,46 @@ function selectPledgeToConfirm(pledges: SimplePledge[], body: Record<string, unk
     return pledges.find((pledge) => String(pledge.wcOfferId) === String(wcOfferId));
   }
 
-  for (let idx = pledges.length - 1; idx >= 0; idx -= 1) {
-    if (pledges[idx].status === 'intent' || pledges[idx].status === 'broadcasted' || pledges[idx].status === 'seen_mempool') {
-      return pledges[idx];
-    }
-  }
   return undefined;
+}
+
+function hasPledgeIdentity(body: Record<string, unknown>): boolean {
+  return Boolean(
+    (body.pledgeId != null && String(body.pledgeId).trim())
+    || (body.wcOfferId != null && String(body.wcOfferId).trim()),
+  );
+}
+
+function isTerminalPledge(pledge: SimplePledge): boolean {
+  return pledge.status === 'confirmed' || pledge.status === 'finalized' || pledge.status === 'refunded';
+}
+
+function isConfirmablePledge(pledge: SimplePledge): boolean {
+  return pledge.status === 'intent'
+    || pledge.status === 'broadcasted'
+    || pledge.status === 'pending_verification'
+    || pledge.status === 'seen_mempool'
+    || (pledge.status === 'invalid' && pledge.statusReason === 'txid-not-found');
+}
+
+function sendIdempotentPledgeSuccess(res: any, pledge: SimplePledge) {
+  return res.json({
+    ok: true,
+    status: pledge.status,
+    pledgeId: pledge.pledgeId,
+    txid: pledge.txid,
+    contributorAddress: pledge.contributorAddress,
+    amount: pledge.amount,
+    timestamp: pledge.timestamp,
+    message: pledge.message,
+  });
+}
+
+function sendTerminalPledgeResult(res: any, pledge: SimplePledge, txid: string) {
+  if (pledge.txid === txid) {
+    return sendIdempotentPledgeSuccess(res, pledge);
+  }
+  return res.status(409).json({ error: 'pledge-status-not-confirmable' });
 }
 
 export const confirmPledgeHandler = async (req: any, res: any) => {
@@ -84,24 +119,23 @@ export const confirmPledgeHandler = async (req: any, res: any) => {
       return res.status(404).json({ error: 'campaign-not-found' });
     }
 
-    const txid = sanitizeTxid(req.body?.txid);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (!hasPledgeIdentity(body)) {
+      return res.status(400).json({ error: 'missing-pledge-identity' });
+    }
+
+    const txid = sanitizeTxid(body.txid);
     const pledges = await getPledgesByCampaign(campaignId);
-    const pledge = selectPledgeToConfirm(pledges, (req.body ?? {}) as Record<string, unknown>);
+    const pledge = selectPledgeToConfirm(pledges, body);
     if (!pledge) {
       return res.status(404).json({ error: 'pledge-not-found' });
     }
 
-    if (pledge.txid === txid && (pledge.status === 'confirmed' || pledge.status === 'finalized')) {
-      return res.json({
-        ok: true,
-        status: pledge.status,
-        pledgeId: pledge.pledgeId,
-        txid: pledge.txid,
-        contributorAddress: pledge.contributorAddress,
-        amount: pledge.amount,
-        timestamp: pledge.timestamp,
-        message: pledge.message,
-      });
+    if (isTerminalPledge(pledge)) {
+      return sendTerminalPledgeResult(res, pledge, txid);
+    }
+    if (!isConfirmablePledge(pledge)) {
+      return res.status(409).json({ error: 'pledge-status-not-confirmable' });
     }
 
     const verification = await pledgeVerificationService.verifyPledgeTx({
@@ -119,7 +153,14 @@ export const confirmPledgeHandler = async (req: any, res: any) => {
       confirmedAt: verification.status === 'confirmed' ? new Date().toISOString() : null,
     });
     if (!updated) {
-      return res.status(404).json({ error: 'pledge-not-found' });
+      const current = await getPledgeById(pledge.pledgeId);
+      if (!current || current.campaignId !== campaignId) {
+        return res.status(404).json({ error: 'pledge-not-found' });
+      }
+      if (isTerminalPledge(current)) {
+        return sendTerminalPledgeResult(res, current, txid);
+      }
+      return res.status(409).json({ error: 'pledge-status-not-confirmable' });
     }
 
     if (verification.status === 'invalid') {

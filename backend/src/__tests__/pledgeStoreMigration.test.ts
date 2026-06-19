@@ -60,7 +60,7 @@ describe('pledge store migration', () => {
     await migratedDb.close();
   });
 
-  it('allows multiple intent pledges with null txid while enforcing uniqueness once txid is set', async () => {
+  it('duplicate_txid_constraint_returns_domain_error', async () => {
     const { openDatabase, initializeDatabase } = await import('../db/SQLiteStore');
     const db = await openDatabase(dbPath);
     await initializeDatabase(db);
