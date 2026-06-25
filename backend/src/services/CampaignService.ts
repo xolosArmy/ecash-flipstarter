@@ -6,6 +6,7 @@ import {
 import {
   LEGACY_PLACEHOLDER_COVENANT,
   TEYOLIA_COVENANT_V1,
+  TEYOLIA_COVENANT_V2_G,
 } from '../covenants/scriptCompiler';
 import { derivePrivKeyFromSeed } from '../blockchain/txBuilder';
 import { CovenantIndex, type CovenantRef } from '../blockchain/covenantIndex';
@@ -150,7 +151,7 @@ function toCampaignDefinition(snapshot: StoredCampaign): CampaignDefinition {
     campaignAddress: snapshot.campaignAddress ?? undefined,
     covenantAddress: snapshot.covenantAddress ?? undefined,
     contractVersion:
-      snapshot.contractVersion === TEYOLIA_COVENANT_V1 || snapshot.contractVersion === LEGACY_PLACEHOLDER_COVENANT
+      snapshot.contractVersion === TEYOLIA_COVENANT_V1 || snapshot.contractVersion === TEYOLIA_COVENANT_V2_G || snapshot.contractVersion === LEGACY_PLACEHOLDER_COVENANT
         ? snapshot.contractVersion
         : undefined,
     constructorArgs: snapshot.constructorArgs ?? undefined,
@@ -496,7 +497,8 @@ export class CampaignService {
     const requestedContractVersion = typeof payload.contractVersion === 'string'
       ? payload.contractVersion.trim()
       : '';
-    const requestedV1 = requestedContractVersion !== LEGACY_PLACEHOLDER_COVENANT;
+    const requestedV2G = requestedContractVersion === TEYOLIA_COVENANT_V2_G;
+    const requestedV1 = requestedContractVersion !== LEGACY_PLACEHOLDER_COVENANT && !requestedV2G;
     const payloadConstructorArgs =
       typeof payload.constructorArgs === 'object' && payload.constructorArgs !== null
         ? Object.fromEntries(
@@ -534,6 +536,16 @@ export class CampaignService {
       expirationTime: toExpirationTime(payload.expirationTime ?? expiresAtCandidate),
       beneficiaryPubKey: resolvedBeneficiaryPubKey,
       beneficiaryAddress: payload.beneficiaryAddress,
+      governanceAddress: typeof payload.governanceAddress === 'string' ? payload.governanceAddress : undefined,
+      governanceLockingBytecodeHex: typeof payload.governanceLockingBytecodeHex === 'string'
+        ? payload.governanceLockingBytecodeHex
+        : undefined,
+      infrastructureFeeAddress: typeof payload.infrastructureFeeAddress === 'string'
+        ? payload.infrastructureFeeAddress
+        : undefined,
+      infrastructureFeeLockingBytecodeHex: typeof payload.infrastructureFeeLockingBytecodeHex === 'string'
+        ? payload.infrastructureFeeLockingBytecodeHex
+        : undefined,
       campaignAddress:
         typeof payload.campaignAddress === 'string'
           ? payload.campaignAddress
@@ -542,9 +554,11 @@ export class CampaignService {
             : undefined,
       covenantAddress: payload.covenantAddress,
       refundOraclePubKey: refundOraclePubKeyCandidate,
-      contractVersion: requestedContractVersion === LEGACY_PLACEHOLDER_COVENANT
-        ? LEGACY_PLACEHOLDER_COVENANT
-        : TEYOLIA_COVENANT_V1,
+      contractVersion: requestedV2G
+        ? TEYOLIA_COVENANT_V2_G
+        : requestedContractVersion === LEGACY_PLACEHOLDER_COVENANT
+          ? LEGACY_PLACEHOLDER_COVENANT
+          : TEYOLIA_COVENANT_V1,
       constructorArgs,
       status: initialStatus,
     };

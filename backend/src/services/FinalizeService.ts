@@ -7,8 +7,11 @@ import { AutoPayoutService, type AutoPayoutResult } from './AutoPayoutService';
 import {
   filterSpendableUtxos,
   isV1Campaign,
+  isV2GCampaign,
   requireV1BeneficiaryPubKey,
   requireV1RedeemScriptHex,
+  requireV2GLockingBytecode,
+  requireV2GRedeemScriptHex,
   resolveCampaignBeneficiaryAddress,
   resolveCampaignEscrowAddress,
   resolvePrivateKeyFromEnv,
@@ -40,7 +43,9 @@ export class FinalizeService {
     if (!campaign) {
       throw new Error('campaign-not-found');
     }
-    if (!isV1Campaign(campaign)) {
+    const v1Campaign = isV1Campaign(campaign);
+    const v2GCampaign = isV2GCampaign(campaign);
+    if (!v1Campaign && !v2GCampaign) {
       return this.deps.legacyFinalizeCampaign(campaignId);
     }
 
@@ -58,16 +63,22 @@ export class FinalizeService {
       throw new Error('activation-fee-unpaid');
     }
 
-    const beneficiaryAddress = resolveCampaignBeneficiaryAddress(campaign);
-    const beneficiaryPubKey = requireV1BeneficiaryPubKey(campaign);
-    const redeemScriptHex = requireV1RedeemScriptHex(campaign);
-    const beneficiaryPrivKey = await resolvePrivateKeyFromEnv({
+    const beneficiaryAddress = v1Campaign ? resolveCampaignBeneficiaryAddress(campaign) : undefined;
+    const beneficiaryPubKey = v1Campaign ? requireV1BeneficiaryPubKey(campaign) : undefined;
+    const redeemScriptHex = v2GCampaign ? requireV2GRedeemScriptHex(campaign) : requireV1RedeemScriptHex(campaign);
+    const governanceLockingBytecodeHex = v2GCampaign
+      ? requireV2GLockingBytecode(campaign, 'governanceLockingBytecodeHex')
+      : undefined;
+    const infrastructureFeeLockingBytecodeHex = v2GCampaign
+      ? requireV2GLockingBytecode(campaign, 'infrastructureFeeLockingBytecodeHex')
+      : undefined;
+    const beneficiaryPrivKey = v1Campaign ? await resolvePrivateKeyFromEnv({
       privKeyEnvNames: ['TEYOLIA_BENEFICIARY_PRIVKEY', 'BENEFICIARY_PRIVKEY'],
       seedEnvNames: ['TEYOLIA_BENEFICIARY_SEED', 'BENEFICIARY_SEED'],
       publicKeyHex: beneficiaryPubKey,
       missingError: 'beneficiary-signing-key-not-configured',
       mismatchError: 'beneficiary-signing-key-mismatch',
-    });
+    }) : undefined;
 
     const escrowAddress = resolveCampaignEscrowAddress(campaign);
     const spendableUtxos = filterSpendableUtxos(await this.deps.getUtxosForAddress(escrowAddress));
@@ -93,6 +104,9 @@ export class FinalizeService {
     if ((hasGasSigner && !gasWalletAddress) || (!hasGasSigner && gasWalletAddress)) {
       throw new Error('gas-wallet-config-incomplete');
     }
+    if (v2GCampaign && !hasGasSigner) {
+      throw new Error('gas-wallet-not-configured-in-env');
+    }
 
     let gasUtxos: Utxo[] = [];
     let gasPrivKey: Buffer | null = null;
@@ -114,6 +128,8 @@ export class FinalizeService {
       redeemScriptHex,
       beneficiaryPrivKey,
       beneficiaryPubKey,
+      governanceLockingBytecodeHex,
+      infrastructureFeeLockingBytecodeHex,
       gasUtxos,
       gasChangeAddress: gasUtxos.length > 0 ? gasWalletAddress : undefined,
       gasPrivKey,
@@ -122,7 +138,7 @@ export class FinalizeService {
 
     const rawHex = built.rawHex;
 
-    console.log('\n=== [DEBUG-V1] PRE-BROADCAST ===');
+    console.log('\n=== [DEBUG-FINALIZE] PRE-BROADCAST ===');
     console.log('Campaign ID:', campaignId);
     console.log(
       'Covenant UTXO:',
@@ -160,7 +176,7 @@ export class FinalizeService {
       throw new Error('campaign-not-found');
     }
 
-    const beneficiaryAddress = resolveCampaignBeneficiaryAddress(campaign);
+    const beneficiaryAddress = isV1Campaign(campaign) ? resolveCampaignBeneficiaryAddress(campaign) : undefined;
     const escrowAddress = resolveCampaignEscrowAddress(campaign);
     const covenantUtxo = selectCampaignCovenantUtxo({
       campaignId,
@@ -169,10 +185,30 @@ export class FinalizeService {
       tracked: covenantIndexInstance.getCovenantRef(campaignId),
     });
 
-    if (!isV1Campaign(campaign)) {
+    if (!isV1Campaign(campaign) && !isV2GCampaign(campaign)) {
       return this.deps.buildFinalizeTx({
         covenantUtxo,
         beneficiaryAddress,
+      });
+    }
+
+    if (isV2GCampaign(campaign)) {
+      const gasWalletPrivKey =
+        process.env.TEYOLIA_GAS_WALLET_PRIVKEY?.trim() || process.env.GAS_WALLET_PRIVKEY?.trim() || '';
+      const gasWalletAddress =
+        process.env.TEYOLIA_GAS_WALLET_ADDRESS?.trim() || process.env.GAS_WALLET_ADDRESS?.trim() || '';
+      if (!gasWalletPrivKey || !gasWalletAddress) {
+        throw new Error('gas-wallet-not-configured-in-env');
+      }
+      const gasUtxos = selectGasUtxos(filterSpendableUtxos(await this.deps.getUtxosForAddress(gasWalletAddress)), 500n);
+      return this.deps.buildFinalizeTx({
+        covenantUtxo,
+        contractVersion: campaign.contractVersion ?? undefined,
+        redeemScriptHex: requireV2GRedeemScriptHex(campaign),
+        governanceLockingBytecodeHex: requireV2GLockingBytecode(campaign, 'governanceLockingBytecodeHex'),
+        infrastructureFeeLockingBytecodeHex: requireV2GLockingBytecode(campaign, 'infrastructureFeeLockingBytecodeHex'),
+        gasUtxos,
+        gasPrivKey: Buffer.from(gasWalletPrivKey, 'hex'),
       });
     }
 

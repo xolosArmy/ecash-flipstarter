@@ -1,5 +1,5 @@
 import { secp256k1 } from '@noble/curves/secp256k1';
-import { TEYOLIA_COVENANT_V1 } from '../covenants/scriptCompiler';
+import { TEYOLIA_COVENANT_V1, TEYOLIA_COVENANT_V2_G } from '../covenants/scriptCompiler';
 import type { Utxo } from '../blockchain/types';
 import { validateAddress } from '../utils/validation';
 import { derivePrivKeyFromSeed } from '../blockchain/txBuilder';
@@ -21,6 +21,7 @@ export type SpendableCampaignRecord = {
   contractVersion?: string | null;
   redeemScriptHex?: string | null;
   scriptPubKey?: string | null;
+  constructorArgs?: Record<string, string> | null;
   expirationTime?: string;
   expiresAt?: string;
 };
@@ -31,6 +32,10 @@ function trimString(value: unknown): string {
 
 export function isV1Campaign(campaign: Pick<SpendableCampaignRecord, 'contractVersion'>): boolean {
   return trimString(campaign.contractVersion) === TEYOLIA_COVENANT_V1;
+}
+
+export function isV2GCampaign(campaign: Pick<SpendableCampaignRecord, 'contractVersion'>): boolean {
+  return trimString(campaign.contractVersion) === TEYOLIA_COVENANT_V2_G;
 }
 
 export function resolveCampaignEscrowAddress(campaign: SpendableCampaignRecord): string {
@@ -55,6 +60,28 @@ export function requireV1RedeemScriptHex(campaign: SpendableCampaignRecord): str
     throw new Error('v1-redeem-script-required');
   }
   return redeemScriptHex;
+}
+
+export function requireV2GRedeemScriptHex(campaign: SpendableCampaignRecord): string {
+  const redeemScriptHex = trimString(campaign.redeemScriptHex).toLowerCase();
+  if (!redeemScriptHex) {
+    throw new Error('v2g-redeem-script-required');
+  }
+  return redeemScriptHex;
+}
+
+export function requireV2GLockingBytecode(
+  campaign: SpendableCampaignRecord,
+  key: 'governanceLockingBytecodeHex' | 'infrastructureFeeLockingBytecodeHex',
+): string {
+  const candidate = trimString(campaign.constructorArgs?.[key]).toLowerCase();
+  if (!candidate) {
+    throw new Error(`v2g-${key}-required`);
+  }
+  if (!/^[0-9a-f]+$/.test(candidate) || candidate.length % 2 !== 0) {
+    throw new Error(`v2g-${key}-invalid`);
+  }
+  return candidate;
 }
 
 export function requireV1BeneficiaryPubKey(campaign: SpendableCampaignRecord): string {

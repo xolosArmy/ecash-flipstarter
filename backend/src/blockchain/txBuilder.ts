@@ -15,7 +15,7 @@ import {
   sha256d,
   flagSignature,
 } from '@ecash/lib';
-import { TEYOLIA_COVENANT_V1 } from '../covenants/scriptCompiler';
+import { TEYOLIA_COVENANT_V1, TEYOLIA_COVENANT_V2_G } from '../covenants/scriptCompiler';
 import { addressToScriptPubKey } from './ecashClient';
 import type { Utxo, UnsignedTx } from './types';
 
@@ -36,15 +36,20 @@ export interface PledgeTxParams {
 
 export interface FinalizeTxParams {
   covenantUtxo: Utxo;
-  beneficiaryAddress: string;
+  beneficiaryAddress?: string;
   contractVersion?: string;
   redeemScriptHex?: string;
   beneficiaryPrivKey?: Buffer | string;
   beneficiaryPubKey?: string;
+  governanceAddress?: string;
+  governanceLockingBytecodeHex?: string;
+  infrastructureFeeAddress?: string;
+  infrastructureFeeLockingBytecodeHex?: string;
   gasUtxos?: Utxo[];
   gasChangeAddress?: string;
   gasPrivKey?: Buffer | string | null;
   fixedFee?: bigint;
+  maxGasFeeSats?: bigint;
 }
 
 export interface RefundTxParams {
@@ -103,7 +108,7 @@ export async function buildPledgeTx(params: PledgeTxParams): Promise<BuiltTx> {
   }
 
   if (
-    params.contractVersion === TEYOLIA_COVENANT_V1
+    (params.contractVersion === TEYOLIA_COVENANT_V1 || params.contractVersion === TEYOLIA_COVENANT_V2_G)
     && params.redeemScriptHex
     && params.covenantUtxo.scriptPubKey
   ) {
@@ -258,6 +263,10 @@ export async function buildPayoutTx(
 }
 
 export async function buildFinalizeTx(params: FinalizeTxParams): Promise<BuiltTx> {
+  if (params.contractVersion === TEYOLIA_COVENANT_V2_G && params.redeemScriptHex) {
+    return buildFinalizeTxV2G(params);
+  }
+
   if (
     params.contractVersion === TEYOLIA_COVENANT_V1
     && params.redeemScriptHex
@@ -266,7 +275,7 @@ export async function buildFinalizeTx(params: FinalizeTxParams): Promise<BuiltTx
     return buildFinalizeTxV1(params);
   }
 
-  const beneficiaryScript = await addressToScriptPubKey(params.beneficiaryAddress);
+  const beneficiaryScript = await addressToScriptPubKey(params.beneficiaryAddress!);
   const unsigned: UnsignedTx = {
     inputs: [params.covenantUtxo],
     outputs: [{ value: params.covenantUtxo.value, scriptPubKey: beneficiaryScript }],
@@ -276,7 +285,7 @@ export async function buildFinalizeTx(params: FinalizeTxParams): Promise<BuiltTx
 
 export async function buildRefundTx(params: RefundTxParams): Promise<BuiltTx> {
   if (
-    params.contractVersion === TEYOLIA_COVENANT_V1
+    (params.contractVersion === TEYOLIA_COVENANT_V1 || params.contractVersion === TEYOLIA_COVENANT_V2_G)
     && params.redeemScriptHex
     && params.refundOraclePrivKey
   ) {
@@ -314,6 +323,55 @@ export function buildPledgeUnlockingScriptV1(redeemScriptHex: string): string {
     '53', // OP_3
     pushHexChunk(redeemScriptHex),
   ]);
+}
+
+
+export function buildFinalizeUnlockingScriptV2G(redeemScriptHex: string): string {
+  return serializeScriptChunks([
+    '51', // OP_1
+    pushHexChunk(redeemScriptHex),
+  ]);
+}
+
+export function assertFinalizeTxV2GSettlement(args: {
+  unsignedTx: UnsignedTx;
+  covenantInputIndex?: number;
+  governanceLockingBytecodeHex: string;
+  infrastructureFeeLockingBytecodeHex: string;
+}): void {
+  const input = args.unsignedTx.inputs[args.covenantInputIndex ?? 0];
+  if (!input) {
+    throw new Error('v2g-covenant-input-missing');
+  }
+  if (hasTokenData(input)) {
+    throw new Error('token-utxo-not-supported');
+  }
+  if (args.unsignedTx.outputs.length !== 2) {
+    throw new Error('v2g-unauthorized-output-count');
+  }
+
+  const governanceScript = normalizeHexString(args.governanceLockingBytecodeHex, 'governanceLockingBytecodeHex');
+  const infrastructureFeeScript = normalizeHexString(
+    args.infrastructureFeeLockingBytecodeHex,
+    'infrastructureFeeLockingBytecodeHex',
+  );
+  const expectedFee = input.value / 100n;
+  const expectedGovernanceAmount = input.value - expectedFee;
+  const governanceOutput = args.unsignedTx.outputs[0];
+  const feeOutput = args.unsignedTx.outputs[1];
+
+  if (!governanceOutput || governanceOutput.scriptPubKey.toLowerCase() !== governanceScript) {
+    throw new Error('v2g-governance-output-script-mismatch');
+  }
+  if (governanceOutput.value !== expectedGovernanceAmount) {
+    throw new Error('v2g-governance-output-amount-mismatch');
+  }
+  if (!feeOutput || feeOutput.scriptPubKey.toLowerCase() !== infrastructureFeeScript) {
+    throw new Error('v2g-fee-output-script-mismatch');
+  }
+  if (feeOutput.value !== expectedFee) {
+    throw new Error('v2g-fee-output-amount-mismatch');
+  }
 }
 
 export function buildFinalizeUnlockingScriptV1(
@@ -502,6 +560,94 @@ async function buildPledgeTxV1(params: PledgeTxParams): Promise<BuiltTx> {
   return { unsignedTx, rawHex: serializeUnsignedTx(unsignedTx), fee };
 }
 
+
+async function buildFinalizeTxV2G(params: FinalizeTxParams): Promise<BuiltTx> {
+  if (hasTokenData(params.covenantUtxo)) {
+    throw new Error('token-utxo-not-supported');
+  }
+  if (!params.governanceLockingBytecodeHex && !params.governanceAddress) {
+    throw new Error('v2g-governance-settlement-required');
+  }
+  if (!params.infrastructureFeeLockingBytecodeHex && !params.infrastructureFeeAddress) {
+    throw new Error('v2g-infrastructure-fee-required');
+  }
+
+  const governanceScript = params.governanceLockingBytecodeHex
+    ? normalizeHexString(params.governanceLockingBytecodeHex, 'governanceLockingBytecodeHex')
+    : await addressToScriptPubKey(params.governanceAddress!);
+  const infrastructureFeeScript = params.infrastructureFeeLockingBytecodeHex
+    ? normalizeHexString(params.infrastructureFeeLockingBytecodeHex, 'infrastructureFeeLockingBytecodeHex')
+    : await addressToScriptPubKey(params.infrastructureFeeAddress!);
+  if (params.governanceAddress && params.governanceLockingBytecodeHex) {
+    const scriptFromAddress = await addressToScriptPubKey(params.governanceAddress);
+    if (scriptFromAddress.toLowerCase() !== governanceScript) {
+      throw new Error('v2g-governance-address-script-mismatch');
+    }
+  }
+  if (params.infrastructureFeeAddress && params.infrastructureFeeLockingBytecodeHex) {
+    const scriptFromAddress = await addressToScriptPubKey(params.infrastructureFeeAddress);
+    if (scriptFromAddress.toLowerCase() !== infrastructureFeeScript) {
+      throw new Error('v2g-infrastructure-fee-address-script-mismatch');
+    }
+  }
+
+  const gasUtxos = (params.gasUtxos ?? []).map((utxo) => {
+    if (hasTokenData(utxo)) {
+      throw new Error('token-utxo-not-supported');
+    }
+    if (!utxo.scriptPubKey) {
+      throw new Error('gas-input-missing-scriptpubkey');
+    }
+    return { ...utxo, sequence: FINAL_SEQUENCE };
+  });
+  const gasTotal = gasUtxos.reduce((acc, utxo) => acc + utxo.value, 0n);
+  if (gasTotal <= 0n) {
+    throw new Error('v2g-gas-utxo-required');
+  }
+  const maxGasFeeSats = params.maxGasFeeSats ?? params.fixedFee ?? 1000n;
+  if (gasTotal > maxGasFeeSats) {
+    throw new Error('v2g-gas-fee-cap-exceeded');
+  }
+  if (!params.gasPrivKey) {
+    throw new Error('gas-wallet-signing-key-missing');
+  }
+
+  const infrastructureFeeAmount = params.covenantUtxo.value / 100n;
+  const governanceAmount = params.covenantUtxo.value - infrastructureFeeAmount;
+  if (infrastructureFeeAmount <= 0n || governanceAmount <= 0n) {
+    throw new Error('v2g-covenant-funds-too-small');
+  }
+
+  const covenantInput: UnsignedTx['inputs'][number] = {
+    ...params.covenantUtxo,
+    scriptSig: buildFinalizeUnlockingScriptV2G(params.redeemScriptHex!),
+    sequence: FINAL_SEQUENCE,
+  };
+  const unsignedTx: UnsignedTx = {
+    inputs: [covenantInput, ...gasUtxos],
+    outputs: [
+      { value: governanceAmount, scriptPubKey: governanceScript },
+      { value: infrastructureFeeAmount, scriptPubKey: infrastructureFeeScript },
+    ],
+  };
+
+  assertFinalizeTxV2GSettlement({
+    unsignedTx,
+    governanceLockingBytecodeHex: governanceScript,
+    infrastructureFeeLockingBytecodeHex: infrastructureFeeScript,
+  });
+
+  for (let inputIndex = 1; inputIndex < unsignedTx.inputs.length; inputIndex += 1) {
+    unsignedTx.inputs[inputIndex]!.scriptSig = signP2pkhInput(unsignedTx, params.gasPrivKey, inputIndex);
+  }
+
+  return {
+    unsignedTx,
+    rawHex: serializeUnsignedTx(unsignedTx),
+    fee: gasTotal,
+  };
+}
+
 async function buildFinalizeTxV1(params: FinalizeTxParams): Promise<BuiltTx> {
   const ecc = new Ecc();
   // The preimage-based V1 finalize path now produces a much larger tx
@@ -603,7 +749,7 @@ async function buildFinalizeTxV1(params: FinalizeTxParams): Promise<BuiltTx> {
     }
   }
 
-  const beneficiaryScript = await addressToScriptPubKey(params.beneficiaryAddress);
+  const beneficiaryScript = await addressToScriptPubKey(params.beneficiaryAddress!);
   const outputs: any[] = [
     {
       value: Number(beneficiaryAmount),
@@ -896,6 +1042,15 @@ function asPrivKeyBuffer(privateKey: Buffer | string): Buffer {
     return privateKey;
   }
   return Buffer.from(privateKey, 'hex');
+}
+
+
+function normalizeHexString(value: string, fieldName: string): string {
+  const normalized = value.trim().replace(/^0x/i, '').toLowerCase();
+  if (!/^[0-9a-f]*$/.test(normalized) || normalized.length % 2 !== 0) {
+    throw new Error(`invalid-${fieldName}-hex`);
+  }
+  return normalized;
 }
 
 function normalizePublicKey(privateKey: Buffer | string, publicKey?: string): string {

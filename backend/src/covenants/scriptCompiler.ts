@@ -1,7 +1,10 @@
 import { createHash } from 'crypto';
+import cashaddr from 'ecashaddrjs';
 import type { CampaignDefinition } from './campaignDefinition';
+import { validateAddress } from '../utils/validation';
 
 export const TEYOLIA_COVENANT_V1 = 'teyolia-covenant-v1' as const;
+export const TEYOLIA_COVENANT_V2_G = 'teyolia-covenant-v2-g' as const;
 export const LEGACY_PLACEHOLDER_COVENANT = 'legacy-placeholder' as const;
 
 export const OP = {
@@ -33,7 +36,9 @@ export const OP = {
   OP_EQUAL: 0x87,
   OP_EQUALVERIFY: 0x88,
   OP_NOT: 0x91,
+  OP_ADD: 0x93,
   OP_SUB: 0x94,
+  OP_DIV: 0x96,
   OP_NUMEQUAL: 0x9c,
   OP_NUMEQUALVERIFY: 0x9d,
   OP_LESSTHAN: 0x9f,
@@ -65,8 +70,18 @@ export interface CampaignCovenantParams {
   feeCapSats?: bigint | number | string;
 }
 
+export interface CampaignCovenantV2GParams {
+  goal: bigint | number | string;
+  expirationTime: bigint | number | string;
+  refundOraclePubKey: string;
+  governanceAddress?: string;
+  governanceLockingBytecodeHex?: string;
+  infrastructureFeeAddress?: string;
+  infrastructureFeeLockingBytecodeHex?: string;
+}
+
 export interface CompiledCampaignScript {
-  contractVersion: typeof TEYOLIA_COVENANT_V1 | typeof LEGACY_PLACEHOLDER_COVENANT;
+  contractVersion: typeof TEYOLIA_COVENANT_V1 | typeof TEYOLIA_COVENANT_V2_G | typeof LEGACY_PLACEHOLDER_COVENANT;
   scriptHex: string;
   scriptHash: string;
   redeemScriptHex?: string;
@@ -335,7 +350,147 @@ export function compileCampaignCovenantV1(
   };
 }
 
+
+export function compileCampaignCovenantV2G(
+  params: CampaignCovenantV2GParams,
+): {
+  redeemScriptHex: string;
+  scriptPubKeyHex: string;
+  scriptHashHex: string;
+  governanceLockingBytecodeHex: string;
+  infrastructureFeeLockingBytecodeHex: string;
+} {
+  const goal = toBigInt(params.goal);
+  const expirationTime = normalizeExpirationTime(params.expirationTime);
+  if (goal < 0n) throw new Error('campaign-goal-negative');
+  if (expirationTime < 0n) throw new Error('campaign-expiration-negative');
+
+  const refundOraclePubKey = expectHexBytes(params.refundOraclePubKey, [33, 65], 'refundOraclePubKey');
+  const governanceLockingBytecodeHex = resolveExplicitLockingBytecode({
+    fieldName: 'governance',
+    address: params.governanceAddress,
+    lockingBytecodeHex: params.governanceLockingBytecodeHex,
+  });
+  const infrastructureFeeLockingBytecodeHex = resolveExplicitLockingBytecode({
+    fieldName: 'infrastructureFee',
+    address: params.infrastructureFeeAddress,
+    lockingBytecodeHex: params.infrastructureFeeLockingBytecodeHex,
+  });
+
+  const finalizeBranch = compileScript(
+    OP.OP_DROP,
+    OP.OP_TXOUTPUTCOUNT,
+    pushScriptNum(2n),
+    OP.OP_NUMEQUALVERIFY,
+    OP.OP_INPUTINDEX,
+    OP.OP_UTXOVALUE,
+    pushScriptNum(goal),
+    OP.OP_LESSTHAN,
+    OP.OP_NOT,
+    OP.OP_VERIFY,
+    pushScriptNum(0n),
+    OP.OP_OUTPUTBYTECODE,
+    pushBytes(hexToBytes(governanceLockingBytecodeHex)),
+    OP.OP_EQUALVERIFY,
+    pushScriptNum(1n),
+    OP.OP_OUTPUTBYTECODE,
+    pushBytes(hexToBytes(infrastructureFeeLockingBytecodeHex)),
+    OP.OP_EQUALVERIFY,
+    pushScriptNum(0n),
+    OP.OP_OUTPUTVALUE,
+    pushScriptNum(1n),
+    OP.OP_OUTPUTVALUE,
+    OP.OP_ADD,
+    OP.OP_INPUTINDEX,
+    OP.OP_UTXOVALUE,
+    OP.OP_NUMEQUALVERIFY,
+    pushScriptNum(1n),
+    OP.OP_OUTPUTVALUE,
+    OP.OP_INPUTINDEX,
+    OP.OP_UTXOVALUE,
+    pushScriptNum(100n),
+    OP.OP_DIV,
+    OP.OP_NUMEQUALVERIFY,
+    OP.OP_1,
+  );
+
+  const refundBranch = compileScript(
+    OP.OP_DROP,
+    pushScriptNum(expirationTime),
+    OP.OP_CHECKLOCKTIMEVERIFY,
+    OP.OP_DROP,
+    pushBytes(refundOraclePubKey),
+    OP.OP_CHECKSIGVERIFY,
+    OP.OP_1,
+  );
+
+  const pledgeBranch = compileScript(
+    pushScriptNum(0n),
+    OP.OP_OUTPUTBYTECODE,
+    OP.OP_INPUTINDEX,
+    OP.OP_UTXOBYTECODE,
+    OP.OP_EQUALVERIFY,
+    pushScriptNum(0n),
+    OP.OP_OUTPUTVALUE,
+    OP.OP_INPUTINDEX,
+    OP.OP_UTXOVALUE,
+    OP.OP_GREATERTHAN,
+    OP.OP_VERIFY,
+    OP.OP_1,
+  );
+
+  const redeemScript = compileScript(
+    OP.OP_DUP,
+    pushScriptNum(1n),
+    OP.OP_NUMEQUAL,
+    OP.OP_IF,
+    finalizeBranch,
+    OP.OP_ELSE,
+    OP.OP_DUP,
+    pushScriptNum(2n),
+    OP.OP_NUMEQUAL,
+    OP.OP_IF,
+    refundBranch,
+    OP.OP_ELSE,
+    pushScriptNum(3n),
+    OP.OP_NUMEQUALVERIFY,
+    pledgeBranch,
+    OP.OP_ENDIF,
+    OP.OP_ENDIF,
+  );
+
+  const redeemScriptHex = bytesToHex(redeemScript);
+  const p2sh = p2shLockingBytecodeFromRedeemScript(redeemScript);
+  return {
+    redeemScriptHex,
+    scriptPubKeyHex: p2sh.scriptPubKeyHex,
+    scriptHashHex: p2sh.scriptHashHex,
+    governanceLockingBytecodeHex,
+    infrastructureFeeLockingBytecodeHex,
+  };
+}
+
 export function compileCampaignScript(campaign: CampaignDefinition): CompiledCampaignScript {
+  const paramsV2G = getCampaignCovenantV2GParams(campaign);
+  if (paramsV2G) {
+    const compiled = compileCampaignCovenantV2G(paramsV2G);
+    return {
+      contractVersion: TEYOLIA_COVENANT_V2_G,
+      scriptHex: compiled.scriptPubKeyHex,
+      scriptHash: compiled.scriptHashHex,
+      redeemScriptHex: compiled.redeemScriptHex,
+      scriptPubKeyHex: compiled.scriptPubKeyHex,
+      scriptHashHex: compiled.scriptHashHex,
+      constructorArgs: {
+        goal: toBigInt(paramsV2G.goal).toString(),
+        expirationTime: normalizeExpirationTime(paramsV2G.expirationTime).toString(),
+        refundOraclePubKey: normalizeHex(paramsV2G.refundOraclePubKey),
+        governanceLockingBytecodeHex: compiled.governanceLockingBytecodeHex,
+        infrastructureFeeLockingBytecodeHex: compiled.infrastructureFeeLockingBytecodeHex,
+      },
+    };
+  }
+
   const params = getCampaignCovenantParams(campaign);
   if (params) {
     const compiled = compileCampaignCovenantV1(params);
@@ -362,6 +517,37 @@ export function compileCampaignScript(campaign: CampaignDefinition): CompiledCam
     contractVersion: LEGACY_PLACEHOLDER_COVENANT,
     scriptHex: legacy.scriptHex,
     scriptHash: legacy.scriptHash,
+  };
+}
+
+
+function getCampaignCovenantV2GParams(campaign: CampaignDefinition): CampaignCovenantV2GParams | null {
+  if (campaign.contractVersion !== TEYOLIA_COVENANT_V2_G) {
+    return null;
+  }
+
+  const constructorArgs = campaign.constructorArgs ?? {};
+  const refundOraclePubKey = String(
+    constructorArgs.refundOraclePubKey
+      ?? campaign.refundOraclePubKey
+      ?? process.env.TEYOLIA_REFUND_ORACLE_PUBKEY
+      ?? process.env.REFUND_ORACLE_PUBKEY
+      ?? '',
+  ).trim();
+
+  if (!isHexLength(refundOraclePubKey, [33, 65])) {
+    throw new Error('v2g-refund-oracle-pubkey-required');
+  }
+
+  return {
+    goal: constructorArgs.goal ?? campaign.goal,
+    expirationTime: constructorArgs.expirationTime ?? campaign.expirationTime,
+    refundOraclePubKey,
+    governanceAddress: constructorArgs.governanceAddress ?? campaign.governanceAddress,
+    governanceLockingBytecodeHex: constructorArgs.governanceLockingBytecodeHex ?? campaign.governanceLockingBytecodeHex,
+    infrastructureFeeAddress: constructorArgs.infrastructureFeeAddress ?? campaign.infrastructureFeeAddress,
+    infrastructureFeeLockingBytecodeHex:
+      constructorArgs.infrastructureFeeLockingBytecodeHex ?? campaign.infrastructureFeeLockingBytecodeHex,
   };
 }
 
@@ -392,6 +578,41 @@ function getCampaignCovenantParams(campaign: CampaignDefinition): CampaignCovena
     refundOraclePubKey,
     feeCapSats: constructorArgs.feeCapSats ?? 1000n,
   };
+}
+
+
+function resolveExplicitLockingBytecode(args: {
+  fieldName: string;
+  address?: string;
+  lockingBytecodeHex?: string;
+}): string {
+  const scriptFromHex = args.lockingBytecodeHex ? normalizeHex(args.lockingBytecodeHex) : '';
+  const scriptFromAddress = args.address ? lockingBytecodeFromAddress(args.address, args.fieldName) : '';
+  const resolved = scriptFromHex || scriptFromAddress;
+  if (!resolved) {
+    throw new Error(`${args.fieldName}-locking-bytecode-required`);
+  }
+  if (scriptFromHex && scriptFromAddress && scriptFromHex !== scriptFromAddress) {
+    throw new Error(`${args.fieldName}-locking-bytecode-address-mismatch`);
+  }
+  return resolved;
+}
+
+function lockingBytecodeFromAddress(address: string, fieldName: string): string {
+  const normalized = validateAddress(address, `${fieldName}Address`);
+  const decoded = cashaddr.decode(normalized, true);
+  const hashHex =
+    typeof decoded.hash === 'string'
+      ? normalizeHex(decoded.hash)
+      : bytesToHex(decoded.hash);
+  const type = decoded.type.toLowerCase();
+  if (type === 'p2pkh') {
+    return `76a914${hashHex}88ac`;
+  }
+  if (type === 'p2sh') {
+    return `a914${hashHex}87`;
+  }
+  throw new Error(`${fieldName}-address-type-unsupported`);
 }
 
 function compileLegacyPlaceholder(campaign: CampaignDefinition): {

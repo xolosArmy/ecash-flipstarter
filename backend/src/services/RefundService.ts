@@ -4,8 +4,10 @@ import { CampaignService, covenantIndexInstance } from './CampaignService';
 import {
   filterSpendableUtxos,
   isV1Campaign,
+  isV2GCampaign,
   requireV1ExpirationTime,
   requireV1RedeemScriptHex,
+  requireV2GRedeemScriptHex,
   requireV1RefundOraclePubKey,
   resolveCampaignEscrowAddress,
   resolvePrivateKeyFromEnv,
@@ -166,7 +168,9 @@ export class RefundService {
       tracked: covenantIndexInstance.getCovenantRef(campaignId),
     });
 
-    if (!isV1Campaign(campaign)) {
+    const v1Campaign = isV1Campaign(campaign);
+    const v2GCampaign = isV2GCampaign(campaign);
+    if (!v1Campaign && !v2GCampaign) {
       return this.deps.buildRefundTx({
         covenantUtxo,
         refundAddress,
@@ -174,7 +178,7 @@ export class RefundService {
       });
     }
 
-    const redeemScriptHex = requireV1RedeemScriptHex(campaign);
+    const redeemScriptHex = v2GCampaign ? requireV2GRedeemScriptHex(campaign) : requireV1RedeemScriptHex(campaign);
     const expirationTime = requireV1ExpirationTime(campaign);
     const refundOraclePubKey = requireV1RefundOraclePubKey(campaign);
     // TODO(security): V1 refunds still rely on a backend-held refund signer.

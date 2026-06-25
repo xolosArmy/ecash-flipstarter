@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   OP,
   TEYOLIA_COVENANT_V1,
+  TEYOLIA_COVENANT_V2_G,
   bytesToHex,
   compileCampaignCovenantV1,
+  compileCampaignCovenantV2G,
   compileCampaignScript,
   encodeScriptNum,
   hash160,
@@ -161,5 +163,50 @@ describe('compileCampaignScript', () => {
     expect(compiled.redeemScriptHex).toMatch(/^[0-9a-f]+$/);
     expect(compiled.scriptHex).toBe(compiled.scriptPubKeyHex);
     expect(compiled.scriptHash).toBe(compiled.scriptHashHex);
+  });
+});
+
+
+describe('compileCampaignCovenantV2G', () => {
+  const GOVERNANCE_SCRIPT = `a914${'33'.repeat(20)}87`;
+  const FEE_SCRIPT = `76a914${'44'.repeat(20)}88ac`;
+
+  it('compiles without a beneficiary pubkey and stores exact settlement bytecode args', () => {
+    const compiled = compileCampaignScript({
+      id: 'campaign-script-v2g',
+      name: 'Teyolia governance bridge',
+      description: '',
+      goal: 100_000n,
+      expirationTime: 950_000n,
+      beneficiaryPubKey: '',
+      refundOraclePubKey: REFUND_ORACLE_PUBKEY,
+      contractVersion: TEYOLIA_COVENANT_V2_G,
+      constructorArgs: {
+        governanceLockingBytecodeHex: GOVERNANCE_SCRIPT,
+        infrastructureFeeLockingBytecodeHex: FEE_SCRIPT,
+      },
+    });
+
+    expect(compiled.contractVersion).toBe(TEYOLIA_COVENANT_V2_G);
+    expect(compiled.beneficiaryLockingBytecodeHex).toBeUndefined();
+    expect(compiled.constructorArgs?.governanceLockingBytecodeHex).toBe(GOVERNANCE_SCRIPT);
+    expect(compiled.constructorArgs?.infrastructureFeeLockingBytecodeHex).toBe(FEE_SCRIPT);
+    expect(compiled.constructorArgs?.beneficiaryPubKey).toBeUndefined();
+  });
+
+  it('enforces two outputs, settlement scripts, 1 percent fee, and input conservation in the finalize branch', () => {
+    const compiled = compileCampaignCovenantV2G({
+      goal: 100_000n,
+      expirationTime: 950_000n,
+      refundOraclePubKey: REFUND_ORACLE_PUBKEY,
+      governanceLockingBytecodeHex: GOVERNANCE_SCRIPT,
+      infrastructureFeeLockingBytecodeHex: FEE_SCRIPT,
+    });
+
+    expect(compiled.redeemScriptHex).toContain(bytesToHex([OP.OP_TXOUTPUTCOUNT, OP.OP_2, OP.OP_NUMEQUALVERIFY]));
+    expect(compiled.redeemScriptHex).toContain(bytesToHex(pushBytes(Buffer.from(GOVERNANCE_SCRIPT, 'hex'))));
+    expect(compiled.redeemScriptHex).toContain(bytesToHex(pushBytes(Buffer.from(FEE_SCRIPT, 'hex'))));
+    expect(compiled.redeemScriptHex).toContain(bytesToHex([OP.OP_OUTPUTVALUE, OP.OP_ADD, OP.OP_INPUTINDEX, OP.OP_UTXOVALUE]));
+    expect(compiled.redeemScriptHex).toContain(bytesToHex([...pushScriptNum(100n), OP.OP_DIV, OP.OP_NUMEQUALVERIFY]));
   });
 });

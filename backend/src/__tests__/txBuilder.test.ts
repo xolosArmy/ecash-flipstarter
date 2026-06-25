@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { describe, expect, it } from 'vitest';
 import {
+  assertFinalizeTxV2GSettlement,
   buildFinalizeTx,
   buildPayoutTx,
   buildPledgeTx,
@@ -13,7 +14,7 @@ import {
   signRefundInputV1,
 } from '../blockchain/txBuilder';
 import { addressToScriptPubKey } from '../blockchain/ecashClient';
-import { TEYOLIA_COVENANT_V1, compileCampaignCovenantV1 } from '../covenants/scriptCompiler';
+import { TEYOLIA_COVENANT_V1, TEYOLIA_COVENANT_V2_G, compileCampaignCovenantV1 } from '../covenants/scriptCompiler';
 
 describe('buildPledgeTx', () => {
   it('routes campaign output first and contributor change last', async () => {
@@ -452,5 +453,144 @@ describe('buildPayoutTx', () => {
       '51',
       1
     )).toThrow('gas-input-missing-scriptpubkey');
+  });
+});
+
+
+describe('V2-G governance-bridge finalize settlement', () => {
+  const governanceScript = `a914${'33'.repeat(20)}87`;
+  const feeScript = `76a914${'44'.repeat(20)}88ac`;
+  const gasScript = `76a914${'55'.repeat(20)}88ac`;
+  const redeemScriptHex = '51';
+  const gasPrivKey = Buffer.from('04'.repeat(32), 'hex');
+
+  const buildV2G = (overrides: Partial<Parameters<typeof buildFinalizeTx>[0]> = {}) => buildFinalizeTx({
+    covenantUtxo: {
+      txid: '99'.repeat(32),
+      vout: 0,
+      value: 100_000n,
+      scriptPubKey: `a914${'66'.repeat(20)}87`,
+    },
+    contractVersion: TEYOLIA_COVENANT_V2_G,
+    redeemScriptHex,
+    governanceLockingBytecodeHex: governanceScript,
+    infrastructureFeeLockingBytecodeHex: feeScript,
+    gasUtxos: [{ txid: 'aa'.repeat(32), vout: 1, value: 700n, scriptPubKey: gasScript }],
+    gasPrivKey,
+    ...overrides,
+  });
+
+  const expectSettlementFailure = async (
+    mutate: (tx: Awaited<ReturnType<typeof buildV2G>>['unsignedTx']) => void,
+    message: string,
+  ) => {
+    const built = await buildV2G();
+    mutate(built.unsignedTx);
+    expect(() => assertFinalizeTxV2GSettlement({
+      unsignedTx: built.unsignedTx,
+      governanceLockingBytecodeHex: governanceScript,
+      infrastructureFeeLockingBytecodeHex: feeScript,
+    })).toThrow(message);
+  };
+
+  it('builds exactly governance principal then infrastructure fee, with gas consumed as miner fee', async () => {
+    const built = await buildV2G();
+
+    expect(built.unsignedTx.outputs).toEqual([
+      { value: 99_000n, scriptPubKey: governanceScript },
+      { value: 1_000n, scriptPubKey: feeScript },
+    ]);
+    expect(built.unsignedTx.inputs[0]?.scriptSig).toMatch(/51$/);
+    expect(built.unsignedTx.inputs[1]?.scriptSig).toMatch(/^[0-9a-f]+$/);
+    expect(built.fee).toBe(700n);
+  });
+
+  it('accepts gasTotal equal to the V2-G gas fee cap', async () => {
+    const built = await buildV2G({
+      gasUtxos: [{ txid: 'aa'.repeat(32), vout: 1, value: 1000n, scriptPubKey: gasScript }],
+      maxGasFeeSats: 1000n,
+    });
+
+    expect(built.unsignedTx.outputs).toEqual([
+      { value: 99_000n, scriptPubKey: governanceScript },
+      { value: 1_000n, scriptPubKey: feeScript },
+    ]);
+    expect(built.fee).toBe(1000n);
+  });
+
+  it('rejects gasTotal above the V2-G gas fee cap', async () => {
+    await expect(buildV2G({
+      gasUtxos: [{ txid: 'aa'.repeat(32), vout: 1, value: 1001n, scriptPubKey: gasScript }],
+      maxGasFeeSats: 1000n,
+    })).rejects.toThrow('v2g-gas-fee-cap-exceeded');
+  });
+
+  it('fails validation if the governance output script is wrong', async () => {
+    await expectSettlementFailure((tx) => {
+      tx.outputs[0]!.scriptPubKey = `a914${'77'.repeat(20)}87`;
+    }, 'v2g-governance-output-script-mismatch');
+  });
+
+  it('fails validation if the governance amount is wrong', async () => {
+    await expectSettlementFailure((tx) => {
+      tx.outputs[0]!.value -= 1n;
+    }, 'v2g-governance-output-amount-mismatch');
+  });
+
+  it('fails validation if the fee output script is wrong', async () => {
+    await expectSettlementFailure((tx) => {
+      tx.outputs[1]!.scriptPubKey = `76a914${'88'.repeat(20)}88ac`;
+    }, 'v2g-fee-output-script-mismatch');
+  });
+
+  it('fails validation if the fee amount is wrong', async () => {
+    await expectSettlementFailure((tx) => {
+      tx.outputs[1]!.value += 1n;
+    }, 'v2g-fee-output-amount-mismatch');
+  });
+
+  it('fails validation if output order is wrong', async () => {
+    await expectSettlementFailure((tx) => {
+      tx.outputs = [tx.outputs[1]!, tx.outputs[0]!];
+    }, 'v2g-governance-output-script-mismatch');
+  });
+
+  it('fails validation if extra unauthorized outputs are included', async () => {
+    await expectSettlementFailure((tx) => {
+      tx.outputs.push({ value: 1n, scriptPubKey: governanceScript });
+    }, 'v2g-unauthorized-output-count');
+  });
+
+  it('rejects token-bearing covenant and gas inputs', async () => {
+    await expect(buildFinalizeTx({
+      covenantUtxo: {
+        txid: 'bb'.repeat(32),
+        vout: 0,
+        value: 100_000n,
+        scriptPubKey: `a914${'66'.repeat(20)}87`,
+        token: { amount: '1' },
+      },
+      contractVersion: TEYOLIA_COVENANT_V2_G,
+      redeemScriptHex,
+      governanceLockingBytecodeHex: governanceScript,
+      infrastructureFeeLockingBytecodeHex: feeScript,
+      gasUtxos: [{ txid: 'aa'.repeat(32), vout: 1, value: 700n, scriptPubKey: gasScript }],
+      gasPrivKey,
+    })).rejects.toThrow('token-utxo-not-supported');
+
+    await expect(buildFinalizeTx({
+      covenantUtxo: {
+        txid: 'cc'.repeat(32),
+        vout: 0,
+        value: 100_000n,
+        scriptPubKey: `a914${'66'.repeat(20)}87`,
+      },
+      contractVersion: TEYOLIA_COVENANT_V2_G,
+      redeemScriptHex,
+      governanceLockingBytecodeHex: governanceScript,
+      infrastructureFeeLockingBytecodeHex: feeScript,
+      gasUtxos: [{ txid: 'aa'.repeat(32), vout: 1, value: 700n, scriptPubKey: gasScript, token: { amount: '1' } }],
+      gasPrivKey,
+    })).rejects.toThrow('token-utxo-not-supported');
   });
 });

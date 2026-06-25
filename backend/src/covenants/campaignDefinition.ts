@@ -5,6 +5,7 @@ import {
   compileCampaignScript,
   LEGACY_PLACEHOLDER_COVENANT,
   TEYOLIA_COVENANT_V1,
+  TEYOLIA_COVENANT_V2_G,
 } from './scriptCompiler';
 
 export interface CampaignDefinition {
@@ -16,9 +17,13 @@ export interface CampaignDefinition {
   beneficiaryPubKey: string;
   refundOraclePubKey?: string;
   beneficiaryAddress?: string;
+  governanceAddress?: string;
+  governanceLockingBytecodeHex?: string;
+  infrastructureFeeAddress?: string;
+  infrastructureFeeLockingBytecodeHex?: string;
   campaignAddress?: string;
   covenantAddress?: string;
-  contractVersion?: typeof TEYOLIA_COVENANT_V1 | typeof LEGACY_PLACEHOLDER_COVENANT;
+  contractVersion?: typeof TEYOLIA_COVENANT_V1 | typeof TEYOLIA_COVENANT_V2_G | typeof LEGACY_PLACEHOLDER_COVENANT;
   constructorArgs?: Record<string, string>;
   status?:
     | 'draft'
@@ -37,10 +42,12 @@ export type CampaignCovenantRecord = {
   scriptPubKey: string;
   scriptHash: string;
   campaignAddress: string;
-  contractVersion?: typeof TEYOLIA_COVENANT_V1 | typeof LEGACY_PLACEHOLDER_COVENANT;
+  contractVersion?: typeof TEYOLIA_COVENANT_V1 | typeof TEYOLIA_COVENANT_V2_G | typeof LEGACY_PLACEHOLDER_COVENANT;
   constructorArgs?: Record<string, string>;
   redeemScriptHex?: string;
   beneficiaryLockingBytecodeHex?: string;
+  governanceLockingBytecodeHex?: string;
+  infrastructureFeeLockingBytecodeHex?: string;
   txid?: string;
   vout?: number;
   value?: string | number | bigint;
@@ -90,6 +97,8 @@ export function ensureCampaignCovenant(args: {
     constructorArgs: script.constructorArgs,
     redeemScriptHex: script.redeemScriptHex,
     beneficiaryLockingBytecodeHex: script.beneficiaryLockingBytecodeHex,
+    governanceLockingBytecodeHex: script.constructorArgs?.governanceLockingBytecodeHex,
+    infrastructureFeeLockingBytecodeHex: script.constructorArgs?.infrastructureFeeLockingBytecodeHex,
     txid: typeof existing?.txid === 'string' ? existing.txid : undefined,
     vout: typeof existing?.vout === 'number' ? existing.vout : undefined,
     value: typeof existing?.value === 'bigint'

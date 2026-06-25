@@ -4,7 +4,7 @@ import { FinalizeService } from '../services/FinalizeService';
 import { RefundService } from '../services/RefundService';
 import { PledgeService } from '../services/PledgeService';
 import { campaignStore, covenantIndexInstance } from '../services/CampaignService';
-import { TEYOLIA_COVENANT_V1 } from '../covenants/scriptCompiler';
+import { TEYOLIA_COVENANT_V1, TEYOLIA_COVENANT_V2_G } from '../covenants/scriptCompiler';
 
 const beneficiaryPrivKeyHex = '01'.repeat(32);
 const gasPrivKeyHex = '03'.repeat(32);
@@ -127,6 +127,76 @@ describe('FinalizeService V1 integration', () => {
     expect(broadcastRawTx).toHaveBeenCalledWith('unsigned-finalize');
     expect(markPayoutComplete).toHaveBeenCalledWith(campaignId, 'aa'.repeat(32), null);
     expect(result).toMatchObject({ status: 'paid_out', txid: 'aa'.repeat(32) });
+  });
+
+
+
+  it('passes V2-G settlement metadata to buildFinalizeTx without beneficiary signing material', async () => {
+    const governanceScript = `a914${'33'.repeat(20)}87`;
+    const feeScript = `76a914${'44'.repeat(20)}88ac`;
+    const getCampaign = vi.fn().mockResolvedValue({
+      id: campaignId,
+      goal: '1000',
+      activationFeePaid: true,
+      status: 'funded',
+      contractVersion: TEYOLIA_COVENANT_V2_G,
+      redeemScriptHex: '51',
+      campaignAddress,
+      scriptPubKey,
+      constructorArgs: {
+        governanceLockingBytecodeHex: governanceScript,
+        infrastructureFeeLockingBytecodeHex: feeScript,
+      },
+      payout: { txid: null, paidAt: null },
+    });
+    const markPayoutComplete = vi.fn().mockResolvedValue(undefined);
+    const buildFinalizeTx = vi.fn().mockResolvedValue({
+      unsignedTx: {
+        inputs: [{ ...trackedCovenant }],
+        outputs: [
+          { value: 2475n, scriptPubKey: governanceScript },
+          { value: 25n, scriptPubKey: feeScript },
+        ],
+      },
+      rawHex: 'v2g-finalize',
+      fee: 700n,
+    });
+    const broadcastRawTx = vi.fn().mockResolvedValue({ txid: 'ee'.repeat(32) });
+    const getUtxosForAddress = vi.fn()
+      .mockResolvedValueOnce([{ ...trackedCovenant }])
+      .mockResolvedValueOnce([
+        {
+          txid: '22'.repeat(32),
+          vout: 1,
+          value: 700n,
+          scriptPubKey: '76a914' + '11'.repeat(20) + '88ac',
+        },
+      ]);
+
+    const service = new FinalizeService({
+      campaignService: { getCampaign, markPayoutComplete },
+      getUtxosForAddress,
+      buildFinalizeTx,
+      broadcastRawTx,
+      legacyFinalizeCampaign: vi.fn(),
+    });
+
+    const result = await service.finalizeCampaign(campaignId);
+
+    expect(buildFinalizeTx).toHaveBeenCalledWith(expect.objectContaining({
+      covenantUtxo: expect.objectContaining({ txid: trackedCovenant.txid, vout: trackedCovenant.vout }),
+      beneficiaryAddress: undefined,
+      contractVersion: TEYOLIA_COVENANT_V2_G,
+      redeemScriptHex: '51',
+      governanceLockingBytecodeHex: governanceScript,
+      infrastructureFeeLockingBytecodeHex: feeScript,
+      beneficiaryPrivKey: undefined,
+      beneficiaryPubKey: undefined,
+      gasPrivKey: Buffer.from(gasPrivKeyHex, 'hex'),
+    }));
+    expect(broadcastRawTx).toHaveBeenCalledWith('v2g-finalize');
+    expect(markPayoutComplete).toHaveBeenCalledWith(campaignId, 'ee'.repeat(32), null);
+    expect(result).toMatchObject({ status: 'paid_out', txid: 'ee'.repeat(32) });
   });
 
   it('falls back to the legacy finalize path for non-V1 campaigns', async () => {

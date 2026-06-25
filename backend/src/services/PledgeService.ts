@@ -3,7 +3,7 @@ import { buildPledgeTx, type BuiltTx } from '../blockchain/txBuilder';
 import type { Utxo } from '../blockchain/types';
 import { validateAddress } from '../utils/validation';
 import { CampaignService, campaignStore, covenantIndexInstance } from './CampaignService';
-import { isV1Campaign, requireV1RedeemScriptHex, type SpendableCampaignRecord } from './covenantV1Integration';
+import { isV1Campaign, isV2GCampaign, requireV1RedeemScriptHex, requireV2GRedeemScriptHex, type SpendableCampaignRecord } from './covenantV1Integration';
 
 const MIN_PLEDGE_FEE_SATS = 500n;
 
@@ -52,12 +52,14 @@ export class PledgeService {
       contributorAddress,
       covenant,
       beneficiaryAddress: escrowAddress,
-      contractVersion: isV1Campaign(serializedCampaign)
+      contractVersion: isV1Campaign(serializedCampaign) || isV2GCampaign(serializedCampaign)
         ? String(serializedCampaign.contractVersion)
         : undefined,
-      redeemScriptHex: isV1Campaign(serializedCampaign)
-        ? requireV1RedeemScriptHex(serializedCampaign)
-        : undefined,
+      redeemScriptHex: isV2GCampaign(serializedCampaign)
+        ? requireV2GRedeemScriptHex(serializedCampaign)
+        : isV1Campaign(serializedCampaign)
+          ? requireV1RedeemScriptHex(serializedCampaign)
+          : undefined,
     });
 
     // Optimistic update; real deployment should update after broadcast/confirmation.

@@ -3,7 +3,7 @@ import { secp256k1 } from '@noble/curves/secp256k1';
 import { CampaignService } from '../services/CampaignService';
 import { getCampaignById } from '../db/SQLiteStore';
 import { makeTestDbPath } from './helpers/testDbPath';
-import { TEYOLIA_COVENANT_V1 } from '../covenants/scriptCompiler';
+import { TEYOLIA_COVENANT_V1, TEYOLIA_COVENANT_V2_G } from '../covenants/scriptCompiler';
 
 const BENEFICIARY_ADDRESS = 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk';
 const REFUND_ORACLE_PUBKEY = `03${'22'.repeat(32)}`;
@@ -99,5 +99,37 @@ describe('CampaignService V1 creation', () => {
       beneficiaryAddress: BENEFICIARY_ADDRESS,
       contractVersion: TEYOLIA_COVENANT_V1,
     })).rejects.toThrow('missing-beneficiary-pubkey-for-v1');
+  });
+});
+
+
+describe('CampaignService V2-G creation', () => {
+  it('persists V2-G governance bridge fields without requiring beneficiaryPubKey', async () => {
+    const service = new CampaignService();
+    const campaignId = uniqueId('v2g-no-beneficiary-pubkey');
+    const governanceScript = `a914${'33'.repeat(20)}87`;
+    const feeScript = `76a914${'44'.repeat(20)}88ac`;
+
+    await service.createCampaign({
+      id: campaignId,
+      name: 'Governance bridge campaign',
+      goal: 1000n,
+      expirationTime: BigInt(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      beneficiaryAddress: BENEFICIARY_ADDRESS,
+      contractVersion: TEYOLIA_COVENANT_V2_G,
+      constructorArgs: {
+        governanceLockingBytecodeHex: governanceScript,
+        infrastructureFeeLockingBytecodeHex: feeScript,
+      },
+    });
+
+    const stored = await getCampaignById(campaignId);
+    expect(stored?.contractVersion).toBe(TEYOLIA_COVENANT_V2_G);
+    expect(stored?.beneficiaryPubKey).toBe('');
+    expect(stored?.redeemScriptHex).toMatch(/^[0-9a-f]+$/);
+    expect(stored?.scriptPubKey).toMatch(/^a914[0-9a-f]{40}87$/);
+    expect(stored?.constructorArgs?.governanceLockingBytecodeHex).toBe(governanceScript);
+    expect(stored?.constructorArgs?.infrastructureFeeLockingBytecodeHex).toBe(feeScript);
+    expect(stored?.constructorArgs?.beneficiaryPubKey).toBeUndefined();
   });
 });

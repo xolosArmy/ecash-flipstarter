@@ -3,6 +3,7 @@ import {
   compileCampaignScript,
   LEGACY_PLACEHOLDER_COVENANT,
   TEYOLIA_COVENANT_V1,
+  TEYOLIA_COVENANT_V2_G,
 } from '../covenants/scriptCompiler';
 import { broadcastRawTx, getUtxosForAddress } from '../blockchain/ecashClient';
 import {
@@ -156,13 +157,17 @@ if ((campaign.status === 'paid_out' || payoutTxid) && forceRescueId === campaign
     let redeemScriptHex = campaign.redeemScriptHex?.trim();
     const expirationTime = BigInt(campaign.expirationTime ?? new Date(campaign.expiresAt ?? 0).getTime());
     const contractVersion =
-      campaign.contractVersion === TEYOLIA_COVENANT_V1 || campaign.contractVersion === LEGACY_PLACEHOLDER_COVENANT
+      campaign.contractVersion === TEYOLIA_COVENANT_V1 || campaign.contractVersion === TEYOLIA_COVENANT_V2_G || campaign.contractVersion === LEGACY_PLACEHOLDER_COVENANT
         ? campaign.contractVersion
         : undefined;
 
     if (contractVersion === TEYOLIA_COVENANT_V1) {
       console.warn(`[AutoPayoutService] Rescue Mode blocked for signed V1 covenant: ${campaignId}`);
       throw new Error('auto-payout-unsupported-for-v1');
+    }
+    if (contractVersion === TEYOLIA_COVENANT_V2_G) {
+      console.warn(`[AutoPayoutService] Rescue Mode blocked for signed V2-G covenant: ${campaignId}`);
+      throw new Error('auto-payout-unsupported-for-v2g');
     }
 
 if (!redeemScriptHex) {
