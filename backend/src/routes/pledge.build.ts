@@ -4,12 +4,26 @@ import { createWalletConnectPledgeOffer } from '../services/PledgeOfferService';
 import { getCampaignStatusById } from './campaigns.routes';
 import { CampaignService } from '../services/CampaignService';
 import { parsePledgeAmountSats, parsePledgeMessage } from './pledgePayload';
+import {
+  assertLegacyPlaceholderMonetaryOperationsAllowed,
+  isLegacyPlaceholderDisabledError,
+  legacyPlaceholderDisabledBody,
+  LEGACY_PLACEHOLDER_DISABLED_STATUS,
+} from '../security/legacyPlaceholderFreeze';
 
 const router = Router();
 const campaignService = new CampaignService();
 
 export const createPledgeBuildHandler = async (req: any, res: any) => {
   try {
+    const campaign = await campaignService.getCampaign(req.params.id) as
+      | { campaignAddress?: string; covenantAddress?: string; contractVersion?: string | null }
+      | null;
+    if (!campaign) {
+      return res.status(404).json({ error: 'campaign-not-found' });
+    }
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
+
     const status = await getCampaignStatusById(req.params.id);
     if (!status) {
       return res.status(404).json({ error: 'campaign-not-found' });
@@ -21,9 +35,6 @@ export const createPledgeBuildHandler = async (req: any, res: any) => {
     if (!ensured.scriptHash || !ensured.scriptPubKey) {
       return res.status(400).json({ error: 'campaign-address-required' });
     }
-    const campaign = await campaignService.getCampaign(req.params.id) as
-      | { campaignAddress?: string; covenantAddress?: string }
-      | null;
     const campaignAddress = campaign?.campaignAddress || campaign?.covenantAddress || '';
     if (!campaignAddress) {
       return res.status(400).json({ error: 'campaign-address-required' });
@@ -49,6 +60,11 @@ export const createPledgeBuildHandler = async (req: any, res: any) => {
     );
     return res.json(response);
   } catch (err) {
+    if (isLegacyPlaceholderDisabledError(err)) {
+      return res
+        .status(LEGACY_PLACEHOLDER_DISABLED_STATUS)
+        .json(legacyPlaceholderDisabledBody());
+    }
     return res.status(400).json({ error: (err as Error).message });
   }
 };

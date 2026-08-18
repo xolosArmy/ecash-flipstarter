@@ -4,6 +4,7 @@ import type { Utxo } from '../blockchain/types';
 import { validateAddress } from '../utils/validation';
 import { CampaignService, campaignStore, covenantIndexInstance } from './CampaignService';
 import { isV1Campaign, isV2GCampaign, requireV1RedeemScriptHex, requireV2GRedeemScriptHex, type SpendableCampaignRecord } from './covenantV1Integration';
+import { assertLegacyPlaceholderMonetaryOperationsAllowed } from '../security/legacyPlaceholderFreeze';
 
 const MIN_PLEDGE_FEE_SATS = 500n;
 
@@ -30,12 +31,13 @@ export class PledgeService {
     contributorAddress: string,
     amount: bigint,
   ): Promise<BuiltTx & { nextCovenantValue: bigint }> {
+    const serializedCampaign = await this.deps.campaignService.getCampaign(campaignId) as SpendableCampaignRecord | null;
+    if (!serializedCampaign) throw new Error('campaign-not-found');
+    assertLegacyPlaceholderMonetaryOperationsAllowed(serializedCampaign);
     const covenant = covenantIndexInstance.getCovenantRef(campaignId);
     if (!covenant) throw new Error('campaign-not-found');
     const campaign = campaignStore.get(campaignId);
     if (!campaign) throw new Error('campaign-not-found');
-    const serializedCampaign = await this.deps.campaignService.getCampaign(campaignId) as SpendableCampaignRecord | null;
-    if (!serializedCampaign) throw new Error('campaign-not-found');
     const campaignStatus = (campaign as unknown as { status?: string }).status;
     if (campaignStatus && campaignStatus !== 'active') {
       throw new Error('campaign-not-active');

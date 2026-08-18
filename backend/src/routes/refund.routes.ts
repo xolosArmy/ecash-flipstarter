@@ -1,6 +1,11 @@
 import { Router } from 'express';
 import { RefundService } from '../services/RefundService';
 import { serializeBuiltTx } from './serialize';
+import {
+  isLegacyPlaceholderDisabledError,
+  legacyPlaceholderDisabledBody,
+  LEGACY_PLACEHOLDER_DISABLED_STATUS,
+} from '../security/legacyPlaceholderFreeze';
 
 const router = Router();
 const service = new RefundService();
@@ -19,7 +24,7 @@ router.post('/campaign/:id/refund', async (req, res) => {
   if (!publicRefundsEnabled()) {
     return res.status(403).json({
       error: 'public-refunds-disabled',
-      message: 'Public refunds are disabled. Refunds must be claimed from verified pledge ownership and campaign expiry state.',
+      code: 'public-refunds-disabled',
     });
   }
 
@@ -54,6 +59,11 @@ router.post('/campaign/:id/refund', async (req, res) => {
       ...serializeBuiltTx(result.builtTx),
     });
   } catch (err) {
+    if (isLegacyPlaceholderDisabledError(err)) {
+      return res
+        .status(LEGACY_PLACEHOLDER_DISABLED_STATUS)
+        .json(legacyPlaceholderDisabledBody());
+    }
     res.status(400).json({ error: (err as Error).message });
   }
 });

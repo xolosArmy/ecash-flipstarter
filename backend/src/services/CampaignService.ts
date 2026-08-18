@@ -21,6 +21,10 @@ import { ACTIVATION_FEE_SATS, ACTIVATION_FEE_XEC } from '../config/constants';
 import { coerceAmountToSats } from '../utils/ecashUnits';
 import { normalizeActivationOfferOutputs, type ActivationOfferOutput } from '../types/tokenOutput';
 import { secp256k1 } from '@noble/curves/secp256k1';
+import {
+  assertLegacyPlaceholderMonetaryOperationsAllowed,
+  isLegacyPlaceholderCampaign,
+} from '../security/legacyPlaceholderFreeze';
 
 // In-memory cache used by CovenantIndex and pledge services.
 const campaigns = new Map<string, CampaignDefinition>();
@@ -464,6 +468,7 @@ export class CampaignService {
     if (!campaign) {
       throw new Error('campaign-not-found');
     }
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
     const snapshotRaw = campaignSnapshots.get(campaignId);
     const snapshot = normalizeSnapshot(toStoredCampaign(campaign, snapshotRaw));
     const existing = covenantIndex.getCovenantRef(campaignId);
@@ -497,6 +502,7 @@ export class CampaignService {
     const requestedContractVersion = typeof payload.contractVersion === 'string'
       ? payload.contractVersion.trim()
       : '';
+    assertLegacyPlaceholderMonetaryOperationsAllowed({ contractVersion: requestedContractVersion });
     const requestedV2G = requestedContractVersion === TEYOLIA_COVENANT_V2_G;
     const requestedV1 = requestedContractVersion !== LEGACY_PLACEHOLDER_COVENANT && !requestedV2G;
     const payloadConstructorArgs =
@@ -801,6 +807,7 @@ export class CampaignService {
     if (!campaign) {
       throw new Error('campaign-not-found');
     }
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
 
     const previousSnapshot = campaignSnapshots.get(id);
     const nextSnapshot = normalizeSnapshot(toStoredCampaign(campaign, previousSnapshot));
@@ -843,6 +850,7 @@ export class CampaignService {
     if (!campaign) {
       throw new Error('campaign-not-found');
     }
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
 
     const previousSnapshot = campaignSnapshots.get(id);
     const nextSnapshot = normalizeSnapshot(toStoredCampaign(campaign, previousSnapshot));
@@ -890,6 +898,7 @@ export class CampaignService {
     if (!campaign) {
       throw new Error('campaign-not-found');
     }
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
 
     const previousSnapshot = campaignSnapshots.get(id);
     const nextSnapshot = normalizeSnapshot(toStoredCampaign(campaign, previousSnapshot));
@@ -976,6 +985,7 @@ export class CampaignService {
     if (!campaign) {
       throw new Error('campaign-not-found');
     }
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
 
     const previousSnapshot = campaignSnapshots.get(id);
     const nextSnapshot = normalizeSnapshot(toStoredCampaign(campaign, previousSnapshot));
@@ -1066,6 +1076,7 @@ export class CampaignService {
     if (!campaign) {
       throw new Error('campaign-not-found');
     }
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
 
     const previousSnapshot = campaignSnapshots.get(id);
     const nextSnapshot = normalizeSnapshot(toStoredCampaign(campaign, previousSnapshot));
@@ -1093,6 +1104,7 @@ export class CampaignService {
     if (!campaign) {
       throw new Error('campaign-not-found');
     }
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
 
     const previousSnapshot = campaignSnapshots.get(id);
     const nextSnapshot = normalizeSnapshot(toStoredCampaign(campaign, previousSnapshot));
@@ -1126,6 +1138,7 @@ export class CampaignService {
     if (!campaign) {
       throw new Error('campaign-not-found');
     }
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
 
     const previousSnapshot = campaignSnapshots.get(id);
     const nextSnapshot = normalizeSnapshot(toStoredCampaign(campaign, previousSnapshot));
@@ -1161,6 +1174,10 @@ export class CampaignService {
   ) {
     const snapshot = snapshotRaw ? normalizeSnapshot(snapshotRaw) : undefined;
     const expiresAt = snapshot?.expiresAt ?? toIsoFromExpiration(campaign.expirationTime);
+    const legacyPlaceholder = isLegacyPlaceholderCampaign({
+      contractVersion: snapshot?.contractVersion ?? campaign.contractVersion,
+    });
+    const redeemScriptHex = legacyPlaceholder ? null : snapshot?.redeemScriptHex ?? null;
 
     return {
       id: campaign.id,
@@ -1179,7 +1196,7 @@ export class CampaignService {
       refundOraclePubKey: snapshot?.refundOraclePubKey,
       contractVersion: snapshot?.contractVersion ?? campaign.contractVersion ?? null,
       constructorArgs: snapshot?.constructorArgs ?? campaign.constructorArgs ?? null,
-      redeemScriptHex: snapshot?.redeemScriptHex ?? null,
+      redeemScriptHex,
       scriptHash: snapshot?.scriptHash ?? covenant?.scriptHash ?? null,
       scriptPubKey: snapshot?.scriptPubKey ?? covenant?.scriptPubKey ?? null,
       location: snapshot?.location,
@@ -1202,7 +1219,7 @@ export class CampaignService {
           campaignAddress: campaign.campaignAddress ?? snapshot?.campaignAddress ?? snapshot?.covenantAddress,
           contractVersion: snapshot?.contractVersion ?? campaign.contractVersion ?? null,
           constructorArgs: snapshot?.constructorArgs ?? campaign.constructorArgs ?? null,
-          redeemScriptHex: snapshot?.redeemScriptHex ?? null,
+          redeemScriptHex,
         }
         : undefined,
       progress,

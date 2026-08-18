@@ -2,6 +2,7 @@ import { addressToScriptPubKey, getTransactionInfo, type TransactionInfo } from 
 import { CampaignService } from './CampaignService';
 import { getPledgeByTxid, type SimplePledge } from '../store/simplePledges';
 import { validateAddress } from '../utils/validation';
+import { assertLegacyPlaceholderMonetaryOperationsAllowed } from '../security/legacyPlaceholderFreeze';
 
 export type PledgeVerificationOutcome =
   | {
@@ -44,6 +45,7 @@ type CampaignRecord = {
   campaignAddress?: string | null;
   covenantAddress?: string | null;
   scriptPubKey?: string | null;
+  contractVersion?: string | null;
 };
 
 type VerificationDependencies = {
@@ -103,6 +105,7 @@ export class PledgeVerificationService {
     if (!campaign) {
       throw new Error('campaign-not-found');
     }
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
 
     const reusedPledge = await this.deps.getPledgeByTxid(args.txid);
     if (reusedPledge && reusedPledge.pledgeId !== args.pledgeId) {

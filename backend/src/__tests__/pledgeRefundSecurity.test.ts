@@ -677,7 +677,6 @@ describe('pledge and refund security', () => {
         getCampaign: vi.fn().mockResolvedValue({
           id: CAMPAIGN_ID,
           goal: '5000',
-          contractVersion: 'legacy-placeholder',
           campaignAddress: CAMPAIGN_ADDRESS,
           scriptPubKey: CAMPAIGN_SCRIPT,
           expirationTime: String(Date.now() - 60_000),
@@ -730,7 +729,6 @@ describe('pledge and refund security', () => {
         getCampaign: vi.fn().mockResolvedValue({
           id: CAMPAIGN_ID,
           goal: '5000',
-          contractVersion: 'legacy-placeholder',
           campaignAddress: CAMPAIGN_ADDRESS,
           scriptPubKey: CAMPAIGN_SCRIPT,
           expirationTime: String(Date.now() - 60_000),
@@ -776,7 +774,6 @@ describe('pledge and refund security', () => {
         getCampaign: vi.fn().mockResolvedValue({
           id: CAMPAIGN_ID,
           goal: '5000',
-          contractVersion: 'legacy-placeholder',
           campaignAddress: CAMPAIGN_ADDRESS,
           scriptPubKey: CAMPAIGN_SCRIPT,
           expirationTime: String(Date.now() - 60_000),
@@ -823,7 +820,6 @@ describe('pledge and refund security', () => {
         getCampaign: vi.fn().mockResolvedValue({
           id: CAMPAIGN_ID,
           goal: '5000',
-          contractVersion: 'legacy-placeholder',
           campaignAddress: CAMPAIGN_ADDRESS,
           scriptPubKey: CAMPAIGN_SCRIPT,
           expirationTime: String(Date.now() - 60_000),
@@ -874,7 +870,6 @@ describe('pledge and refund security', () => {
         getCampaign: vi.fn().mockResolvedValue({
           id: CAMPAIGN_ID,
           goal: '5000',
-          contractVersion: 'legacy-placeholder',
           campaignAddress: CAMPAIGN_ADDRESS,
           scriptPubKey: CAMPAIGN_SCRIPT,
           expirationTime: String(Date.now() + 60_000),

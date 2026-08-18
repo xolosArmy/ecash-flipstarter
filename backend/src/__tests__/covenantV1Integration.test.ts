@@ -5,6 +5,7 @@ import { RefundService } from '../services/RefundService';
 import { PledgeService } from '../services/PledgeService';
 import { campaignStore, covenantIndexInstance } from '../services/CampaignService';
 import { TEYOLIA_COVENANT_V1, TEYOLIA_COVENANT_V2_G } from '../covenants/scriptCompiler';
+import { LEGACY_PLACEHOLDER_DISABLED_CODE } from '../security/legacyPlaceholderFreeze';
 
 const beneficiaryPrivKeyHex = '01'.repeat(32);
 const gasPrivKeyHex = '03'.repeat(32);
@@ -199,7 +200,7 @@ describe('FinalizeService V1 integration', () => {
     expect(result).toMatchObject({ status: 'paid_out', txid: 'ee'.repeat(32) });
   });
 
-  it('falls back to the legacy finalize path for non-V1 campaigns', async () => {
+  it('rejects the legacy-placeholder finalize path before invoking fallback payout logic', async () => {
     const legacyFinalizeCampaign = vi.fn().mockResolvedValue({
       status: 'paid_out',
       campaignId,
@@ -226,10 +227,8 @@ describe('FinalizeService V1 integration', () => {
       legacyFinalizeCampaign,
     });
 
-    const result = await service.finalizeCampaign(campaignId);
-
-    expect(legacyFinalizeCampaign).toHaveBeenCalledWith(campaignId);
-    expect(result.txid).toBe('bb'.repeat(32));
+    await expect(service.finalizeCampaign(campaignId)).rejects.toThrow(LEGACY_PLACEHOLDER_DISABLED_CODE);
+    expect(legacyFinalizeCampaign).not.toHaveBeenCalled();
   });
 
   it('fails clearly when V1 redeemScriptHex metadata is missing', async () => {
@@ -318,7 +317,7 @@ describe('RefundService V1 integration', () => {
     expect(result.txid).toBe('cc'.repeat(32));
   });
 
-  it('keeps the legacy refund builder path for non-V1 campaigns', async () => {
+  it('rejects the legacy-placeholder refund builder path', async () => {
     const buildRefundTx = vi.fn().mockResolvedValue({
       unsignedTx: { inputs: [{ ...trackedCovenant }], outputs: [] },
       rawHex: 'legacy-refund-hex',
@@ -338,13 +337,9 @@ describe('RefundService V1 integration', () => {
       broadcastRawTx: vi.fn().mockResolvedValue({ txid: 'dd'.repeat(32) }),
     });
 
-    await service.createRefundTx(campaignId, refundAddress, 500n);
-
-    expect(buildRefundTx).toHaveBeenCalledWith({
-      covenantUtxo: expect.objectContaining({ txid: trackedCovenant.txid, vout: trackedCovenant.vout }),
-      refundAddress,
-      refundAmount: 500n,
-    });
+    await expect(service.createRefundTx(campaignId, refundAddress, 500n))
+      .rejects.toThrow(LEGACY_PLACEHOLDER_DISABLED_CODE);
+    expect(buildRefundTx).not.toHaveBeenCalled();
   });
 });
 

@@ -11,6 +11,12 @@ import {
   type SimplePledge,
 } from '../store/simplePledges';
 import { PledgeVerificationService } from '../services/PledgeVerificationService';
+import {
+  assertLegacyPlaceholderMonetaryOperationsAllowed,
+  isLegacyPlaceholderDisabledError,
+  legacyPlaceholderDisabledBody,
+  LEGACY_PLACEHOLDER_DISABLED_STATUS,
+} from '../security/legacyPlaceholderFreeze';
 
 const router = Router();
 const campaignService = new CampaignService();
@@ -19,6 +25,14 @@ const TXID_HEX_REGEX = /^[0-9a-fA-F]{64}$/;
 
 export const createPledgeHandler = async (req: any, res: any) => {
   try {
+    const campaign = await campaignService.getCampaign(req.params.id) as
+      | { campaignAddress?: string; covenantAddress?: string; contractVersion?: string | null }
+      | null;
+    if (!campaign) {
+      return res.status(404).json({ error: 'campaign-not-found' });
+    }
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
+
     const status = await getCampaignStatusById(req.params.id);
     if (!status) {
       return res.status(404).json({ error: 'campaign-not-found' });
@@ -26,9 +40,6 @@ export const createPledgeHandler = async (req: any, res: any) => {
     if (status !== 'active') {
       return res.status(400).json({ error: 'campaign-not-active' });
     }
-    const campaign = await campaignService.getCampaign(req.params.id) as
-      | { campaignAddress?: string; covenantAddress?: string }
-      | null;
     const campaignAddress = campaign?.campaignAddress || campaign?.covenantAddress || '';
     if (!campaignAddress) {
       return res.status(400).json({ error: 'campaign-address-required' });
@@ -46,6 +57,11 @@ export const createPledgeHandler = async (req: any, res: any) => {
     });
     res.json(response);
   } catch (err) {
+    if (isLegacyPlaceholderDisabledError(err)) {
+      return res
+        .status(LEGACY_PLACEHOLDER_DISABLED_STATUS)
+        .json(legacyPlaceholderDisabledBody());
+    }
     res.status(400).json({ error: (err as Error).message });
   }
 };
@@ -114,6 +130,14 @@ function sendTerminalPledgeResult(res: any, pledge: SimplePledge, txid: string) 
 export const confirmPledgeHandler = async (req: any, res: any) => {
   try {
     const campaignId = String(req.params.id ?? '').trim();
+    const campaign = await campaignService.getCampaign(campaignId) as
+      | { contractVersion?: string | null }
+      | null;
+    if (!campaign) {
+      return res.status(404).json({ error: 'campaign-not-found' });
+    }
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
+
     const status = await getCampaignStatusById(campaignId);
     if (!status) {
       return res.status(404).json({ error: 'campaign-not-found' });
@@ -204,6 +228,11 @@ export const confirmPledgeHandler = async (req: any, res: any) => {
       expectedAmountSats: verification.expectedAmountSats.toString(),
     });
   } catch (err) {
+    if (isLegacyPlaceholderDisabledError(err)) {
+      return res
+        .status(LEGACY_PLACEHOLDER_DISABLED_STATUS)
+        .json(legacyPlaceholderDisabledBody());
+    }
     const message = (err as Error).message;
     return res.status(400).json({ error: message });
   }

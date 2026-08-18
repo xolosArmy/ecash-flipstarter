@@ -21,6 +21,13 @@ import { coerceAmountToSats } from '../utils/ecashUnits';
 import { FinalizeService } from '../services/FinalizeService';
 import { reconcilePendingPledgesForCampaign } from '../services/PledgeReconciliationService';
 import { normalizeActivationOfferOutputs, type ActivationOfferOutput } from '../types/tokenOutput';
+import {
+  assertLegacyPlaceholderMonetaryOperationsAllowed,
+  isLegacyPlaceholderCampaign,
+  isLegacyPlaceholderDisabledError,
+  legacyPlaceholderDisabledBody,
+  LEGACY_PLACEHOLDER_DISABLED_STATUS,
+} from '../security/legacyPlaceholderFreeze';
 
 type CampaignStatus =
   | 'draft'
@@ -70,6 +77,7 @@ type CampaignApiRecord = {
     paidAt?: string | null;
   };
   treasuryAddressUsed?: string | null;
+  contractVersion?: string | null;
 };
 
 const TXID_HEX_REGEX = /^[0-9a-f]{64}$/i;
@@ -77,8 +85,16 @@ const router = Router();
 const service = new CampaignService();
 const finalizeService = new FinalizeService();
 
-async function reconcileCampaignPledgesBestEffort(campaignId: string): Promise<void> {
+async function reconcileCampaignPledgesBestEffort(
+  campaignId: string,
+  campaignRecord?: CampaignApiRecord,
+): Promise<void> {
   try {
+    const campaign = campaignRecord
+      ?? (await service.getCampaign(campaignId) as CampaignApiRecord | null);
+    if (isLegacyPlaceholderCampaign(campaign)) {
+      return;
+    }
     await reconcilePendingPledgesForCampaign(campaignId);
   } catch (err) {
     console.warn('[pledge-reconcile] failed', {
@@ -93,8 +109,17 @@ async function reconcileCampaignListBestEffort(campaigns: CampaignApiRecord[]): 
     campaigns
       .map((campaign) => String(campaign.id ?? '').trim())
       .filter((campaignId) => campaignId && campaignId !== 'undefined')
-      .map((campaignId) => reconcileCampaignPledgesBestEffort(campaignId)),
+      .map((campaignId) => {
+        const campaign = campaigns.find((entry) => entry.id === campaignId);
+        return reconcileCampaignPledgesBestEffort(campaignId, campaign);
+      }),
   );
+}
+
+function sendLegacyPlaceholderDisabled(res: any) {
+  return res
+    .status(LEGACY_PLACEHOLDER_DISABLED_STATUS)
+    .json(legacyPlaceholderDisabledBody());
 }
 
 function validateCampaignIdParam(raw: unknown): string {
@@ -504,6 +529,9 @@ router.post('/campaign', async (req, res) => {
     const campaign = await service.createCampaign(req.body ?? {});
     res.status(201).json(campaign);
   } catch (err) {
+    if (isLegacyPlaceholderDisabledError(err)) {
+      return sendLegacyPlaceholderDisabled(res);
+    }
     res.status(400).json({ error: (err as Error).message });
   }
 });
@@ -522,6 +550,9 @@ router.post('/campaigns', async (req, res) => {
     const campaign = await service.createCampaign(req.body ?? {});
     res.status(201).json(campaign);
   } catch (err) {
+    if (isLegacyPlaceholderDisabledError(err)) {
+      return sendLegacyPlaceholderDisabled(res);
+    }
     res.status(400).json({ error: (err as Error).message });
   }
 });
@@ -534,10 +565,14 @@ async function activateCampaign(req: any, res: any) {
     if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found' });
     }
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
     await service.updateCampaignStatus(id, 'active');
     return res.json({ success: true, status: 'active' });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (isLegacyPlaceholderDisabledError(error)) {
+      return sendLegacyPlaceholderDisabled(res);
+    }
     if (message === 'activation-fee-unpaid') {
       return res.status(400).json({ error: 'activation-fee-unpaid' });
     }
@@ -552,9 +587,13 @@ async function processCampaignPayout(req: any, res: any) {
     if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found' });
     }
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
     await service.updateCampaignStatus(id, 'funded');
     return res.json({ success: true, status: 'funded' });
-  } catch (_error) {
+  } catch (error) {
+    if (isLegacyPlaceholderDisabledError(error)) {
+      return sendLegacyPlaceholderDisabled(res);
+    }
     return res.status(500).json({ error: 'Failed to process payout' });
   }
 }
@@ -569,6 +608,7 @@ export const buildActivationHandler: Parameters<typeof router.post>[1] = async (
   try {
     const campaign = await getCampaignOr404(req, res);
     if (!campaign) return;
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
 
     if (isActivationFeePaid(campaign)) {
       return res.status(400).json({ error: 'activation-fee-already-paid' });
@@ -651,6 +691,9 @@ export const buildActivationHandler: Parameters<typeof router.post>[1] = async (
       outpoints: [],
     });
   } catch (err) {
+    if (isLegacyPlaceholderDisabledError(err)) {
+      return sendLegacyPlaceholderDisabled(res);
+    }
     return res.status(400).json({ error: (err as Error).message });
   }
 };
@@ -664,6 +707,7 @@ export const confirmActivationHandler: Parameters<typeof router.post>[1] = async
   try {
     const campaign = await getCampaignOr404(req, res);
     if (!campaign) return;
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
 
     const txid = sanitizeTxid(req.body?.txid);
     const payerAddress =
@@ -750,6 +794,9 @@ export const confirmActivationHandler: Parameters<typeof router.post>[1] = async
     }
     return res.json(response);
   } catch (err) {
+    if (isLegacyPlaceholderDisabledError(err)) {
+      return sendLegacyPlaceholderDisabled(res);
+    }
     return res.status(400).json({ error: (err as Error).message });
   }
 };
@@ -765,7 +812,7 @@ export const activationStatusHandler: Parameters<typeof router.get>[1] = async (
     let verificationStatus = campaign.activationFeeVerificationStatus ?? 'none';
     let warning: string | undefined;
     const feeTxid = campaign.activationFeeTxid ?? campaign.activation?.feeTxid ?? null;
-    if (feeTxid && verificationStatus === 'pending_verification') {
+    if (!isLegacyPlaceholderCampaign(campaign) && feeTxid && verificationStatus === 'pending_verification') {
       const activationFeeRequiredTokenAmount = BigInt(ACTIVATION_FEE_TOKEN_AMOUNT_RAW);
       const treasuryAddress =
         campaign.activationTreasuryAddressUsed
@@ -820,6 +867,7 @@ const finalizeCampaignHandler: Parameters<typeof router.post>[1] = async (req, r
     const campaignId = validateCampaignIdParam(req.params.id);
     campaign = await getCampaignOr404(req, res);
     if (!campaign) return;
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
 
     if (!isActivationFeePaid(campaign)) {
       return res.status(400).json({
@@ -891,6 +939,9 @@ if ((campaign.status === 'paid_out' || payoutTxid) && forceRescueId === campaign
       txid: campaign?.payout?.txid ?? null,
       error: message,
     });
+    if (isLegacyPlaceholderDisabledError(err)) {
+      return sendLegacyPlaceholderDisabled(res);
+    }
     if (message === 'auto-payout-spend-path-missing') {
       return res.status(409).json({
         error: 'auto-payout-spend-path-missing',
@@ -924,6 +975,7 @@ router.post('/campaigns/:id/payout/confirm', async (req, res) => {
   try {
     const campaign = await getCampaignOr404(req, res);
     if (!campaign) return;
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
 
     const txid = sanitizeTxid(req.body?.txid);
     await service.markPayoutComplete(campaign.id, txid, TREASURY_ADDRESS);
@@ -941,6 +993,9 @@ router.post('/campaigns/:id/payout/confirm', async (req, res) => {
       pledgeCount: totals.pledgeCount,
     });
   } catch (err) {
+    if (isLegacyPlaceholderDisabledError(err)) {
+      return sendLegacyPlaceholderDisabled(res);
+    }
     return res.status(400).json({ error: (err as Error).message });
   }
 });

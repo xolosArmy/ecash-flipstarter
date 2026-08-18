@@ -18,6 +18,7 @@ import {
   selectCampaignCovenantUtxo,
   type SpendableCampaignRecord,
 } from './covenantV1Integration';
+import { assertLegacyPlaceholderMonetaryOperationsAllowed } from '../security/legacyPlaceholderFreeze';
 
 type FinalizeDependencies = {
   campaignService: Pick<CampaignService, 'getCampaign' | 'markPayoutComplete'>;
@@ -43,6 +44,7 @@ export class FinalizeService {
     if (!campaign) {
       throw new Error('campaign-not-found');
     }
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
     const v1Campaign = isV1Campaign(campaign);
     const v2GCampaign = isV2GCampaign(campaign);
     if (!v1Campaign && !v2GCampaign) {
@@ -175,6 +177,7 @@ export class FinalizeService {
     if (!campaign) {
       throw new Error('campaign-not-found');
     }
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
 
     const beneficiaryAddress = isV1Campaign(campaign) ? resolveCampaignBeneficiaryAddress(campaign) : undefined;
     const escrowAddress = resolveCampaignEscrowAddress(campaign);

@@ -16,6 +16,7 @@ import {
 } from './covenantV1Integration';
 import { getPledgeById, getConfirmedTotalByCampaign, markPledgeRefunded } from '../store/simplePledges';
 import { coerceAmountToSats } from '../utils/ecashUnits';
+import { assertLegacyPlaceholderMonetaryOperationsAllowed } from '../security/legacyPlaceholderFreeze';
 
 type ReconcilePendingPledges = (
   campaignId: string,
@@ -92,6 +93,7 @@ export class RefundService {
     if (!campaign) {
       throw new Error('campaign-not-found');
     }
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
 
     const pledge = await getPledgeById(args.pledgeId);
     if (!pledge || pledge.campaignId !== args.campaignId) {
@@ -158,6 +160,7 @@ export class RefundService {
     if (!campaign) {
       throw new Error('campaign-not-found');
     }
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
 
     const escrowAddress = resolveCampaignEscrowAddress(campaign);
     const spendableUtxos = filterSpendableUtxos(await this.deps.getUtxosForAddress(escrowAddress));

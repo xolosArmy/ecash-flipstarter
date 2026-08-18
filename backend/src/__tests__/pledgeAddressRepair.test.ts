@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeTestDbPath } from './helpers/testDbPath';
+import { TEYOLIA_COVENANT_V1 } from '../covenants/scriptCompiler';
 
 const CONTRIBUTOR_ADDRESS = 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk';
 const BENEFICIARY_ADDRESS = 'ecash:qq7qn90ev23ecastqmn8as00u8mcp4tzsspvt5dtlk';
@@ -35,11 +36,14 @@ beforeAll(() => {
 
 afterAll(() => {
   delete process.env.TEYOLIA_SQLITE_PATH;
+  delete process.env.TEYOLIA_BENEFICIARY_PUBKEY;
+  delete process.env.TEYOLIA_REFUND_ORACLE_PUBKEY;
 });
 
 beforeEach(() => {
   vi.resetModules();
   process.env.TEYOLIA_BENEFICIARY_PUBKEY = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798';
+  process.env.TEYOLIA_REFUND_ORACLE_PUBKEY = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798';
   vi.clearAllMocks();
 });
 
@@ -52,11 +56,11 @@ describe('pledge covenant auto-repair', () => {
 
     await service.createCampaign({
       id: campaignId,
-      name: 'Legacy active campaign',
+      name: 'V1 active campaign',
       goal: 1000n,
       expirationTime: BigInt(Date.now() + 3 * 24 * 60 * 60 * 1000),
       beneficiaryAddress: BENEFICIARY_ADDRESS,
-      contractVersion: 'legacy-placeholder',
+      contractVersion: TEYOLIA_COVENANT_V1,
     });
     await service.markActivationFeePaid(campaignId, 'f'.repeat(64));
 

@@ -15,6 +15,7 @@ import type { Utxo } from '../blockchain/types';
 import { CampaignService } from './CampaignService';
 import { validateAddress } from '../utils/validation';
 import { coerceAmountToSats } from '../utils/ecashUnits';
+import { assertLegacyPlaceholderMonetaryOperationsAllowed } from '../security/legacyPlaceholderFreeze';
 
 type CampaignRecord = {
   id: string;
@@ -121,6 +122,7 @@ export class AutoPayoutService {
     if (!campaign) {
       throw new Error('campaign-not-found');
     }
+    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
 
     const goalSats = coerceAmountToSats(campaign.goal);
 const payoutTxid = campaign.payout?.txid?.trim().toLowerCase() ?? '';
