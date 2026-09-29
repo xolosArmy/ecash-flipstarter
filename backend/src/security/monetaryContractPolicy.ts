@@ -23,7 +23,7 @@ export function monetaryFlowsEnabled(): boolean {
 
 export function isMonetaryContractVersionSupported(version: unknown): boolean {
   return typeof version === 'string'
-    && SUPPORTED_MONETARY_CONTRACT_VERSIONS.has(version.trim());
+    && SUPPORTED_MONETARY_CONTRACT_VERSIONS.has(version);
 }
 
 export function assertMonetaryFlowsEnabled(): void {

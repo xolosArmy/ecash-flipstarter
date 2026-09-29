@@ -76,6 +76,9 @@ describe('fail-closed monetary containment', () => {
       request(app).post('/api/campaigns/campaign-safe/finalize-request').send({}),
       request(app).post('/api/campaign/campaign-safe/refund').send({ pledgeId: 'pledge-1' }),
       request(app).post('/api/broadcast').send({ rawTxHex: '00' }),
+      request(app).post('/api/broadcast/').send({ rawTxHex: '00' }),
+      request(app).post('/api/tx/broadcast/').send({ rawTxHex: '00' }),
+      request(app).post('/API/BROADCAST').send({ rawTxHex: '00' }),
       request(app).get('/api/walletconnect/offers/stale-offer'),
     ]);
 
@@ -92,17 +95,30 @@ describe('fail-closed monetary containment', () => {
     process.env.TEYOLIA_MONETARY_FLOWS_ENABLED = 'true';
     const app = createApp();
 
-    const legacyPayout = await request(app)
-      .post('/api/campaigns/campaign-safe/payout')
-      .send({});
-    expect(legacyPayout.status).toBe(403);
-    expect(legacyPayout.body.code).toBe('legacy-payout-route-disabled');
+    const payoutVariants = [
+      '/api/campaigns/campaign-safe/payout',
+      '/api/campaigns/campaign-safe/payout/',
+      '/API/CAMPAIGNS/campaign-safe/PAYOUT',
+      '/api/campaign/campaign-safe/payout/',
+    ];
+    for (const path of payoutVariants) {
+      const response = await request(app).post(path).send({});
+      expect(response.status).toBe(403);
+      expect(response.body.code).toBe('legacy-payout-route-disabled');
+    }
 
-    const fakeConfirm = await request(app)
-      .post('/api/campaigns/campaign-safe/payout/confirm')
-      .send({ txid: 'a'.repeat(64) });
-    expect(fakeConfirm.status).toBe(403);
-    expect(fakeConfirm.body.code).toBe('unverified-payout-confirm-disabled');
+    const confirmVariants = [
+      '/api/campaigns/campaign-safe/payout/confirm',
+      '/api/campaigns/campaign-safe/payout/confirm/',
+      '/API/CAMPAIGNS/campaign-safe/PAYOUT/CONFIRM',
+    ];
+    for (const path of confirmVariants) {
+      const response = await request(app)
+        .post(path)
+        .send({ txid: 'a'.repeat(64) });
+      expect(response.status).toBe(403);
+      expect(response.body.code).toBe('unverified-payout-confirm-disabled');
+    }
   });
 
   it('fails in the service layer before blockchain spend dependencies are invoked', async () => {
@@ -187,6 +203,53 @@ describe('fail-closed monetary containment', () => {
     expect(stored?.contractVersion).toBeUndefined();
     expect(stored?.redeemScriptHex).toBe('51');
     expect(stored?.campaignAddress).toBe(CAMPAIGN_ADDRESS);
+  });
+
+  it('treats whitespace-padded historical contract versions as unsupported and never upgrades them', async () => {
+    const dbPath = makeTestDbPath();
+    process.env.TEYOLIA_SQLITE_PATH = dbPath;
+
+    const db = await openDatabase(dbPath);
+    await initializeDatabase(db);
+
+    const campaignId = 'campaign-malformed-version-read-only';
+    const historical: StoredCampaign = {
+      id: campaignId,
+      name: 'Malformed historical version',
+      description: 'Whitespace-padded version must remain unsupported',
+      goal: '1000',
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+      createdAt: new Date().toISOString(),
+      status: 'active',
+      beneficiaryAddress: 'ecash:qpjm4qgv50v5vc6dpf6nu0w0epp8tzdn7gt0e06ssk',
+      campaignAddress: CAMPAIGN_ADDRESS,
+      covenantAddress: CAMPAIGN_ADDRESS,
+      beneficiaryPubKey: BENEFICIARY_PUBKEY,
+      refundOraclePubKey: REFUND_ORACLE_PUBKEY,
+      contractVersion: ` ${TEYOLIA_COVENANT_V1} `,
+      redeemScriptHex: '51',
+      scriptHash: '33'.repeat(20),
+      scriptPubKey: `a914${'44'.repeat(20)}87`,
+      activationFeePaid: true,
+      activationFeeVerificationStatus: 'verified',
+      payout: {
+        wcOfferId: null,
+        txid: null,
+        paidAt: null,
+      },
+    };
+
+    await upsertCampaign(historical, db);
+    syncCampaignStoreFromDiskCampaigns([historical]);
+
+    const service = new CampaignService();
+    const detail = await service.getCampaign(campaignId);
+    const stored = await getCampaignById(campaignId, db);
+
+    expect(detail?.contractVersion).toBeNull();
+    expect(detail?.redeemScriptHex).toBeNull();
+    expect(stored?.contractVersion).toBe(` ${TEYOLIA_COVENANT_V1} `);
+    expect(stored?.redeemScriptHex).toBe('51');
   });
 
   it('distinguishes exact legacy from unsupported unknown versions when monetary flows are enabled', () => {
