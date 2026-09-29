@@ -1,4 +1,5 @@
 import { LEGACY_PLACEHOLDER_COVENANT } from '../covenants/scriptCompiler';
+import { assertMonetaryContractVersionSupported } from './monetaryContractPolicy';
 
 export const LEGACY_PLACEHOLDER_DISABLED_CODE = 'legacy_placeholder_disabled';
 export const LEGACY_PLACEHOLDER_DISABLED_STATUS = 403;
@@ -19,6 +20,7 @@ export function assertLegacyPlaceholderMonetaryOperationsAllowed(
   if (isLegacyPlaceholderCampaign(campaign)) {
     throw new Error(LEGACY_PLACEHOLDER_DISABLED_CODE);
   }
+  assertMonetaryContractVersionSupported(campaign);
 }
 
 export function legacyPlaceholderDisabledBody() {
