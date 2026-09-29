@@ -25,6 +25,7 @@ import {
   assertLegacyPlaceholderMonetaryOperationsAllowed,
   isLegacyPlaceholderCampaign,
 } from '../security/legacyPlaceholderFreeze';
+import { isMonetaryContractVersionSupported } from '../security/monetaryContractPolicy';
 
 // In-memory cache used by CovenantIndex and pledge services.
 const campaigns = new Map<string, CampaignDefinition>();
@@ -312,6 +313,15 @@ export function syncCampaignStoreFromDiskCampaigns(diskCampaigns: StoredCampaign
     snapshot.status = normalizeActivationStatus(snapshot.status, snapshot.activationFeePaid === true);
 
     const campaign = toCampaignDefinition(snapshot);
+    if (!isMonetaryContractVersionSupported(diskSnapshot.contractVersion)) {
+      // Historical/unversioned/unknown records are read-only. Never infer or
+      // persist a modern covenant version as a side effect of hydration.
+      campaigns.set(campaign.id, campaign);
+      campaignSnapshots.set(campaign.id, snapshot);
+      covenantIndex.deleteCampaign(campaign.id);
+      continue;
+    }
+
     const ensured = ensureCampaignCovenant({
       campaignId: campaign.id,
       campaign,
@@ -691,6 +701,13 @@ export class CampaignService {
     if (fromCache) {
       const snapshotRaw = campaignSnapshots.get(id);
       const snapshot = snapshotRaw ? normalizeSnapshot(snapshotRaw) : normalizeSnapshot(toStoredCampaign(fromCache));
+      if (!isMonetaryContractVersionSupported(snapshotRaw?.contractVersion ?? fromCache.contractVersion)) {
+        covenantIndex.deleteCampaign(id);
+        campaignSnapshots.set(id, snapshot);
+        campaigns.set(id, fromCache);
+        return this.serializeCampaign(fromCache, snapshot, undefined, 0);
+      }
+
       const existing = covenantIndex.getCovenantRef(id);
       const covenant = existing ?? this.buildEnsuredCovenant(fromCache);
       const changed = this.applyEnsuredCovenant(fromCache, snapshot, covenant);
@@ -715,6 +732,11 @@ export class CampaignService {
     const campaign = toCampaignDefinition(snapshot);
     campaigns.set(id, campaign);
     campaignSnapshots.set(id, snapshot);
+
+    if (!isMonetaryContractVersionSupported(snapshotRaw.contractVersion)) {
+      covenantIndex.deleteCampaign(id);
+      return this.serializeCampaign(campaign, snapshot, undefined, 0);
+    }
 
     let covenant = covenantIndex.getCovenantRef(id);
     if (!covenant) {
@@ -1174,10 +1196,14 @@ export class CampaignService {
   ) {
     const snapshot = snapshotRaw ? normalizeSnapshot(snapshotRaw) : undefined;
     const expiresAt = snapshot?.expiresAt ?? toIsoFromExpiration(campaign.expirationTime);
+    const persistedVersion = snapshot?.contractVersion ?? campaign.contractVersion;
     const legacyPlaceholder = isLegacyPlaceholderCampaign({
-      contractVersion: snapshot?.contractVersion ?? campaign.contractVersion,
+      contractVersion: persistedVersion,
     });
-    const redeemScriptHex = legacyPlaceholder ? null : snapshot?.redeemScriptHex ?? null;
+    const supportedMonetaryVersion = isMonetaryContractVersionSupported(persistedVersion);
+    const redeemScriptHex = legacyPlaceholder || !supportedMonetaryVersion
+      ? null
+      : snapshot?.redeemScriptHex ?? null;
 
     return {
       id: campaign.id,
