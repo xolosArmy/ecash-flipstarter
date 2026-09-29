@@ -25,7 +25,10 @@ import {
   assertLegacyPlaceholderMonetaryOperationsAllowed,
   isLegacyPlaceholderCampaign,
 } from '../security/legacyPlaceholderFreeze';
-import { isMonetaryContractVersionSupported } from '../security/monetaryContractPolicy';
+import {
+  assertMonetaryContractVersionSupported,
+  isMonetaryContractVersionSupported,
+} from '../security/monetaryContractPolicy';
 
 // In-memory cache used by CovenantIndex and pledge services.
 const campaigns = new Map<string, CampaignDefinition>();
@@ -509,10 +512,13 @@ export class CampaignService {
 
     const activationFeeRequired = toActivationFeeRequired(payload.activationFeeRequired);
     const activationFeePaid = false;
-    const requestedContractVersion = typeof payload.contractVersion === 'string'
+    const requestedContractVersionRaw = typeof payload.contractVersion === 'string'
       ? payload.contractVersion.trim()
       : '';
-    assertLegacyPlaceholderMonetaryOperationsAllowed({ contractVersion: requestedContractVersion });
+    // New campaigns always persist an explicit supported version. Historical
+    // snapshots with a missing version remain untouched/read-only during hydration.
+    const requestedContractVersion = requestedContractVersionRaw || TEYOLIA_COVENANT_V1;
+    assertMonetaryContractVersionSupported({ contractVersion: requestedContractVersion });
     const requestedV2G = requestedContractVersion === TEYOLIA_COVENANT_V2_G;
     const requestedV1 = requestedContractVersion !== LEGACY_PLACEHOLDER_COVENANT && !requestedV2G;
     const payloadConstructorArgs =
