@@ -580,22 +580,11 @@ async function activateCampaign(req: any, res: any) {
   }
 }
 
-async function processCampaignPayout(req: any, res: any) {
-  const { id } = req.params;
-  try {
-    const campaign = await service.getCampaign(id);
-    if (!campaign) {
-      return res.status(404).json({ error: 'Campaign not found' });
-    }
-    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
-    await service.updateCampaignStatus(id, 'funded');
-    return res.json({ success: true, status: 'funded' });
-  } catch (error) {
-    if (isLegacyPlaceholderDisabledError(error)) {
-      return sendLegacyPlaceholderDisabled(res);
-    }
-    return res.status(500).json({ error: 'Failed to process payout' });
-  }
+async function processCampaignPayout(_req: any, res: any) {
+  return res.status(403).json({
+    error: 'legacy-payout-route-disabled',
+    code: 'legacy-payout-route-disabled',
+  });
 }
 
 router.post('/campaign/:id/activate', activateCampaign);
@@ -971,33 +960,11 @@ router.post('/campaigns/:id/finalize-request', finalizeCampaignHandler);
 router.post('/campaign/:id/finalize-request', finalizeCampaignHandler);
 router.post('/campaigns/:id/payout/build', finalizeCampaignHandler);
 
-router.post('/campaigns/:id/payout/confirm', async (req, res) => {
-  try {
-    const campaign = await getCampaignOr404(req, res);
-    if (!campaign) return;
-    assertLegacyPlaceholderMonetaryOperationsAllowed(campaign);
-
-    const txid = sanitizeTxid(req.body?.txid);
-    await service.markPayoutComplete(campaign.id, txid, TREASURY_ADDRESS);
-
-    const updated = (await service.getCampaign(campaign.id)) as CampaignApiRecord | null;
-    if (!updated) {
-      return res.status(404).json({ error: 'campaign-not-found' });
-    }
-
-    const totals = await getCampaignPledgeTotals(campaign.id);
-    const summary = toSummary(updated, totals.totalPledged, totals.pendingTotalPledged);
-
-    return res.json({
-      ...summary,
-      pledgeCount: totals.pledgeCount,
-    });
-  } catch (err) {
-    if (isLegacyPlaceholderDisabledError(err)) {
-      return sendLegacyPlaceholderDisabled(res);
-    }
-    return res.status(400).json({ error: (err as Error).message });
-  }
+router.post('/campaigns/:id/payout/confirm', async (_req, res) => {
+  return res.status(403).json({
+    error: 'unverified-payout-confirm-disabled',
+    code: 'unverified-payout-confirm-disabled',
+  });
 });
 
 router.get('/campaigns/:id/pledges', async (req, res) => {
