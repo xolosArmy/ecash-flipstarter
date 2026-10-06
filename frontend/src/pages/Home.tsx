@@ -13,7 +13,12 @@ import { SecurityBanner } from '../components/SecurityBanner';
 import { parseXecInputToSats } from '../utils/amount';
 import { getCampaignRouteId } from '../utils/campaignRoute';
 import { useWalletConnect } from '../wallet/useWalletConnect';
-import { resolveTonalliBeneficiaryPubKey } from '../wallet/ecashPublicKey';
+import {
+  RECIPIENT_ADDRESS_MISMATCH_LABEL,
+  ecashAddressFromPublicKey,
+  recipientAddressMatchesPublicKey,
+  resolveTonalliBeneficiaryPubKey,
+} from '../wallet/ecashPublicKey';
 
 export const Home: React.FC = () => {
   const { monetaryEnabled } = useCampaignCapabilities();
@@ -26,7 +31,7 @@ export const Home: React.FC = () => {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [beneficiaryAddress, setBeneficiaryAddress] = useState('');
+  const [recipientAddress, setRecipientAddress] = useState('');
   const [goal, setGoal] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
   const [formMessage, setFormMessage] = useState<string | null>(null);
@@ -61,6 +66,17 @@ export const Home: React.FC = () => {
   }, [loadCampaigns]);
 
   useEffect(() => {
+    if (!publicKey) return;
+    let derived = '';
+    try {
+      derived = ecashAddressFromPublicKey(publicKey);
+    } catch {
+      return;
+    }
+    setRecipientAddress((current) => (current.trim() ? current : derived));
+  }, [publicKey]);
+
+  useEffect(() => {
     if (monetaryEnabled) fetchGlobalStats().then(setGlobalStats).catch(console.error);
     else setGlobalStats(null);
   }, [monetaryEnabled]);
@@ -82,7 +98,7 @@ export const Home: React.FC = () => {
   const resetForm = () => {
     setName('');
     setDescription('');
-    setBeneficiaryAddress('');
+    setRecipientAddress('');
     setGoal('');
     setExpiresAt('');
   };
@@ -94,12 +110,20 @@ export const Home: React.FC = () => {
 
     const trimmedName = name.trim();
     const trimmedDescription = description.trim();
-    const trimmedBeneficiaryAddress = beneficiaryAddress.trim();
+    const trimmedRecipientAddress = recipientAddress.trim();
     const parsedGoal = parseXecInputToSats(goal);
     const trimmedExpiresAt = expiresAt.trim();
 
-    if (!trimmedName || !trimmedDescription || !trimmedBeneficiaryAddress || !trimmedExpiresAt) {
+    if (!trimmedName || !trimmedDescription || !trimmedExpiresAt) {
       setFormMessage('Completa todos los campos.');
+      return;
+    }
+    if (
+      publicKey
+      && trimmedRecipientAddress
+      && !recipientAddressMatchesPublicKey(trimmedRecipientAddress, publicKey)
+    ) {
+      setFormMessage(RECIPIENT_ADDRESS_MISMATCH_LABEL);
       return;
     }
     if (parsedGoal.error) {
@@ -127,10 +151,17 @@ export const Home: React.FC = () => {
         resetSession,
         requestAccountPublicKey,
       });
+      const derivedRecipient = ecashAddressFromPublicKey(beneficiaryPubKey);
+      if (trimmedRecipientAddress && !recipientAddressMatchesPublicKey(trimmedRecipientAddress, beneficiaryPubKey)) {
+        setFormMessage(RECIPIENT_ADDRESS_MISMATCH_LABEL);
+        return;
+      }
+      setRecipientAddress(derivedRecipient);
       await createCampaign({
         name: trimmedName,
         description: trimmedDescription,
-        beneficiaryAddress: trimmedBeneficiaryAddress,
+        beneficiaryAddress: derivedRecipient,
+        recipientAddress: derivedRecipient,
         beneficiaryPubkey: beneficiaryPubKey,
         beneficiaryPubKey,
         contractVersion: 'teyolia-covenant-v1',
@@ -172,6 +203,12 @@ export const Home: React.FC = () => {
     }
     return 0;
   });
+
+  const recipientAddressMismatch = Boolean(
+    publicKey
+    && recipientAddress.trim()
+    && !recipientAddressMatchesPublicKey(recipientAddress, publicKey)
+  );
 
   return (
     <div>
@@ -297,9 +334,9 @@ export const Home: React.FC = () => {
             />
             <input
               type="text"
-              value={beneficiaryAddress}
-              onChange={(event) => setBeneficiaryAddress(event.target.value)}
-              placeholder="Beneficiary Address (ecash:...)"
+              value={recipientAddress}
+              onChange={(event) => setRecipientAddress(event.target.value)}
+              placeholder="recipientAddress (ecash:...)"
             />
             <small>
               {publicKey
@@ -318,8 +355,12 @@ export const Home: React.FC = () => {
               value={expiresAt}
               onChange={(event) => setExpiresAt(event.target.value)}
             />
-            <button type="submit" disabled={creating}>
-              {creating ? 'Creando...' : 'Crear campaña'}
+            <button type="submit" disabled={creating || recipientAddressMismatch}>
+              {recipientAddressMismatch
+                ? RECIPIENT_ADDRESS_MISMATCH_LABEL
+                : creating
+                  ? 'Creando...'
+                  : 'Crear campaña'}
             </button>
             {formMessage && <p>{formMessage}</p>}
           </form>

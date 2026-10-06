@@ -2,12 +2,41 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   MISSING_TONALLI_PUBKEY_MESSAGE,
   SIMULATED_ECASH_PUBKEY,
+  ecashAddressFromPublicKey,
   extractSessionEcashPublicKey,
   readDisclosedEcashPublicKey,
+  recipientAddressMatchesPublicKey,
   resolveTonalliBeneficiaryPubKey,
 } from './ecashPublicKey';
 
 const REAL_PUBKEY = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798';
+
+describe('ecashAddressFromPublicKey', () => {
+  it('derives the eCash CashAddr from the hash160 of a compressed public key', () => {
+    expect(ecashAddressFromPublicKey(
+      '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798',
+    )).toBe('ecash:qp63uahgrxged4z5jswyt5dn5v3lzsem6cacy2kzvq');
+    expect(ecashAddressFromPublicKey(`03${'4e'.repeat(32)}`.toUpperCase())).toBe(
+      ecashAddressFromPublicKey(`03${'4e'.repeat(32)}`),
+    );
+  });
+
+  it('rejects a public key that is not compressed secp256k1', () => {
+    expect(() => ecashAddressFromPublicKey(SIMULATED_ECASH_PUBKEY)).toThrow('invalid-compressed-pubkey');
+    expect(() => ecashAddressFromPublicKey('04'.padEnd(130, '1'))).toThrow('invalid-compressed-pubkey');
+  });
+
+  it('matches only the address derived from the active public key', () => {
+    const publicKey = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798';
+    const derived = ecashAddressFromPublicKey(publicKey);
+    expect(recipientAddressMatchesPublicKey(derived, publicKey)).toBe(true);
+    expect(recipientAddressMatchesPublicKey(derived.slice('ecash:'.length), publicKey)).toBe(true);
+    expect(recipientAddressMatchesPublicKey(
+      'ecash:qzklee2022djz48rcdsmhclh6swmqc6hzuqf9vutqh',
+      publicKey,
+    )).toBe(false);
+  });
+});
 
 describe('extractSessionEcashPublicKey', () => {
   it('reads publicKey from the ecash session properties', () => {

@@ -2,6 +2,9 @@
  * Clave pública comprimida de secp256k1 que Tonalli asocia a la cuenta ecash: conectada.
  * La sesión puede traerla como `publicKey` o `pubkey`. La clave simulada de desarrollo no es válida.
  */
+import { ripemd160 } from '@noble/hashes/ripemd160';
+import { sha256 } from '@noble/hashes/sha2';
+import cashaddr from 'ecashaddrjs';
 
 const COMPRESSED_PUBKEY = /^(02|03)[0-9a-f]{64}$/;
 export const SIMULATED_ECASH_PUBKEY =
@@ -12,6 +15,9 @@ export const TONALLI_PUBKEY_DISCLOSURE_MESSAGE =
 
 export const MISSING_TONALLI_PUBKEY_MESSAGE =
   'No hay una clave pública eCash en esta sesión de Tonalli. Desconecta, vuelve a conectar la wallet y autoriza compartir la clave pública. Sin esa clave no se puede crear la campaña.';
+
+export const RECIPIENT_ADDRESS_MISMATCH_LABEL =
+  'La dirección no corresponde a la clave pública obtenida de la wallet';
 
 const PUBKEY_FIELD = /pubkey|public[_-]?key/i;
 
@@ -35,6 +41,41 @@ function readNamedPublicKey(source: unknown): string | null {
     if (parsed) return parsed;
   }
   return null;
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+/** SHA256 seguido de RIPEMD160, el hash160 de una clave comprimida. */
+export function hash160(bytes: Uint8Array): Uint8Array {
+  return ripemd160(sha256(bytes));
+}
+
+/**
+ * Dirección P2PKH CashAddr (`ecash:q...`) derivada del hash160 de la clave comprimida.
+ * Ejemplo de entrada: `034e...`.
+ */
+export function ecashAddressFromPublicKey(publicKeyHex: string): string {
+  const normalized = normalizeCompressedSecp256k1PublicKey(publicKeyHex);
+  if (!normalized) {
+    throw new Error('invalid-compressed-pubkey');
+  }
+  return cashaddr.encode('ecash', 'p2pkh', hash160(hexToBytes(normalized)));
+}
+
+export function recipientAddressMatchesPublicKey(address: string, publicKeyHex: string): boolean {
+  const typed = address.trim();
+  if (!typed) return false;
+  try {
+    return canonicalEcashAccount(typed) === canonicalEcashAccount(ecashAddressFromPublicKey(publicKeyHex));
+  } catch {
+    return false;
+  }
 }
 
 function canonicalEcashAccount(value: string): string {
