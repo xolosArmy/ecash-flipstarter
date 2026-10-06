@@ -10,6 +10,7 @@ import {
   disconnect as wcDisconnect,
   getEcashAccounts,
   getEcashSessionDiagnostics,
+  getPreferredEcashChain,
   getRequestedNamespaces,
   getSignClient,
   getStoredTopic,
@@ -18,8 +19,16 @@ import {
   isWalletConnectConfigured,
   onSessionDelete,
   WC_METHOD,
+  WC_METHOD_GET_ADDRESSES,
+  WC_METHOD_SIGN_MESSAGE,
   requestSignAndBroadcastTransaction,
 } from '../walletconnect/client';
+import {
+  buildTonalliPublicKeyRequest,
+  extractSessionEcashPublicKey,
+  normalizeCompressedSecp256k1PublicKey,
+  readDisclosedEcashPublicKey,
+} from './ecashPublicKey';
 import {
   normalizeAlpTokenPayload,
   normalizeTokenOutputs,
@@ -32,6 +41,8 @@ type WalletConnectState = {
   connected: boolean;
   topic: string | null;
   addresses: string[];
+  /** Clave pública comprimida secp256k1 de la cuenta ecash: conectada. */
+  publicKey: string | null;
   lastTxid: string | null;
   uri: string | null;
   status: 'idle' | 'connecting' | 'awaiting' | 'connected' | 'signing';
@@ -41,6 +52,7 @@ type WalletConnectState = {
   disconnect: () => Promise<void>;
   resetSession: () => Promise<void>;
   requestAddresses: () => Promise<string[]>;
+  requestAccountPublicKey: () => Promise<string | null>;
   requestSignAndBroadcast: (
     offerId: string,
     chainId: string,
@@ -142,7 +154,11 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode; enable
   const [connected, setConnected] = useState(false);
   const [topic, setTopic] = useState<string | null>(null);
   const [addresses, setAddresses] = useState<string[]>([]);
+  const [publicKey, setPublicKey] = useState<string | null>(null);
   const [lastTxid, setLastTxid] = useState<string | null>(null);
+  const topicRef = useRef<string | null>(null);
+  const publicKeyRef = useRef<string | null>(null);
+  const addressesRef = useRef<string[]>([]);
   const [uri, setUri] = useState<string | null>(null);
   const [status, setStatus] = useState<WalletConnectState['status']>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -154,10 +170,33 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode; enable
     }
   }, []);
 
+  const assignTopic = (next: string | null) => {
+    topicRef.current = next;
+    setTopic(next);
+  };
+
+  const rememberPublicKey = (next: string | null) => {
+    const normalized = normalizeCompressedSecp256k1PublicKey(next);
+    publicKeyRef.current = normalized;
+    setPublicKey(normalized);
+  };
+
+  const rememberSessionIdentity = (
+    session: SessionTypes.Struct | null | undefined,
+    options?: { acceptPublicKey?: boolean },
+  ) => {
+    const nextAddresses = getEcashAccounts(session ?? undefined);
+    addressesRef.current = nextAddresses;
+    setAddresses(nextAddresses);
+    rememberPublicKey(options?.acceptPublicKey === false ? null : extractSessionEcashPublicKey(session));
+  };
+
   const resetState = () => {
     setConnected(false);
-    setTopic(null);
+    assignTopic(null);
+    addressesRef.current = [];
     setAddresses([]);
+    rememberPublicKey(null);
     setUri(null);
     setStatus('idle');
     setLastTxid(null);
@@ -169,7 +208,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode; enable
       // Best effort cleanup for stale walletconnect storage.
     });
     resetState();
-    setTopic(null);
+    assignTopic(null);
     setStatus('idle');
     setError(nextError);
     if (import.meta.env.DEV) {
@@ -216,17 +255,17 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode; enable
             null;
           if (session) {
             if (!isEcashSessionValid(session)) {
-              setTopic(session.topic);
+              assignTopic(session.topic);
               setConnected(false);
               setStatus('idle');
-              setAddresses(getEcashAccounts(session));
+              rememberSessionIdentity(session, { acceptPublicKey: false });
               setError(formatInvalidEcashSessionMessage(session));
               return () => unsubscribe();
             }
-            setTopic(session.topic);
+            assignTopic(session.topic);
             setConnected(true);
             setStatus('connected');
-            setAddresses(getEcashAccounts(session));
+            rememberSessionIdentity(session);
           } else {
             if (import.meta.env.DEV) {
               console.debug('[WC] stale topic detected -> purge');
@@ -263,7 +302,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode; enable
     setError(null);
     setStatus('connecting');
     try {
-      const { session, accounts } = await wcConnect({
+      const { session } = await wcConnect({
         onUri: (nextUri) => {
           setUri(nextUri);
           setStatus('awaiting');
@@ -271,18 +310,18 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode; enable
       });
 
       if (!isEcashSessionValid(session)) {
-        setTopic(session.topic);
+        assignTopic(session.topic);
         setConnected(false);
-        setAddresses(getEcashAccounts(session));
+        rememberSessionIdentity(session, { acceptPublicKey: false });
         setStatus('idle');
         setError(formatInvalidEcashSessionMessage(session));
         return null;
       }
-      setTopic(session.topic);
+      assignTopic(session.topic);
       setConnected(true);
       setStatus('connected');
       setUri(null);
-      setAddresses(accounts);
+      rememberSessionIdentity(session);
       return session;
     } catch (err) {
       if (isStaleSessionError(err)) {
@@ -318,8 +357,105 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode; enable
     if (!existingTopic || !client) return [];
     const session = safelyGetSession(client, existingTopic);
     const next = getEcashAccounts(session ?? undefined);
+    addressesRef.current = next;
     setAddresses(next);
+    if (session && isEcashSessionValid(session)) {
+      rememberPublicKey(extractSessionEcashPublicKey(session));
+    }
     return next;
+  };
+
+  const requestDisclosedPublicKey = async (method: string, params: Record<string, unknown>) => {
+    const activeTopic = topicRef.current;
+    const client = clientRef.current;
+    if (!activeTopic || !client) return null;
+    const session = safelyGetSession(client, activeTopic);
+    if (!session) return null;
+    const chainId = getPreferredEcashChain(session) ?? CHAIN_ID;
+    const result = await client.request({
+      topic: activeTopic,
+      chainId,
+      request: { method, params },
+    });
+    const accounts = getEcashAccounts(session);
+    addressesRef.current = accounts;
+    setAddresses(accounts);
+    const disclosed = readDisclosedEcashPublicKey(result, accounts);
+    if (disclosed.publicKey && !disclosed.addressMatches) {
+      throw new Error('La clave pública de Tonalli no corresponde a la cuenta conectada. Reconecta Tonalli.');
+    }
+    if (!disclosed.publicKey) return null;
+    rememberPublicKey(disclosed.publicKey);
+    return disclosed.publicKey;
+  };
+
+  const requestAccountPublicKey = async (): Promise<string | null> => {
+    const cached = normalizeCompressedSecp256k1PublicKey(publicKeyRef.current);
+    if (cached) return cached;
+
+    const activeTopic = topicRef.current;
+    const client = clientRef.current;
+    if (!activeTopic || !client) return null;
+    const session = safelyGetSession(client, activeTopic);
+    if (!session || !isEcashSessionValid(session)) return null;
+
+    const fromSession = extractSessionEcashPublicKey(session);
+    if (fromSession) {
+      rememberPublicKey(fromSession);
+      return fromSession;
+    }
+
+    const methods = getEcashSessionDiagnostics(session).detectedMethods;
+    if (methods.includes(WC_METHOD_GET_ADDRESSES)) {
+      try {
+        const listed = await requestDisclosedPublicKey(WC_METHOD_GET_ADDRESSES, {});
+        if (listed) return listed;
+      } catch (err) {
+        if (isStaleSessionError(err)) {
+          await purgeWalletConnect();
+          throw new Error(INVALID_SESSION_MESSAGE);
+        }
+        if (err instanceof Error && err.message.includes('no corresponde')) {
+          throw err;
+        }
+      }
+    }
+
+    if (!methods.includes(WC_METHOD_SIGN_MESSAGE)) return null;
+
+    setStatus('signing');
+    try {
+      const disclosed = await requestDisclosedPublicKey(
+        WC_METHOD_SIGN_MESSAGE,
+        buildTonalliPublicKeyRequest().params,
+      );
+      setStatus('connected');
+      if (!disclosed) {
+        throw new Error('Tonalli no devolvió la clave pública comprimida de la cuenta conectada.');
+      }
+      return disclosed;
+    } catch (err) {
+      if (isStaleSessionError(err)) {
+        await purgeWalletConnect();
+        throw new Error(INVALID_SESSION_MESSAGE);
+      }
+      setStatus('connected');
+      if (err instanceof Error && err.message.includes('no corresponde')) {
+        setError(err.message);
+        throw err;
+      }
+      if (err instanceof Error && err.message.includes('no devolvió')) {
+        setError(err.message);
+        throw err;
+      }
+      const formattedError = formatWalletConnectError(err, 'No se pudo obtener la clave pública de Tonalli.');
+      setError(formattedError);
+      const lower = formattedError.toLowerCase();
+      if (lower.includes('method') || lower.includes('método') || lower.includes('metodo')) {
+        throw new Error(`${formattedError} Reconecta Tonalli.`);
+      }
+      throw new Error(formattedError);
+    }
   };
 
   const requestSignAndBroadcast = async (
@@ -477,6 +613,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode; enable
       connected,
       topic,
       addresses,
+      publicKey,
       lastTxid,
       uri,
       status,
@@ -486,6 +623,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode; enable
       disconnect,
       resetSession,
       requestAddresses,
+      requestAccountPublicKey,
       requestSignAndBroadcast,
       requestSignAndBroadcastIntent,
       requestSignAndBroadcastRawTx,
@@ -496,6 +634,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode; enable
       connected,
       topic,
       addresses,
+      publicKey,
       lastTxid,
       uri,
       status,

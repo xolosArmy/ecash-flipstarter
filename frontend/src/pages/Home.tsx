@@ -12,6 +12,8 @@ import { WalletConnectBar } from '../components/WalletConnectBar';
 import { SecurityBanner } from '../components/SecurityBanner';
 import { parseXecInputToSats } from '../utils/amount';
 import { getCampaignRouteId } from '../utils/campaignRoute';
+import { useWalletConnect } from '../wallet/useWalletConnect';
+import { resolveTonalliBeneficiaryPubKey } from '../wallet/ecashPublicKey';
 
 export const Home: React.FC = () => {
   const { monetaryEnabled } = useCampaignCapabilities();
@@ -28,8 +30,10 @@ export const Home: React.FC = () => {
   const [goal, setGoal] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
   const [formMessage, setFormMessage] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [globalStats, setGlobalStats] = useState<GlobalStats | null>(null);
   const navigate = useNavigate();
+  const { publicKey, connect, resetSession, requestAccountPublicKey } = useWalletConnect();
 
   const loadCampaigns = useCallback(() => {
     setLoading(true);
@@ -115,13 +119,20 @@ export const Home: React.FC = () => {
       return;
     }
 
+    setCreating(true);
     try {
+      const beneficiaryPubKey = await resolveTonalliBeneficiaryPubKey({
+        publicKey,
+        connect,
+        resetSession,
+        requestAccountPublicKey,
+      });
       await createCampaign({
         name: trimmedName,
         description: trimmedDescription,
         beneficiaryAddress: trimmedBeneficiaryAddress,
-        beneficiaryPubkey: '020000000000000000000000000000000000000000000000000000000000000001',
-        beneficiaryPubKey: '020000000000000000000000000000000000000000000000000000000000000001',
+        beneficiaryPubkey: beneficiaryPubKey,
+        beneficiaryPubKey,
         contractVersion: 'teyolia-covenant-v1',
         goal: parsedGoal.sats,
         expiresAt: expiresAtIso,
@@ -132,6 +143,8 @@ export const Home: React.FC = () => {
       loadCampaigns();
     } catch (err) {
       setFormMessage(err instanceof Error ? err.message : 'Error al crear la campaña.');
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -288,6 +301,11 @@ export const Home: React.FC = () => {
               onChange={(event) => setBeneficiaryAddress(event.target.value)}
               placeholder="Beneficiary Address (ecash:...)"
             />
+            <small>
+              {publicKey
+                ? `Clave pública de Tonalli: ${publicKey.slice(0, 8)}…${publicKey.slice(-6)}`
+                : 'La clave pública del beneficiario sale de la sesión de Tonalli. Si esta sesión no la trae, hay que reconectar la wallet antes de crear la campaña.'}
+            </small>
             <input
               type="text"
               inputMode="decimal"
@@ -300,7 +318,9 @@ export const Home: React.FC = () => {
               value={expiresAt}
               onChange={(event) => setExpiresAt(event.target.value)}
             />
-            <button type="submit">Crear campaña</button>
+            <button type="submit" disabled={creating}>
+              {creating ? 'Creando...' : 'Crear campaña'}
+            </button>
             {formMessage && <p>{formMessage}</p>}
           </form>
         )}

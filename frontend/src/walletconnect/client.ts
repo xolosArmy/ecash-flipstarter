@@ -10,6 +10,8 @@ export const CHAIN_ID = 'ecash:1' as const;
 export const CHAIN_ID_ALIAS = 'ecash:mainnet' as const;
 export const WC_METHOD = 'ecash_signAndBroadcastTransaction' as const;
 export const WC_METHOD_ALIAS = 'ecash_signAndBroadcast' as const;
+export const WC_METHOD_GET_ADDRESSES = 'ecash_getAddresses' as const;
+export const WC_METHOD_SIGN_MESSAGE = 'ecash_signMessage' as const;
 const STORAGE_TOPIC = 'wc_topic';
 
 type WalletConnectOptionalNamespaces = {
@@ -23,7 +25,7 @@ type WalletConnectOptionalNamespaces = {
 export const OPTIONAL_NAMESPACES: WalletConnectOptionalNamespaces = {
   [WC_NAMESPACE]: {
     chains: [CHAIN_ID, CHAIN_ID_ALIAS],
-    methods: [WC_METHOD, WC_METHOD_ALIAS, 'ecash_getAddresses'],
+    methods: [WC_METHOD, WC_METHOD_ALIAS, WC_METHOD_GET_ADDRESSES, WC_METHOD_SIGN_MESSAGE],
     events: ['accountsChanged'],
   },
 };
