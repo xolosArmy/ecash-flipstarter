@@ -21,6 +21,7 @@ import { ExplorerLink } from '../components/ExplorerLink';
 import { AmountDisplay } from '../components/AmountDisplay';
 import { StatusBadge } from '../components/StatusBadge';
 import { useWalletConnect } from '../wallet/useWalletConnect';
+import { resolveTonalliBeneficiaryPubKey } from '../wallet/ecashPublicKey';
 import { useToast } from '../components/ToastProvider';
 import { parseXecInputToSats } from '../utils/amount';
 import { getPreferredEcashChain, WC_METHOD } from '../walletconnect/client';
@@ -76,7 +77,17 @@ const LegacyCreateCampaignWizard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const { signClient, topic, connected, connect, requestSignAndBroadcast, addresses } = useWalletConnect();
+  const {
+    signClient,
+    topic,
+    connected,
+    connect,
+    resetSession,
+    requestSignAndBroadcast,
+    requestAccountPublicKey,
+    addresses,
+    publicKey,
+  } = useWalletConnect();
   const { showToast } = useToast();
 
   const shareUrl = useMemo(() => {
@@ -232,14 +243,20 @@ const LegacyCreateCampaignWizard: React.FC = () => {
 
     setSubmittingCreate(true);
     try {
+      const beneficiaryPubKey = await resolveTonalliBeneficiaryPubKey({
+        publicKey,
+        connect,
+        resetSession,
+        requestAccountPublicKey,
+      });
       const created = await createCampaign({
         name: trimmedName,
         goal: parsedGoal.sats,
         expiresAt: new Date(trimmedExpiresAt).toISOString(),
         beneficiaryAddress: trimmedBeneficiary,
-        beneficiaryPubkey: '020000000000000000000000000000000000000000000000000000000000000001',
+        beneficiaryPubkey: beneficiaryPubKey,
         // CampaignService solo acepta esta grafía; sin ella V1 responde missing-beneficiary-pubkey-for-v1.
-        beneficiaryPubKey: '020000000000000000000000000000000000000000000000000000000000000001',
+        beneficiaryPubKey,
         contractVersion: 'teyolia-covenant-v1',
         description: description.trim() || undefined,
         location: location.trim() || undefined,
@@ -450,6 +467,13 @@ const LegacyCreateCampaignWizard: React.FC = () => {
                 placeholder="ecash:..."
               />
             </label>
+            <p style={{ margin: 0 }}>
+              <small>
+                {publicKey
+                  ? `Clave pública de Tonalli: ${publicKey.slice(0, 8)}…${publicKey.slice(-6)}`
+                  : 'La clave pública del beneficiario sale de la sesión de Tonalli. Si esta sesión no la trae, hay que reconectar la wallet antes de crear la campaña.'}
+              </small>
+            </p>
             <label style={{ display: 'grid', gap: 4 }}>
               Descripción (opcional, soporta links y Markdown básico)
               <textarea
