@@ -22,9 +22,8 @@ import { AmountDisplay } from '../components/AmountDisplay';
 import { StatusBadge } from '../components/StatusBadge';
 import { useWalletConnect } from '../wallet/useWalletConnect';
 import {
-  RECIPIENT_ADDRESS_MISMATCH_LABEL,
+  DERIVED_COLLECTION_ADDRESS_NOTICE,
   ecashAddressFromPublicKey,
-  recipientAddressMatchesPublicKey,
   resolveTonalliBeneficiaryPubKey,
 } from '../wallet/ecashPublicKey';
 import { useToast } from '../components/ToastProvider';
@@ -151,16 +150,19 @@ const LegacyCreateCampaignWizard: React.FC = () => {
     });
   }, []);
 
-  useEffect(() => {
-    if (!publicKey) return;
-    let derived = '';
+  const lockedRecipientAddress = useMemo(() => {
+    if (!publicKey) return '';
     try {
-      derived = ecashAddressFromPublicKey(publicKey);
+      return ecashAddressFromPublicKey(publicKey);
     } catch {
-      return;
+      return '';
     }
-    setRecipientAddress((current) => (current.trim() ? current : derived));
   }, [publicKey]);
+
+  useEffect(() => {
+    if (!lockedRecipientAddress) return;
+    setRecipientAddress(lockedRecipientAddress);
+  }, [lockedRecipientAddress]);
 
   useEffect(() => {
     if (payerAddress.trim()) return;
@@ -234,7 +236,6 @@ const LegacyCreateCampaignWizard: React.FC = () => {
 
     const trimmedName = name.trim();
     const parsedGoal = parseXecInputToSats(goal);
-    const trimmedRecipient = recipientAddress.trim();
     const trimmedExpiresAt = expiresAt.trim();
     if (trimmedName.length < 3) {
       setError('El nombre debe tener al menos 3 caracteres.');
@@ -252,14 +253,6 @@ const LegacyCreateCampaignWizard: React.FC = () => {
       setError('Selecciona una fecha de expiración.');
       return;
     }
-    if (
-      publicKey
-      && trimmedRecipient
-      && !recipientAddressMatchesPublicKey(trimmedRecipient, publicKey)
-    ) {
-      setError(RECIPIENT_ADDRESS_MISMATCH_LABEL);
-      return;
-    }
 
     setSubmittingCreate(true);
     try {
@@ -270,10 +263,6 @@ const LegacyCreateCampaignWizard: React.FC = () => {
         requestAccountPublicKey,
       });
       const derivedRecipient = ecashAddressFromPublicKey(beneficiaryPubKey);
-      if (trimmedRecipient && !recipientAddressMatchesPublicKey(trimmedRecipient, beneficiaryPubKey)) {
-        setError(RECIPIENT_ADDRESS_MISMATCH_LABEL);
-        return;
-      }
       setRecipientAddress(derivedRecipient);
       const created = await createCampaign({
         name: trimmedName,
@@ -429,11 +418,7 @@ const LegacyCreateCampaignWizard: React.FC = () => {
   }
 
   const activationFeeLabel = '1,600.00 RMZ';
-  const recipientAddressMismatch = Boolean(
-    publicKey
-    && recipientAddress.trim()
-    && !recipientAddressMatchesPublicKey(recipientAddress, publicKey)
-  );
+  const displayedRecipientAddress = lockedRecipientAddress || recipientAddress;
 
   return (
     <div>
@@ -494,11 +479,18 @@ const LegacyCreateCampaignWizard: React.FC = () => {
             <label style={{ display: 'grid', gap: 4 }}>
               Dirección beneficiaria (ecash:...)
               <input
-                value={recipientAddress}
-                onChange={(event) => setRecipientAddress(event.target.value)}
+                value={displayedRecipientAddress}
+                onChange={(event) => {
+                  if (lockedRecipientAddress) return;
+                  setRecipientAddress(event.target.value);
+                }}
+                readOnly={Boolean(lockedRecipientAddress)}
                 placeholder="ecash:..."
               />
             </label>
+            {lockedRecipientAddress && (
+              <p style={{ margin: 0 }}>{DERIVED_COLLECTION_ADDRESS_NOTICE}</p>
+            )}
             <p style={{ margin: 0 }}>
               <small>
                 {publicKey
@@ -519,12 +511,8 @@ const LegacyCreateCampaignWizard: React.FC = () => {
               Ubicación (opcional)
               <input value={location} onChange={(event) => setLocation(event.target.value)} />
             </label>
-            <button type="submit" disabled={submittingCreate || recipientAddressMismatch}>
-              {recipientAddressMismatch
-                ? RECIPIENT_ADDRESS_MISMATCH_LABEL
-                : submittingCreate
-                  ? 'Creando...'
-                  : 'Crear borrador'}
+            <button type="submit" disabled={submittingCreate}>
+              {submittingCreate ? 'Creando...' : 'Crear borrador'}
             </button>
           </form>
         </section>
