@@ -1,3 +1,6 @@
+import { useCampaignCapabilities } from '../context/CampaignCapabilities';
+import { isMetadataOnly } from '../utils/campaignMode';
+import { MetadataBanner } from '../components/MetadataBanner';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { createCampaign, fetchCampaigns, fetchCampaignSummary, fetchGlobalStats } from '../api/client';
@@ -11,6 +14,7 @@ import { parseXecInputToSats } from '../utils/amount';
 import { getCampaignRouteId } from '../utils/campaignRoute';
 
 export const Home: React.FC = () => {
+  const { monetaryEnabled } = useCampaignCapabilities();
   const [campaigns, setCampaigns] = useState<CampaignSummaryResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,10 +36,13 @@ export const Home: React.FC = () => {
     setError(null);
     fetchCampaigns()
       .then((data) => {
-        const campaignIds = data
-          .map((campaign) => getCampaignRouteId(campaign))
-          .filter((value): value is string => Boolean(value));
-        return Promise.all(campaignIds.map((campaignId) => fetchCampaignSummary(campaignId)));
+        return Promise.all(data.map(async (campaign) => {
+          const routeId = getCampaignRouteId(campaign);
+          if (isMetadataOnly(campaign) || !monetaryEnabled || !routeId) {
+            return { ...campaign, status: campaign.status || 'draft' } as CampaignSummaryResponse;
+          }
+          return fetchCampaignSummary(routeId);
+        }));
       })
       .then((summaries) => setCampaigns(summaries))
       .catch((err) => {
@@ -43,15 +50,16 @@ export const Home: React.FC = () => {
         setCampaigns([]);
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [monetaryEnabled]);
 
   useEffect(() => {
     loadCampaigns();
   }, [loadCampaigns]);
 
   useEffect(() => {
-    fetchGlobalStats().then(setGlobalStats).catch(console.error);
-  }, []);
+    if (monetaryEnabled) fetchGlobalStats().then(setGlobalStats).catch(console.error);
+    else setGlobalStats(null);
+  }, [monetaryEnabled]);
 
   useEffect(() => {
     const onCampaignRefresh = () => loadCampaigns();
@@ -77,6 +85,7 @@ export const Home: React.FC = () => {
 
   const handleCreateSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!monetaryEnabled) return;
     setFormMessage(null);
 
     const trimmedName = name.trim();
@@ -111,6 +120,8 @@ export const Home: React.FC = () => {
         name: trimmedName,
         description: trimmedDescription,
         beneficiaryAddress: trimmedBeneficiaryAddress,
+        beneficiaryPubkey: '020000000000000000000000000000000000000000000000000000000000000001',
+        beneficiaryPubKey: '020000000000000000000000000000000000000000000000000000000000000001',
         contractVersion: 'teyolia-covenant-v1',
         goal: parsedGoal.sats,
         expiresAt: expiresAtIso,
@@ -126,6 +137,7 @@ export const Home: React.FC = () => {
 
   const filtered = campaigns.filter((campaign) => {
     if (filterStatus === 'Todas') return true;
+    if (filterStatus === 'Borradores') return campaign.status === 'draft';
     if (filterStatus === 'Activas') return campaign.status === 'active';
     if (filterStatus === 'Expiradas') return campaign.status === 'expired';
     if (filterStatus === 'Meta alcanzada') return campaign.status === 'funded';
@@ -133,8 +145,15 @@ export const Home: React.FC = () => {
   });
 
   const sorted = [...filtered].sort((a, b) => {
-    if (sortBy === 'Recaudación') return b.totalPledged - a.totalPledged;
-    if (sortBy === 'Meta') return a.goal - b.goal;
+    if (sortBy === 'Recaudación') return monetaryEnabled ? (b.totalPledged ?? 0) - (a.totalPledged ?? 0) : 0;
+    if (sortBy === 'Meta') {
+      if (/^[0-9]+$/.test(String(a.goal)) && /^[0-9]+$/.test(String(b.goal))) {
+        const left = BigInt(a.goal);
+        const right = BigInt(b.goal);
+        return left < right ? -1 : left > right ? 1 : 0;
+      }
+      return Number(a.goal) - Number(b.goal);
+    }
     if (sortBy === 'Próximas a vencer') {
       return new Date(a.expiresAt).getTime() - new Date(b.expiresAt).getTime();
     }
@@ -162,8 +181,7 @@ export const Home: React.FC = () => {
           </div>
         </div>
       )}
-      <SecurityBanner />
-      <WalletConnectBar />
+      {monetaryEnabled ? <><SecurityBanner /><WalletConnectBar /></> : <MetadataBanner />}
       <div style={{ marginBottom: 16 }}>
         <Link
           to="/campaigns/create"
@@ -177,7 +195,7 @@ export const Home: React.FC = () => {
             textDecoration: 'none',
           }}
         >
-          Crear campaña (guiado)
+          {monetaryEnabled ? 'Crear campaña (guiado)' : 'Crear registro de metadata'}
         </Link>
         <Link
           to="/mis-campanas"
@@ -192,9 +210,9 @@ export const Home: React.FC = () => {
             textDecoration: 'none',
           }}
         >
-          Mis campañas
+          {monetaryEnabled ? 'Mis campañas' : 'Registros'}
         </Link>
-        <p style={{ marginTop: 8, marginBottom: 0 }}>
+        {monetaryEnabled && <p style={{ marginTop: 8, marginBottom: 0 }}>
           <small>
             Solo cobramos 1%
             {' '}
@@ -214,7 +232,7 @@ export const Home: React.FC = () => {
               i
             </button>
           </small>
-        </p>
+        </p>}
       </div>
       <div style={{ marginBottom: 16 }}>
         <button type="button" onClick={loadCampaigns} disabled={loading}>
@@ -231,21 +249,22 @@ export const Home: React.FC = () => {
           Estado:
           <select value={filterStatus} onChange={(event) => setFilterStatus(event.target.value)}>
             <option>Todas</option>
-            <option>Activas</option>
-            <option>Expiradas</option>
-            <option>Meta alcanzada</option>
+            <option>Borradores</option>
+            {monetaryEnabled && <option>Activas</option>}
+            {monetaryEnabled && <option>Expiradas</option>}
+            {monetaryEnabled && <option>Meta alcanzada</option>}
           </select>
         </label>
         <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           Ordenar por:
           <select value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
-            <option>Recaudación</option>
+            <option value="Recaudación">{monetaryEnabled ? 'Recaudación' : 'Orden del registro'}</option>
             <option>Meta</option>
             <option>Próximas a vencer</option>
           </select>
         </label>
       </div>
-      <div style={{ border: '1px solid #eee', borderRadius: 8, padding: 12, marginBottom: 16 }}>
+      {monetaryEnabled && <div style={{ border: '1px solid #eee', borderRadius: 8, padding: 12, marginBottom: 16 }}>
         <button type="button" onClick={() => setShowCreateForm((prev) => !prev)}>
           {showCreateForm ? 'Ocultar creación manual' : 'Mostrar creación manual'}
         </button>
@@ -285,7 +304,7 @@ export const Home: React.FC = () => {
             {formMessage && <p>{formMessage}</p>}
           </form>
         )}
-      </div>
+      </div>}
       <div style={{ border: '1px solid #eee', borderRadius: 8, padding: 12, marginBottom: 16 }}>
         <h3>Open campaign by ID</h3>
         <div style={{ display: 'flex', gap: 8 }}>

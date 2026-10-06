@@ -1,3 +1,7 @@
+import { CreateCampaign } from './CreateCampaign';
+import { MetadataCampaignView } from '../components/MetadataCampaignView';
+import { useCampaignCapabilities } from '../context/CampaignCapabilities';
+import { canUseMonetaryCampaign, isMetadataOnly } from '../utils/campaignMode';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -49,7 +53,8 @@ function parseStoredStep(value: string | null): WizardStep | null {
   return null;
 }
 
-export const CreateCampaignWizard: React.FC = () => {
+const LegacyCreateCampaignWizard: React.FC = () => {
+  const { capabilities } = useCampaignCapabilities();
   const [step, setStep] = useState<WizardStep>(1);
   const [campaign, setCampaign] = useState<CampaignSummary | null>(null);
   const [campaignId, setCampaignId] = useState<string | null>(null);
@@ -94,7 +99,9 @@ export const CreateCampaignWizard: React.FC = () => {
     try {
       const summary = await fetchCampaignSummary(id);
       setCampaign(summary);
-      if (summary.status === 'active') {
+      if (isMetadataOnly(summary)) {
+        setWizardStep(1);
+      } else if (summary.status === 'active') {
         setWizardStep(3);
       } else if (
         summary.status === 'pending_fee'
@@ -135,7 +142,7 @@ export const CreateCampaignWizard: React.FC = () => {
   }, [addresses, payerAddress]);
 
   useEffect(() => {
-    if (!campaignId) return undefined;
+    if (!campaignId || !canUseMonetaryCampaign(campaign, capabilities)) return undefined;
     if (campaign?.status !== 'pending_verification') return undefined;
     const txid = campaign.activationFeeTxid || campaign.activation?.feeTxid;
     if (!txid) return undefined;
@@ -175,10 +182,17 @@ export const CreateCampaignWizard: React.FC = () => {
     return () => {
       window.clearInterval(interval);
     };
-  }, [campaign?.activation?.feeTxid, campaign?.activationFeeTxid, campaign?.status, campaignId]);
+  }, [campaign?.activation?.feeTxid, campaign?.activationFeeTxid, campaign?.status, campaignId, campaign?.recordKind, campaign?.monetaryEnabled, capabilities]);
 
   const handleCreatedCampaign = async (created: CreatedCampaign) => {
     persistCampaignId(created.id);
+    if (isMetadataOnly(created)) {
+      setCampaign({ ...created, status: 'draft' });
+      setMessage('Registro de metadata guardado.');
+      setWizardStep(1);
+      window.dispatchEvent(new Event('campaigns:refresh'));
+      return;
+    }
     setMessage('Borrador creado. Ahora activa la campaña para recibir donaciones.');
     setError(null);
     setWizardStep(2);
@@ -223,6 +237,9 @@ export const CreateCampaignWizard: React.FC = () => {
         goal: parsedGoal.sats,
         expiresAt: new Date(trimmedExpiresAt).toISOString(),
         beneficiaryAddress: trimmedBeneficiary,
+        beneficiaryPubkey: '020000000000000000000000000000000000000000000000000000000000000001',
+        // CampaignService solo acepta esta grafía; sin ella V1 responde missing-beneficiary-pubkey-for-v1.
+        beneficiaryPubKey: '020000000000000000000000000000000000000000000000000000000000000001',
         contractVersion: 'teyolia-covenant-v1',
         description: description.trim() || undefined,
         location: location.trim() || undefined,
@@ -236,7 +253,7 @@ export const CreateCampaignWizard: React.FC = () => {
   };
 
   const confirmActivation = async (txid: string, activePayerAddress?: string) => {
-    if (!campaignId) return;
+    if (!campaignId || !canUseMonetaryCampaign(campaign, capabilities)) return;
     setConfirmingActivation(true);
     setError(null);
     setMessage('Confirmando activación...');
@@ -276,7 +293,7 @@ export const CreateCampaignWizard: React.FC = () => {
   };
 
   const handlePayActivation = async () => {
-    if (!campaignId || payingActivation) return;
+    if (!campaignId || payingActivation || !canUseMonetaryCampaign(campaign, capabilities)) return;
     setPayingActivation(true);
     setError(null);
     setMessage('Preparando activación...');
@@ -358,6 +375,14 @@ export const CreateCampaignWizard: React.FC = () => {
     setError(null);
     await confirmActivation(txid, payerAddress.trim() || undefined);
   };
+
+  if (campaign && isMetadataOnly(campaign)) {
+    return <div><Link to="/">Volver al inicio</Link><MetadataCampaignView campaign={campaign} /></div>;
+  }
+
+  if (campaign && !canUseMonetaryCampaign(campaign, capabilities)) {
+    return <div><Link to="/">Volver al inicio</Link><p>Tipo de registro incompatible; acciones monetarias deshabilitadas.</p></div>;
+  }
 
   const activationFeeLabel = '1,600.00 RMZ';
 
@@ -464,7 +489,7 @@ export const CreateCampaignWizard: React.FC = () => {
             />
           </label>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button type="button" onClick={handlePayActivation} disabled={payingActivation || confirmingActivation}>
+            <button type="button" onClick={handlePayActivation} disabled={payingActivation || confirmingActivation || !canUseMonetaryCampaign(campaign, capabilities)}>
               {payingActivation ? 'Procesando...' : 'Pagar fee de activación'}
             </button>
             <button
@@ -484,7 +509,7 @@ export const CreateCampaignWizard: React.FC = () => {
                 placeholder="txid de 64 caracteres hex"
               />
             </label>
-            <button type="submit" disabled={confirmingActivation || payingActivation}>
+            <button type="submit" disabled={confirmingActivation || payingActivation || !canUseMonetaryCampaign(campaign, capabilities)}>
               {confirmingActivation ? 'Confirmando...' : 'Confirmar activación'}
             </button>
           </form>
@@ -523,4 +548,9 @@ export const CreateCampaignWizard: React.FC = () => {
       <WalletConnectModal />
     </div>
   );
+};
+
+export const CreateCampaignWizard: React.FC = () => {
+  const { monetaryEnabled } = useCampaignCapabilities();
+  return monetaryEnabled ? <LegacyCreateCampaignWizard /> : <CreateCampaign />;
 };

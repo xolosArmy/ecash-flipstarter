@@ -1,3 +1,5 @@
+import type { CampaignMode, CampaignPlanning, MetadataLocation } from '../types/metadata';
+import { isMetadataOnly } from '../utils/campaignMode';
 import type {
   AuditLog,
   BuiltTxResponse,
@@ -50,7 +52,9 @@ function normalizeActivationOutputs(outputs: TokenOutputLike[] | null | undefine
   return normalizeTokenOutputs(outputs, { fallbackProtocol: true });
 }
 
-function normalizeCampaignRecord<T extends { activationOfferOutputs?: TokenOutputLike[] | null }>(campaign: T): T {
+function normalizeCampaignRecord<T extends CampaignMode & { activationOfferOutputs?: TokenOutputLike[] | null }>(campaign: T): T {
+  // Do not synthesize activation artifacts on a metadata response.
+  if (isMetadataOnly(campaign)) return campaign;
   return {
     ...campaign,
     activationOfferOutputs: normalizeActivationOutputs(campaign.activationOfferOutputs),
@@ -60,6 +64,10 @@ function normalizeCampaignRecord<T extends { activationOfferOutputs?: TokenOutpu
 function wait(ms: number): Promise<void> {
   if (ms <= 0) return Promise.resolve();
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+export async function fetchCapabilities(): Promise<CampaignMode> {
+  return jsonFetch<CampaignMode>('/capabilities');
 }
 
 export async function fetchCampaigns(): Promise<ApiCampaignSummary[]> {
@@ -79,56 +87,43 @@ export async function fetchCampaignSummary(id: string): Promise<CampaignSummaryR
   return normalizeCampaignRecord(campaign);
 }
 
-export interface CreateCampaignPayload {
+/** Metadata shape intentionally excludes legacy instrument inputs. */
+export interface CreateMetadataCampaignPayload {
+  name: string;
+  goal: string;
+  expiresAt: string;
+  description?: string;
+  planning?: CampaignPlanning;
+  location?: MetadataLocation;
+  beneficiaryAddress?: never;
+  beneficiaryPubKey?: never;
+  contractVersion?: never;
+}
+
+export interface CreateLegacyCampaignPayload {
   name: string;
   goal: number;
   expiresAt: string;
   beneficiaryAddress: string;
   beneficiaryPubKey?: string;
+  beneficiaryPubkey?: string;
   contractVersion?: 'teyolia-covenant-v1' | 'legacy-placeholder';
   description?: string;
   location?: string;
 }
 
-export interface CreatedCampaign {
+export type CreateCampaignPayload = CreateMetadataCampaignPayload | CreateLegacyCampaignPayload;
+
+export interface CreatedCampaign extends ApiCampaignSummary {
   id: string;
-  name: string;
-  goal: number;
-  expiresAt: string;
-  createdAt?: string;
-  status?:
-    | 'draft'
-    | 'created'
-    | 'pending_fee'
-    | 'pending_verification'
-    | 'fee_invalid'
-    | 'expired'
-    | 'funded'
-    | 'active'
-    | 'paid_out';
-  beneficiaryAddress: string;
-  description?: string;
-  location?: string;
-  activation?: {
-    feeSats: string;
-    feeTxid?: string | null;
-    feePaidAt?: string | null;
-    payerAddress?: string | null;
-    wcOfferId?: string | null;
-  };
-  activationFeeRequired?: number;
-  activationFeePaid?: boolean;
-  activationFeeTxid?: string | null;
-  activationFeePaidAt?: string | null;
-  activationFeeVerificationStatus?: 'none' | 'pending_verification' | 'verified' | 'invalid';
-  activationFeeVerifiedAt?: string | null;
 }
 
 export async function createCampaign(payload: CreateCampaignPayload): Promise<CreatedCampaign> {
-  return jsonFetch<CreatedCampaign>(`/campaigns`, {
+  const campaign = await jsonFetch<CreatedCampaign>(`/campaigns`, {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+  return normalizeCampaignRecord(campaign);
 }
 
 export interface CampaignActivationBuildResponse {
