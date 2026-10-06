@@ -19,6 +19,9 @@ export const MISSING_TONALLI_PUBKEY_MESSAGE =
 export const RECIPIENT_ADDRESS_MISMATCH_LABEL =
   'La dirección no corresponde a la clave pública obtenida de la wallet';
 
+export const DERIVED_COLLECTION_ADDRESS_NOTICE =
+  'La dirección de recaudación ha sido ajustada automáticamente para coincidir con la clave pública firmada por tu Tonalli Wallet';
+
 export const DERIVATION_MISMATCH_MESSAGE =
   'La clave pública de Tonalli no corresponde a la misma derivación de la cuenta conectada. Reconecta Tonalli.';
 

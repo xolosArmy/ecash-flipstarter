@@ -1,7 +1,7 @@
 import { useCampaignCapabilities } from '../context/CampaignCapabilities';
 import { isMetadataOnly } from '../utils/campaignMode';
 import { MetadataBanner } from '../components/MetadataBanner';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { createCampaign, fetchCampaigns, fetchCampaignSummary, fetchGlobalStats } from '../api/client';
 import { AmountDisplay } from '../components/AmountDisplay';
@@ -14,9 +14,8 @@ import { parseXecInputToSats } from '../utils/amount';
 import { getCampaignRouteId } from '../utils/campaignRoute';
 import { useWalletConnect } from '../wallet/useWalletConnect';
 import {
-  RECIPIENT_ADDRESS_MISMATCH_LABEL,
+  DERIVED_COLLECTION_ADDRESS_NOTICE,
   ecashAddressFromPublicKey,
-  recipientAddressMatchesPublicKey,
   resolveTonalliBeneficiaryPubKey,
 } from '../wallet/ecashPublicKey';
 
@@ -65,16 +64,19 @@ export const Home: React.FC = () => {
     loadCampaigns();
   }, [loadCampaigns]);
 
-  useEffect(() => {
-    if (!publicKey) return;
-    let derived = '';
+  const lockedRecipientAddress = useMemo(() => {
+    if (!publicKey) return '';
     try {
-      derived = ecashAddressFromPublicKey(publicKey);
+      return ecashAddressFromPublicKey(publicKey);
     } catch {
-      return;
+      return '';
     }
-    setRecipientAddress((current) => (current.trim() ? current : derived));
   }, [publicKey]);
+
+  useEffect(() => {
+    if (!lockedRecipientAddress) return;
+    setRecipientAddress(lockedRecipientAddress);
+  }, [lockedRecipientAddress]);
 
   useEffect(() => {
     if (monetaryEnabled) fetchGlobalStats().then(setGlobalStats).catch(console.error);
@@ -98,7 +100,7 @@ export const Home: React.FC = () => {
   const resetForm = () => {
     setName('');
     setDescription('');
-    setRecipientAddress('');
+    setRecipientAddress(lockedRecipientAddress);
     setGoal('');
     setExpiresAt('');
   };
@@ -110,20 +112,11 @@ export const Home: React.FC = () => {
 
     const trimmedName = name.trim();
     const trimmedDescription = description.trim();
-    const trimmedRecipientAddress = recipientAddress.trim();
     const parsedGoal = parseXecInputToSats(goal);
     const trimmedExpiresAt = expiresAt.trim();
 
     if (!trimmedName || !trimmedDescription || !trimmedExpiresAt) {
       setFormMessage('Completa todos los campos.');
-      return;
-    }
-    if (
-      publicKey
-      && trimmedRecipientAddress
-      && !recipientAddressMatchesPublicKey(trimmedRecipientAddress, publicKey)
-    ) {
-      setFormMessage(RECIPIENT_ADDRESS_MISMATCH_LABEL);
       return;
     }
     if (parsedGoal.error) {
@@ -152,10 +145,6 @@ export const Home: React.FC = () => {
         requestAccountPublicKey,
       });
       const derivedRecipient = ecashAddressFromPublicKey(beneficiaryPubKey);
-      if (trimmedRecipientAddress && !recipientAddressMatchesPublicKey(trimmedRecipientAddress, beneficiaryPubKey)) {
-        setFormMessage(RECIPIENT_ADDRESS_MISMATCH_LABEL);
-        return;
-      }
       setRecipientAddress(derivedRecipient);
       await createCampaign({
         name: trimmedName,
@@ -204,11 +193,7 @@ export const Home: React.FC = () => {
     return 0;
   });
 
-  const recipientAddressMismatch = Boolean(
-    publicKey
-    && recipientAddress.trim()
-    && !recipientAddressMatchesPublicKey(recipientAddress, publicKey)
-  );
+  const displayedRecipientAddress = lockedRecipientAddress || recipientAddress;
 
   return (
     <div>
@@ -334,10 +319,15 @@ export const Home: React.FC = () => {
             />
             <input
               type="text"
-              value={recipientAddress}
-              onChange={(event) => setRecipientAddress(event.target.value)}
+              value={displayedRecipientAddress}
+              onChange={(event) => {
+                if (lockedRecipientAddress) return;
+                setRecipientAddress(event.target.value);
+              }}
+              readOnly={Boolean(lockedRecipientAddress)}
               placeholder="recipientAddress (ecash:...)"
             />
+            {lockedRecipientAddress && <p>{DERIVED_COLLECTION_ADDRESS_NOTICE}</p>}
             <small>
               {publicKey
                 ? `Clave pública de Tonalli: ${publicKey.slice(0, 8)}…${publicKey.slice(-6)}`
@@ -355,12 +345,8 @@ export const Home: React.FC = () => {
               value={expiresAt}
               onChange={(event) => setExpiresAt(event.target.value)}
             />
-            <button type="submit" disabled={creating || recipientAddressMismatch}>
-              {recipientAddressMismatch
-                ? RECIPIENT_ADDRESS_MISMATCH_LABEL
-                : creating
-                  ? 'Creando...'
-                  : 'Crear campaña'}
+            <button type="submit" disabled={creating}>
+              {creating ? 'Creando...' : 'Crear campaña'}
             </button>
             {formMessage && <p>{formMessage}</p>}
           </form>
