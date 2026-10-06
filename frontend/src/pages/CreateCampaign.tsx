@@ -1,71 +1,53 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { createCampaign } from '../api/client';
-import { parseXecInputToSats } from '../utils/amount';
+import { MetadataBanner } from '../components/MetadataBanner';
+import { useCampaignCapabilities } from '../context/CampaignCapabilities';
+import { isMetadataOnly } from '../utils/campaignMode';
 
-// Smoke steps:
-// 1) Start backend and frontend.
-// 2) Create a campaign with a valid beneficiaryAddress.
-// 3) Confirm it appears in the list and `/campaigns/:id` renders.
+/** Metadata creation never constructs or sends beneficiary/contract/wallet fields. */
 export const CreateCampaign: React.FC = () => {
   const navigate = useNavigate();
+  const { ready, monetaryEnabled } = useCampaignCapabilities();
   const [name, setName] = useState('');
   const [goal, setGoal] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
-  const [beneficiaryAddress, setBeneficiaryAddress] = useState('');
   const [description, setDescription] = useState('');
-  const [location, setLocation] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const submitPending = useRef(false);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!ready || monetaryEnabled || submitPending.current) return;
     setError(null);
-
-    const trimmedName = name.trim();
-    const parsedGoal = parseXecInputToSats(goal);
-    const expiresAtValue = expiresAt.trim();
-    const beneficiaryAddressValue = beneficiaryAddress.trim();
-    const descriptionValue = description.trim();
-    const locationValue = location.trim();
-
-    if (trimmedName.length < 3) {
+    if (name.trim().length < 3) {
       setError('El nombre debe tener al menos 3 caracteres.');
       return;
     }
-    if (parsedGoal.error) {
-      setError(parsedGoal.error);
+    if (!/^[0-9]{1,30}$/.test(goal.trim())) {
+      setError('La meta propuesta debe contener entre 1 y 30 dígitos (0 permitido).');
       return;
     }
-    if (parsedGoal.sats === null || parsedGoal.sats <= 0) {
-      setError('La meta debe ser mayor que cero.');
+    const expiration = new Date(expiresAt);
+    if (!expiresAt || !Number.isFinite(expiration.getTime()) || expiration.getTime() <= Date.now()) {
+      setError('Selecciona una fecha futura válida.');
       return;
     }
-    if (!expiresAtValue) {
-      setError('La fecha de expiración es obligatoria.');
-      return;
-    }
-    if (!beneficiaryAddressValue) {
-      setError('La dirección beneficiaria es obligatoria.');
-      return;
-    }
-
+    submitPending.current = true;
     setSubmitting(true);
     try {
       const campaign = await createCampaign({
-        name: trimmedName,
-        goal: parsedGoal.sats,
-        expiresAt: new Date(expiresAtValue).toISOString(),
-        beneficiaryAddress: beneficiaryAddressValue,
-        contractVersion: 'teyolia-covenant-v1',
-        description: descriptionValue || undefined,
-        location: locationValue || undefined,
+        name: name.trim(), goal: goal.trim(), description: description.trim(),
+        expiresAt: expiration.toISOString(),
       });
+      if (!isMetadataOnly(campaign)) throw new Error('El backend no devolvió un registro de metadata. No se iniciará ninguna acción monetaria.');
       window.dispatchEvent(new Event('campaigns:refresh'));
       navigate(`/campaigns/${campaign.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo crear la campaña.');
+      setError(err instanceof Error ? err.message : 'No se pudo guardar el registro.');
     } finally {
+      submitPending.current = false;
       setSubmitting(false);
     }
   };
@@ -73,53 +55,25 @@ export const CreateCampaign: React.FC = () => {
   return (
     <div>
       <Link to="/">Volver</Link>
-      <h2>Crear campaña</h2>
+      <h2>Crear registro de campaña</h2>
+      <MetadataBanner />
       <form onSubmit={handleSubmit} style={{ display: 'grid', gap: 12, maxWidth: 560 }}>
-        <label style={{ display: 'grid', gap: 4 }}>
-          Nombre
-          <input value={name} onChange={(event) => setName(event.target.value)} />
+        <label style={{ display: 'grid', gap: 4 }}>Nombre
+          <input name="name" value={name} onChange={(event) => setName(event.target.value)} required />
         </label>
-        <label style={{ display: 'grid', gap: 4 }}>
-          Meta (XEC)
-          <input
-            type="text"
-            inputMode="decimal"
-            value={goal}
-            onChange={(event) => setGoal(event.target.value)}
-          />
+        <label style={{ display: 'grid', gap: 4 }}>Meta propuesta (entero, solo planificación)
+          <input name="goal" type="text" inputMode="numeric" value={goal} onChange={(event) => setGoal(event.target.value)} required />
         </label>
-        <label style={{ display: 'grid', gap: 4 }}>
-          Expira el
-          <input
-            type="datetime-local"
-            value={expiresAt}
-            onChange={(event) => setExpiresAt(event.target.value)}
-          />
+        <label style={{ display: 'grid', gap: 4 }}>Fecha propuesta de expiración
+          <input name="expiresAt" type="datetime-local" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} required />
         </label>
-        <label style={{ display: 'grid', gap: 4 }}>
-          Beneficiary Address (ecash:)
-          <input
-            value={beneficiaryAddress}
-            onChange={(event) => setBeneficiaryAddress(event.target.value)}
-            placeholder="ecash:..."
-          />
+        <label style={{ display: 'grid', gap: 4 }}>Descripción
+          <textarea name="description" rows={4} value={description} onChange={(event) => setDescription(event.target.value)} />
         </label>
-        <label style={{ display: 'grid', gap: 4 }}>
-          Descripción (opcional)
-          <textarea
-            rows={4}
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-          />
-        </label>
-        <label style={{ display: 'grid', gap: 4 }}>
-          Ubicación (opcional)
-          <input value={location} onChange={(event) => setLocation(event.target.value)} />
-        </label>
-        <button type="submit" disabled={submitting}>
-          {submitting ? 'Creando...' : 'Crear campaña'}
+        <button type="submit" disabled={!ready || monetaryEnabled || submitting}>
+          {submitting ? 'Guardando...' : 'Guardar metadata'}
         </button>
-        {error && <p style={{ color: '#b00020', margin: 0 }}>{error}</p>}
+        {error && <p role="alert" style={{ color: '#b00020', margin: 0 }}>{error}</p>}
       </form>
     </div>
   );

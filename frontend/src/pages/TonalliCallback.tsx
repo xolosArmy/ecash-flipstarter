@@ -1,3 +1,5 @@
+import { useCampaignCapabilities } from '../context/CampaignCapabilities';
+import { canUseMonetaryCampaign } from '../utils/campaignMode';
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
@@ -26,6 +28,7 @@ function wait(ms: number): Promise<void> {
 
 // Legacy flow (fallback)
 export const TonalliCallback: React.FC = () => {
+  const { capabilities, monetaryEnabled, ready } = useCampaignCapabilities();
   const location = useLocation();
   const [txid, setTxid] = useState<string | null>(null);
   const [campaignId, setCampaignId] = useState<string | null>(null);
@@ -60,6 +63,22 @@ export const TonalliCallback: React.FC = () => {
     setMode(nextMode);
 
     const confirmIfPossible = async () => {
+      if (!ready) return;
+      if (!monetaryEnabled) {
+        setConfirmed(false);
+        setError('Modo no monetario: este callback no confirma pagos ni activa campañas.');
+        return;
+      }
+      // Resolve record kind before any confirm, polling or local payment-state write.
+      if (nextCampaignId) {
+        const current = await fetchCampaignSummary(nextCampaignId);
+        if (cancelled) return;
+        if (!canUseMonetaryCampaign(current, capabilities)) {
+          setConfirmed(false);
+          setError('Registro de metadata: este callback no puede ejecutar acciones monetarias.');
+          return;
+        }
+      }
       if (nextTxid && nextCampaignId) {
         setConfirming(true);
         setConfirmed(false);
@@ -163,7 +182,7 @@ export const TonalliCallback: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [location.hash, location.search, showToast]);
+  }, [location.hash, location.search, showToast, ready, monetaryEnabled, capabilities]);
 
   return (
     <div>
@@ -182,7 +201,7 @@ export const TonalliCallback: React.FC = () => {
         </p>
       )}
       {error && <p style={{ color: '#b00020' }}>{error}</p>}
-      {txid && (
+      {txid && (confirmed || pendingVerification) && (
         <div>
           <p>{pendingVerification ? 'Transaction broadcasted. Waiting for network verification...' : 'Broadcast successful.'}</p>
           <p>TXID: {txid}</p>

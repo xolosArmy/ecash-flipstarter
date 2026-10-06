@@ -1,3 +1,4 @@
+import type { CampaignMode } from './metadata';
 import type { TokenOutput } from './tokenOutput';
 
 export interface Pledge {
@@ -17,12 +18,12 @@ export interface CampaignPledgeSummary {
   pledges: Pledge[];
 }
 
-export interface CampaignSummary {
+export interface CampaignSummary extends CampaignMode {
   id?: string;
   slug?: string;
   campaignId?: string;
   name: string;
-  goal: number;
+  goal: number | string;
   expiresAt: string;
   createdAt?: string;
   beneficiaryAddress?: string;
@@ -44,9 +45,9 @@ export interface CampaignSummary {
   activationTreasuryAddressUsed?: string | null;
   payout?: CampaignPayout;
   treasuryAddressUsed?: string | null;
-  totalPledged: number;
+  totalPledged?: number;
   pendingTotalPledged?: number;
-  pledgeCount: number;
+  pledgeCount?: number;
   status:
     | 'draft'
     | 'created'

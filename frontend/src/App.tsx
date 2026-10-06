@@ -1,3 +1,4 @@
+import { CampaignCapabilitiesProvider, useCampaignCapabilities } from './context/CampaignCapabilities';
 import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate, Link } from 'react-router-dom';
 import { Home } from './pages/Home';
@@ -33,10 +34,11 @@ const AppRoutes: React.FC = () => {
   );
 };
 
-export const App: React.FC = () => {
+const AppContent: React.FC = () => {
+  const { monetaryEnabled, ready, error } = useCampaignCapabilities();
   return (
     <BrowserRouter>
-      <WalletConnectProvider>
+      <WalletConnectProvider enabled={monetaryEnabled}>
         <ToastProvider>
           <div style={{ maxWidth: 920, margin: '0 auto', padding: 16 }} className="teyolia-shell">
             <header className="teyolia-header">
@@ -50,18 +52,19 @@ export const App: React.FC = () => {
               <nav className="teyolia-nav">
                 <Link to="/">Inicio</Link>
                 <Link to="/campaigns/create">Crear campaña</Link>
-                <Link to="/mis-campanas">Mis campañas</Link>
-                <a
+                <Link to="/mis-campanas">{monetaryEnabled ? 'Mis campañas' : 'Registros'}</Link>
+                {monetaryEnabled && <a
                   href="https://cartera.xolosarmy.xyz"
                   target="_blank"
                   rel="noreferrer"
                   className="teyolia-nav-wallet"
                 >
                   Abrir Tonalli
-                </a>
+                </a>}
               </nav>
             </header>
             <main className="teyolia-page">
+              {!ready && <p role="status">{error || 'Verificando modo del backend...'}</p>}
               <AppRoutes />
             </main>
           </div>
@@ -71,3 +74,7 @@ export const App: React.FC = () => {
     </BrowserRouter>
   );
 };
+
+export const App: React.FC = () => (
+  <CampaignCapabilitiesProvider><AppContent /></CampaignCapabilitiesProvider>
+);

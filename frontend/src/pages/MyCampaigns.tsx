@@ -1,3 +1,6 @@
+import { useCampaignCapabilities } from '../context/CampaignCapabilities';
+import { isMetadataOnly } from '../utils/campaignMode';
+import { MetadataBanner } from '../components/MetadataBanner';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchCampaigns, fetchCampaignSummary } from '../api/client';
@@ -15,6 +18,7 @@ function normalizeAddress(value: string | undefined | null): string {
 }
 
 export const MyCampaigns: React.FC = () => {
+  const { monetaryEnabled } = useCampaignCapabilities();
   const [campaigns, setCampaigns] = useState<CampaignSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,10 +29,13 @@ export const MyCampaigns: React.FC = () => {
     setError(null);
     fetchCampaigns()
       .then((items) => {
-        const campaignIds = items
-          .map((item) => getCampaignRouteId(item))
-          .filter((value): value is string => Boolean(value));
-        return Promise.all(campaignIds.map((campaignId) => fetchCampaignSummary(campaignId)));
+        return Promise.all(items.map(async (campaign) => {
+          const routeId = getCampaignRouteId(campaign);
+          if (isMetadataOnly(campaign) || !monetaryEnabled || !routeId) {
+            return { ...campaign, status: campaign.status || 'draft' } as CampaignSummary;
+          }
+          return fetchCampaignSummary(routeId);
+        }));
       })
       .then(setCampaigns)
       .catch((err) => {
@@ -36,7 +43,7 @@ export const MyCampaigns: React.FC = () => {
         setCampaigns([]);
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [monetaryEnabled]);
 
   const normalizedWallet = useMemo(
     () => new Set(addresses.map((address) => normalizeAddress(address))),
@@ -44,7 +51,8 @@ export const MyCampaigns: React.FC = () => {
   );
 
   const filtered = campaigns.filter((campaign) => {
-    if (normalizedWallet.size === 0) return false;
+    if (isMetadataOnly(campaign)) return true;
+    if (!monetaryEnabled || normalizedWallet.size === 0) return false;
     const payer = normalizeAddress(campaign.activation?.payerAddress || '');
     const beneficiary = normalizeAddress(campaign.beneficiaryAddress || '');
     return normalizedWallet.has(payer) || normalizedWallet.has(beneficiary);
@@ -53,14 +61,14 @@ export const MyCampaigns: React.FC = () => {
   return (
     <div>
       <Link to="/">Volver</Link>
-      <h2>Mis campañas</h2>
-      <WalletConnectBar />
-      {!addresses.length && <p>Conecta tu wallet para filtrar campañas.</p>}
+      <h2>{monetaryEnabled ? 'Mis campañas' : 'Registros de metadata'}</h2>
+      {monetaryEnabled ? <><WalletConnectBar />{!addresses.length && <p>Conecta tu wallet para filtrar campañas monetarias.</p>}</> : <><MetadataBanner /><p>Los registros no tienen dirección de propietario. Se muestran todos los registros disponibles.</p></>}
       {loading && <p>Cargando...</p>}
       {error && <p style={{ color: '#b00020' }}>{error}</p>}
       {!loading && !error && addresses.length > 0 && filtered.length === 0 && (
         <p>No hay campañas asociadas a tu dirección conectada.</p>
       )}
+      {!loading && !error && !monetaryEnabled && filtered.length === 0 && <p>No hay registros de metadata.</p>}
       {filtered.map((campaign) => {
         const routeId = getCampaignRouteId(campaign);
         const fallbackKey = `${campaign.name}-${campaign.expiresAt}`;
