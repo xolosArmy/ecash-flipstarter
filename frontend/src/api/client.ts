@@ -105,6 +105,7 @@ export interface CreateLegacyCampaignPayload {
   goal: number;
   expiresAt: string;
   beneficiaryAddress: string;
+  recipientAddress?: string;
   beneficiaryPubKey?: string;
   beneficiaryPubkey?: string;
   contractVersion?: 'teyolia-covenant-v1' | 'legacy-placeholder';

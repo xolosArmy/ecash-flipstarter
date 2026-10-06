@@ -21,7 +21,12 @@ import { ExplorerLink } from '../components/ExplorerLink';
 import { AmountDisplay } from '../components/AmountDisplay';
 import { StatusBadge } from '../components/StatusBadge';
 import { useWalletConnect } from '../wallet/useWalletConnect';
-import { resolveTonalliBeneficiaryPubKey } from '../wallet/ecashPublicKey';
+import {
+  RECIPIENT_ADDRESS_MISMATCH_LABEL,
+  ecashAddressFromPublicKey,
+  recipientAddressMatchesPublicKey,
+  resolveTonalliBeneficiaryPubKey,
+} from '../wallet/ecashPublicKey';
 import { useToast } from '../components/ToastProvider';
 import { parseXecInputToSats } from '../utils/amount';
 import { getPreferredEcashChain, WC_METHOD } from '../walletconnect/client';
@@ -63,7 +68,7 @@ const LegacyCreateCampaignWizard: React.FC = () => {
   const [name, setName] = useState('');
   const [goal, setGoal] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
-  const [beneficiaryAddress, setBeneficiaryAddress] = useState('');
+  const [recipientAddress, setRecipientAddress] = useState('');
   const [description, setDescription] = useState('');
   const [location, setLocation] = useState('');
 
@@ -147,6 +152,17 @@ const LegacyCreateCampaignWizard: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    if (!publicKey) return;
+    let derived = '';
+    try {
+      derived = ecashAddressFromPublicKey(publicKey);
+    } catch {
+      return;
+    }
+    setRecipientAddress((current) => (current.trim() ? current : derived));
+  }, [publicKey]);
+
+  useEffect(() => {
     if (payerAddress.trim()) return;
     if (!addresses.length) return;
     setPayerAddress(normalizeEcashAddress(addresses[0]));
@@ -218,7 +234,7 @@ const LegacyCreateCampaignWizard: React.FC = () => {
 
     const trimmedName = name.trim();
     const parsedGoal = parseXecInputToSats(goal);
-    const trimmedBeneficiary = beneficiaryAddress.trim();
+    const trimmedRecipient = recipientAddress.trim();
     const trimmedExpiresAt = expiresAt.trim();
     if (trimmedName.length < 3) {
       setError('El nombre debe tener al menos 3 caracteres.');
@@ -236,8 +252,12 @@ const LegacyCreateCampaignWizard: React.FC = () => {
       setError('Selecciona una fecha de expiración.');
       return;
     }
-    if (!trimmedBeneficiary) {
-      setError('La dirección beneficiaria es obligatoria.');
+    if (
+      publicKey
+      && trimmedRecipient
+      && !recipientAddressMatchesPublicKey(trimmedRecipient, publicKey)
+    ) {
+      setError(RECIPIENT_ADDRESS_MISMATCH_LABEL);
       return;
     }
 
@@ -249,11 +269,18 @@ const LegacyCreateCampaignWizard: React.FC = () => {
         resetSession,
         requestAccountPublicKey,
       });
+      const derivedRecipient = ecashAddressFromPublicKey(beneficiaryPubKey);
+      if (trimmedRecipient && !recipientAddressMatchesPublicKey(trimmedRecipient, beneficiaryPubKey)) {
+        setError(RECIPIENT_ADDRESS_MISMATCH_LABEL);
+        return;
+      }
+      setRecipientAddress(derivedRecipient);
       const created = await createCampaign({
         name: trimmedName,
         goal: parsedGoal.sats,
         expiresAt: new Date(trimmedExpiresAt).toISOString(),
-        beneficiaryAddress: trimmedBeneficiary,
+        beneficiaryAddress: derivedRecipient,
+        recipientAddress: derivedRecipient,
         beneficiaryPubkey: beneficiaryPubKey,
         // CampaignService solo acepta esta grafía; sin ella V1 responde missing-beneficiary-pubkey-for-v1.
         beneficiaryPubKey,
@@ -402,6 +429,11 @@ const LegacyCreateCampaignWizard: React.FC = () => {
   }
 
   const activationFeeLabel = '1,600.00 RMZ';
+  const recipientAddressMismatch = Boolean(
+    publicKey
+    && recipientAddress.trim()
+    && !recipientAddressMatchesPublicKey(recipientAddress, publicKey)
+  );
 
   return (
     <div>
@@ -462,8 +494,8 @@ const LegacyCreateCampaignWizard: React.FC = () => {
             <label style={{ display: 'grid', gap: 4 }}>
               Dirección beneficiaria (ecash:...)
               <input
-                value={beneficiaryAddress}
-                onChange={(event) => setBeneficiaryAddress(event.target.value)}
+                value={recipientAddress}
+                onChange={(event) => setRecipientAddress(event.target.value)}
                 placeholder="ecash:..."
               />
             </label>
@@ -487,8 +519,12 @@ const LegacyCreateCampaignWizard: React.FC = () => {
               Ubicación (opcional)
               <input value={location} onChange={(event) => setLocation(event.target.value)} />
             </label>
-            <button type="submit" disabled={submittingCreate}>
-              {submittingCreate ? 'Creando...' : 'Crear borrador'}
+            <button type="submit" disabled={submittingCreate || recipientAddressMismatch}>
+              {recipientAddressMismatch
+                ? RECIPIENT_ADDRESS_MISMATCH_LABEL
+                : submittingCreate
+                  ? 'Creando...'
+                  : 'Crear borrador'}
             </button>
           </form>
         </section>
