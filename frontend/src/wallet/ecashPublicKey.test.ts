@@ -1,15 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  ECASH_LIB_DERIVATION_ENGINE,
+  ECASH_STANDARD_899_PROFILE_ID,
+  ECASH_STANDARD_PROFILE_ID,
   MISSING_TONALLI_PUBKEY_MESSAGE,
+  RMZ_DERIVATION_PROFILES,
   SIMULATED_ECASH_PUBKEY,
+  TONALLI_LEGACY_DERIVATION_ENGINE,
+  TONALLI_LEGACY_PROFILE_ID,
   ecashAddressFromPublicKey,
   extractSessionEcashPublicKey,
+  hash160HexOfPublicKey,
+  pubkeyHashOfAddress,
   readDisclosedEcashPublicKey,
   recipientAddressMatchesPublicKey,
   resolveTonalliBeneficiaryPubKey,
+  selectAccountPublicKey,
 } from './ecashPublicKey';
 
 const REAL_PUBKEY = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798';
+const CASHTAB_PUBKEY = '03ee1364cd7af3a9ffbbbd886388776a6f92a7b8dd986f6a8578885e4b856f7bfb';
+const CASHTAB_ADDRESS = 'ecash:qrwzys2q6xq98vwz0kjn6ulu5m6yljr5fyc909kalg';
+const CASHTAB_HASH160 = 'dc224140d18053b1c27da53d73fca6f44fc87449';
 
 describe('ecashAddressFromPublicKey', () => {
   it('derives the eCash CashAddr from the hash160 of a compressed public key', () => {
@@ -35,6 +47,79 @@ describe('ecashAddressFromPublicKey', () => {
       'ecash:qzklee2022djz48rcdsmhclh6swmqc6hzuqf9vutqh',
       publicKey,
     )).toBe(false);
+  });
+});
+
+describe('RMZWallet derivation profiles', () => {
+  it('registers legacy 899, standard 899 and Cashtab 1899', () => {
+    expect(RMZ_DERIVATION_PROFILES[TONALLI_LEGACY_PROFILE_ID]).toMatchObject({
+      coinType: 899,
+      engine: TONALLI_LEGACY_DERIVATION_ENGINE,
+      basePath: "m/44'/899'/0'",
+    });
+    expect(RMZ_DERIVATION_PROFILES[ECASH_STANDARD_899_PROFILE_ID]).toMatchObject({
+      coinType: 899,
+      engine: ECASH_LIB_DERIVATION_ENGINE,
+      basePath: "m/44'/899'/0'",
+    });
+    expect(RMZ_DERIVATION_PROFILES[ECASH_STANDARD_PROFILE_ID]).toMatchObject({
+      coinType: 1899,
+      engine: ECASH_LIB_DERIVATION_ENGINE,
+      basePath: "m/44'/1899'/0'",
+    });
+    expect(hash160HexOfPublicKey(CASHTAB_PUBKEY)).toBe(CASHTAB_HASH160);
+    expect(pubkeyHashOfAddress(CASHTAB_ADDRESS)).toBe(CASHTAB_HASH160);
+    expect(ecashAddressFromPublicKey(CASHTAB_PUBKEY)).toBe(CASHTAB_ADDRESS);
+  });
+
+  it('keeps the public key whose hash160 matches the active account', () => {
+    expect(extractSessionEcashPublicKey({
+      sessionProperties: {
+        publicKey: REAL_PUBKEY,
+        derivationProfile: TONALLI_LEGACY_PROFILE_ID,
+        hdPath: "m/44'/899'/0'/0/0",
+      },
+      namespaces: {
+        ecash: {
+          accounts: [{
+            address: CASHTAB_ADDRESS,
+            pubkey: CASHTAB_PUBKEY,
+            derivationProfile: ECASH_STANDARD_PROFILE_ID,
+            hdPath: "m/44'/1899'/0'/0/0",
+          }],
+        },
+      },
+    })).toBe(CASHTAB_PUBKEY);
+  });
+
+  it('drops a key from another profile when the active address decodes', () => {
+    expect(extractSessionEcashPublicKey({
+      sessionProperties: {
+        publicKey: REAL_PUBKEY,
+        derivationProfile: ECASH_STANDARD_899_PROFILE_ID,
+        hdPath: "m/44'/899'/0'/0/0",
+      },
+      namespaces: {
+        ecash: { accounts: [`ecash:1:${CASHTAB_ADDRESS.slice('ecash:'.length)}`] },
+      },
+    })).toBeNull();
+  });
+
+  it('uses an injected identity only when it hashes to the active account', () => {
+    const session = {
+      namespaces: { ecash: { accounts: [`ecash:1:${CASHTAB_ADDRESS.slice('ecash:'.length)}`] } },
+    };
+    expect(selectAccountPublicKey([CASHTAB_ADDRESS], session, {
+      publicKey: CASHTAB_PUBKEY,
+      address: CASHTAB_ADDRESS,
+      derivationProfile: ECASH_STANDARD_PROFILE_ID,
+      hdPath: "m/44'/1899'/0'/0/0",
+    })).toBe(CASHTAB_PUBKEY);
+    expect(selectAccountPublicKey([CASHTAB_ADDRESS], session, {
+      publicKey: REAL_PUBKEY,
+      derivationProfile: TONALLI_LEGACY_PROFILE_ID,
+      hdPath: "m/44'/899'/0'/0/0",
+    })).toBeNull();
   });
 });
 
@@ -83,6 +168,23 @@ describe('readDisclosedEcashPublicKey', () => {
       pubkey: REAL_PUBKEY,
       address: 'qpm2qsznhks23z7629mms6s4cwef74vcwvy22gdx6a',
     }, ['ecash:qpm2qsznhks23z7629mms6s4cwef74vcwvy22gdx6a']).publicKey).toBe(REAL_PUBKEY);
+  });
+
+  it('rejects a disclosed key whose hash160 is not the active account', () => {
+    expect(readDisclosedEcashPublicKey({
+      publicKey: REAL_PUBKEY,
+      address: CASHTAB_ADDRESS,
+    }, [CASHTAB_ADDRESS])).toEqual({
+      publicKey: REAL_PUBKEY,
+      addressMatches: false,
+    });
+    expect(readDisclosedEcashPublicKey({
+      publicKey: CASHTAB_PUBKEY,
+      address: CASHTAB_ADDRESS.slice('ecash:'.length),
+    }, [CASHTAB_ADDRESS])).toEqual({
+      publicKey: CASHTAB_PUBKEY,
+      addressMatches: true,
+    });
   });
 
   it('rejects a disclosed key for a different account', () => {

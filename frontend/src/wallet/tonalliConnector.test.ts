@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { decodeBase64Url, signAndBroadcastWithTonalli } from './tonalliConnector';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { decodeBase64Url, readTonalliAccountIdentity, signAndBroadcastWithTonalli } from './tonalliConnector';
 
 const ORIGIN = 'http://localhost:5174';
 const TXID_ONE = 'a'.repeat(64);
@@ -125,5 +125,38 @@ describe('signAndBroadcastWithTonalli', () => {
     const result = await promise;
     expect(result.ok).toBe(true);
     expect(result.txid).toBe(TXID_TWO);
+  });
+});
+
+const CASHTAB_PUBKEY = '03ee1364cd7af3a9ffbbbd886388776a6f92a7b8dd986f6a8578885e4b856f7bfb';
+const CASHTAB_ADDRESS = 'ecash:qrwzys2q6xq98vwz0kjn6ulu5m6yljr5fyc909kalg';
+
+describe('readTonalliAccountIdentity', () => {
+  afterEach(() => {
+    delete (window as unknown as { tonalliWallet?: unknown }).tonalliWallet;
+  });
+
+  it('reads the synchronous key and profile without calling a prompt', () => {
+    const signAndBroadcast = vi.fn();
+    (window as unknown as { tonalliWallet?: unknown }).tonalliWallet = {
+      address: CASHTAB_ADDRESS,
+      getPublicKey: () => CASHTAB_PUBKEY.toUpperCase(),
+      getAddress: () => Promise.resolve('ecash:qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq'),
+      getActiveDerivationProfile: () => ({ id: 'ecash-standard-1899' }),
+      hdPath: "m/44'/1899'/0'/0/0",
+      signAndBroadcast,
+    };
+
+    expect(readTonalliAccountIdentity()).toEqual({
+      address: CASHTAB_ADDRESS,
+      publicKey: CASHTAB_PUBKEY,
+      derivationProfile: 'ecash-standard-1899',
+      hdPath: "m/44'/1899'/0'/0/0",
+    });
+    expect(signAndBroadcast).not.toHaveBeenCalled();
+  });
+
+  it('returns null when Tonalli is not injected', () => {
+    expect(readTonalliAccountIdentity()).toBeNull();
   });
 });

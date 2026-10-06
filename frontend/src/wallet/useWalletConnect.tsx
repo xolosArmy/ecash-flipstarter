@@ -25,10 +25,13 @@ import {
 } from '../walletconnect/client';
 import {
   buildTonalliPublicKeyRequest,
-  extractSessionEcashPublicKey,
+  DERIVATION_MISMATCH_MESSAGE,
   normalizeCompressedSecp256k1PublicKey,
+  publicKeyMatchesAccounts,
   readDisclosedEcashPublicKey,
+  selectAccountPublicKey,
 } from './ecashPublicKey';
+import { readTonalliAccountIdentity } from './tonalliConnector';
 import {
   normalizeAlpTokenPayload,
   normalizeTokenOutputs,
@@ -41,7 +44,7 @@ type WalletConnectState = {
   connected: boolean;
   topic: string | null;
   addresses: string[];
-  /** Clave pública comprimida secp256k1 de la cuenta ecash: conectada. */
+  /** Clave pública comprimida del mismo perfil que la cuenta ecash: activa. */
   publicKey: string | null;
   lastTxid: string | null;
   uri: string | null;
@@ -188,7 +191,9 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode; enable
     const nextAddresses = getEcashAccounts(session ?? undefined);
     addressesRef.current = nextAddresses;
     setAddresses(nextAddresses);
-    rememberPublicKey(options?.acceptPublicKey === false ? null : extractSessionEcashPublicKey(session));
+    rememberPublicKey(options?.acceptPublicKey === false
+      ? null
+      : selectAccountPublicKey(nextAddresses, session, readTonalliAccountIdentity()));
   };
 
   const resetState = () => {
@@ -360,7 +365,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode; enable
     addressesRef.current = next;
     setAddresses(next);
     if (session && isEcashSessionValid(session)) {
-      rememberPublicKey(extractSessionEcashPublicKey(session));
+      rememberPublicKey(selectAccountPublicKey(next, session, readTonalliAccountIdentity()));
     }
     return next;
   };
@@ -382,7 +387,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode; enable
     setAddresses(accounts);
     const disclosed = readDisclosedEcashPublicKey(result, accounts);
     if (disclosed.publicKey && !disclosed.addressMatches) {
-      throw new Error('La clave pública de Tonalli no corresponde a la cuenta conectada. Reconecta Tonalli.');
+      throw new Error(DERIVATION_MISMATCH_MESSAGE);
     }
     if (!disclosed.publicKey) return null;
     rememberPublicKey(disclosed.publicKey);
@@ -390,8 +395,15 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode; enable
   };
 
   const requestAccountPublicKey = async (): Promise<string | null> => {
+    const injected = readTonalliAccountIdentity();
+    const boundAccounts = addressesRef.current.length > 0
+      ? addressesRef.current
+      : injected?.address
+        ? [injected.address]
+        : [];
     const cached = normalizeCompressedSecp256k1PublicKey(publicKeyRef.current);
-    if (cached) return cached;
+    if (cached && publicKeyMatchesAccounts(cached, boundAccounts)) return cached;
+    if (cached) rememberPublicKey(null);
 
     const activeTopic = topicRef.current;
     const client = clientRef.current;
@@ -399,7 +411,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode; enable
     const session = safelyGetSession(client, activeTopic);
     if (!session || !isEcashSessionValid(session)) return null;
 
-    const fromSession = extractSessionEcashPublicKey(session);
+    const fromSession = selectAccountPublicKey(getEcashAccounts(session), session, injected);
     if (fromSession) {
       rememberPublicKey(fromSession);
       return fromSession;
