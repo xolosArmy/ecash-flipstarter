@@ -136,7 +136,7 @@ export function normalizeWalletConnectOutputs(outputs: TokenOutputLike[]): Walle
   return normalized;
 }
 
-export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const WalletConnectProvider: React.FC<{ children: React.ReactNode; enabled?: boolean }> = ({ children, enabled = false }) => {
   const clientRef = useRef<SignClient | null>(null);
   const [signClient, setSignClient] = useState<SignClient | null>(null);
   const [connected, setConnected] = useState(false);
@@ -146,10 +146,10 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
   const [uri, setUri] = useState<string | null>(null);
   const [status, setStatus] = useState<WalletConnectState['status']>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [projectIdMissing, setProjectIdMissing] = useState(!isWalletConnectConfigured());
+  const [projectIdMissing, setProjectIdMissing] = useState(enabled && !isWalletConnectConfigured());
 
   useEffect(() => {
-    if (import.meta.env.DEV) {
+    if (enabled && import.meta.env.DEV) {
       console.info('[wc] projectId present?', Boolean(getWalletConnectProjectId()));
     }
   }, []);
@@ -178,13 +178,14 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   useEffect(() => {
-    if (import.meta.env.DEV) {
+    if (enabled && import.meta.env.DEV) {
       const namespaces = getRequestedNamespaces();
       console.debug('[walletconnect] proposed namespaces', namespaces);
     }
   }, []);
 
   useEffect(() => {
+    if (!enabled) return;
     let active = true;
     const setup = async () => {
       if (!isWalletConnectConfigured()) {
@@ -255,9 +256,10 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
       active = false;
       if (cleanup) cleanup();
     };
-  }, []);
+  }, [enabled]);
 
   const connect = async (): Promise<SessionTypes.Struct | null> => {
+    if (!enabled) throw new Error('Modo no monetario: WalletConnect deshabilitado.');
     setError(null);
     setStatus('connecting');
     try {
@@ -328,6 +330,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
       userPrompt?: string;
     }
   ) => {
+    if (!enabled) throw new Error('Modo no monetario: firma deshabilitada.');
     if (!topic) throw new Error('No WalletConnect session.');
 
     const client = clientRef.current;
@@ -365,6 +368,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
     message?: string;
     userPrompt?: string;
   }): Promise<{ txid: string }> => {
+    if (!enabled) throw new Error('Modo no monetario: firma deshabilitada.');
     const activeTopic = topic;
     const client = clientRef.current;
     if (!activeTopic || !client) {
@@ -419,6 +423,7 @@ export const WalletConnectProvider: React.FC<{ children: React.ReactNode }> = ({
     rawHex: string;
     userPrompt?: string;
   }): Promise<{ txid: string }> => {
+    if (!enabled) throw new Error('Modo no monetario: firma deshabilitada.');
     const activeTopic = topic;
     const client = clientRef.current;
     if (!activeTopic || !client) {

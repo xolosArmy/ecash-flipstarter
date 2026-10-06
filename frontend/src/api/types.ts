@@ -1,3 +1,4 @@
+import type { CampaignMode, MetadataLocation } from '../types/metadata';
 import type { TokenOutput } from '../types/tokenOutput';
 
 export interface CovenantRef {
@@ -9,12 +10,12 @@ export interface CovenantRef {
   campaignAddress?: string;
 }
 
-export interface CampaignSummary {
+export interface CampaignSummary extends CampaignMode {
   id?: string;
   slug?: string;
   campaignId?: string;
   name: string;
-  goal: number;
+  goal: number | string;
   expiresAt: string;
   createdAt?: string;
   status?:
@@ -31,7 +32,7 @@ export interface CampaignSummary {
   campaignAddress?: string;
   covenantAddress?: string;
   description?: string;
-  location?: string;
+  location?: MetadataLocation | string;
   activation?: {
     feeSats: string;
     feeTxid?: string | null;

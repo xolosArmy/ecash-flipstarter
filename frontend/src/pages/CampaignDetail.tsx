@@ -1,3 +1,6 @@
+import { useCampaignCapabilities } from '../context/CampaignCapabilities';
+import { canUseMonetaryCampaign, isMetadataOnly } from '../utils/campaignMode';
+import { MetadataCampaignView } from '../components/MetadataCampaignView';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
 import {
@@ -40,6 +43,7 @@ function requireEcashChainId(session: unknown): string {
 }
 
 export const CampaignDetail: React.FC = () => {
+  const { capabilities } = useCampaignCapabilities();
   const { id } = useParams();
   const location = useLocation();
   const [campaign, setCampaign] = useState<CampaignSummary | null>(null);
@@ -68,6 +72,7 @@ export const CampaignDetail: React.FC = () => {
     addresses,
   } = useWalletConnect();
   const { showToast } = useToast();
+  const monetaryAllowed = canUseMonetaryCampaign(campaign, capabilities);
 
   const loadMessages = useCallback((campaignId: string) => {
     fetchCampaignPledges(campaignId)
@@ -107,14 +112,18 @@ export const CampaignDetail: React.FC = () => {
     if (!id) return;
     setCampaignError('');
     fetchCampaignSummary(id)
-      .then((summary) => setCampaign(summary))
+      .then((summary) => {
+        setCampaign(summary);
+        if (canUseMonetaryCampaign(summary, capabilities)) {
+          loadMessages(id);
+          loadHistory(id);
+        } else { setMessages([]); setPledges([]); setHistory([]); }
+      })
       .catch(() => {
         setCampaign(null);
         setCampaignError('No se pudo cargar la campaña.');
       });
-    loadMessages(id);
-    loadHistory(id);
-  }, [id, loadHistory, loadMessages]);
+  }, [id, loadHistory, loadMessages, capabilities]);
 
 
   useEffect(() => {
@@ -130,21 +139,27 @@ export const CampaignDetail: React.FC = () => {
       setCampaign(null);
       return;
     }
+    let cancelled = false;
     setLoadingCampaign(true);
     setCampaignError('');
     fetchCampaignSummary(id)
       .then((summary) => {
+        if (cancelled) return;
         setCampaign(summary);
         setLoadingCampaign(false);
+        if (canUseMonetaryCampaign(summary, capabilities)) {
+          loadMessages(id);
+          loadHistory(id);
+        } else { setMessages([]); setPledges([]); setHistory([]); }
       })
       .catch(() => {
+        if (cancelled) return;
         setCampaign(null);
         setCampaignError('No se pudo cargar la campaña.');
         setLoadingCampaign(false);
       });
-    loadMessages(id);
-    loadHistory(id);
-  }, [id, loadHistory, loadMessages]);
+    return () => { cancelled = true; };
+  }, [id, loadHistory, loadMessages, capabilities]);
 
   useEffect(() => {
     if (!id) return undefined;
@@ -185,7 +200,7 @@ export const CampaignDetail: React.FC = () => {
 
   useEffect(() => {
     if (!id) return undefined;
-    if (campaign?.status !== 'pending_verification') return undefined;
+    if (!monetaryAllowed || campaign?.status !== 'pending_verification') return undefined;
     const txid = campaign.activationFeeTxid || campaign.activation?.feeTxid;
     if (!txid) return undefined;
 
@@ -222,13 +237,13 @@ export const CampaignDetail: React.FC = () => {
     return () => {
       window.clearInterval(interval);
     };
-  }, [campaign?.activation?.feeTxid, campaign?.activationFeeTxid, campaign?.status, id]);
+  }, [campaign?.activation?.feeTxid, campaign?.activationFeeTxid, campaign?.status, id, monetaryAllowed]);
 
   const description = campaign?.description ?? '';
   const renderedDescription = useMemo(() => parseLimitedMarkdown(description), [description]);
 
   const activateCampaign = async () => {
-    if (!id || activating) return;
+    if (!id || activating || !monetaryAllowed) return;
     setActivationError('');
     setActivationMessage('');
     setActivating(true);
@@ -330,7 +345,7 @@ export const CampaignDetail: React.FC = () => {
   };
 
   const payoutCampaign = async () => {
-    if (!id || payingOut) return;
+    if (!id || payingOut || !monetaryAllowed) return;
     setPayoutError('');
     setPayoutMessage('');
     setPayingOut(true);
@@ -359,7 +374,7 @@ export const CampaignDetail: React.FC = () => {
   };
 
   const executeRefund = async () => {
-    if (!id || refunding) return;
+    if (!id || refunding || !monetaryAllowed) return;
     setRefundError('');
     setRefundMessage('');
     setRefunding(true);
@@ -396,9 +411,12 @@ export const CampaignDetail: React.FC = () => {
   if (campaignError) return <p>{campaignError}</p>;
   if (!campaign) return <p>Campaign not found.</p>;
 
+  if (isMetadataOnly(campaign)) return <div><Link to="/">Volver</Link><MetadataCampaignView campaign={campaign} /></div>;
+  if (!monetaryAllowed) return <div><Link to="/">Volver</Link><h1>{campaign.name}</h1><p>Acciones monetarias deshabilitadas hasta verificar capacidades compatibles del backend.</p></div>;
+
   const percent =
-    campaign.goal > 0
-      ? Math.min(100, Math.round((campaign.totalPledged / campaign.goal) * 100))
+    Number(campaign.goal) > 0
+      ? Math.min(100, Math.round(((campaign.totalPledged ?? 0) / Number(campaign.goal)) * 100))
       : 0;
   const activationFeeTxid = campaign.activationFeeTxid || campaign.activation?.feeTxid || null;
   const pendingTotalPledged = campaign.pendingTotalPledged ?? 0;
