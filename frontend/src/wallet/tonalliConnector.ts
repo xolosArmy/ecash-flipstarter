@@ -1,3 +1,4 @@
+import { normalizeCompressedSecp256k1PublicKey } from './ecashPublicKey';
 import { resolveTonalliBridgeConfig } from './tonalliBridge';
 
 export type TonalliSignRequest = {
@@ -197,4 +198,76 @@ export function getTonalliWallet(): WalletProvider | null {
       return { txid: result.txid };
     },
   };
+}
+
+export type TonalliAccountIdentity = {
+  address: string | null;
+  publicKey: string | null;
+  derivationProfile: string | null;
+  hdPath: string | null;
+};
+
+function isThenable(value: unknown): boolean {
+  return Boolean(value)
+    && (typeof value === 'object' || typeof value === 'function')
+    && typeof (value as { then?: unknown }).then === 'function';
+}
+
+/** Lee un campo o un método síncrono. Una promesa se descarta para no abrir un prompt. */
+function readSyncMember(target: Record<string, unknown>, name: string): unknown {
+  const current = target[name];
+  if (typeof current !== 'function') return current;
+  try {
+    const result = (current as () => unknown).call(target);
+    if (isThenable(result)) return undefined;
+    return result;
+  } catch {
+    return undefined;
+  }
+}
+
+function asCleanString(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function asProfileId(value: unknown): string | null {
+  const direct = asCleanString(value);
+  if (direct) return direct;
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  return asCleanString(record.id)
+    ?? asCleanString(record.profileId)
+    ?? asCleanString(record.derivationProfile);
+}
+
+/**
+ * Identidad que Tonalli expone en la página sin pedir firma.
+ * La clave solo se usa después si su hash160 coincide con la cuenta activa.
+ */
+export function readTonalliAccountIdentity(): TonalliAccountIdentity | null {
+  if (typeof window === 'undefined') return null;
+  const holder = (window as { tonalliWallet?: unknown }).tonalliWallet;
+  if (!holder || typeof holder !== 'object') return null;
+  const wallet = holder as Record<string, unknown>;
+
+  const address = asCleanString(wallet.address)
+    ?? asCleanString(wallet.xecAddress)
+    ?? asCleanString(readSyncMember(wallet, 'getAddress'));
+  const publicKey = normalizeCompressedSecp256k1PublicKey(wallet.publicKey)
+    ?? normalizeCompressedSecp256k1PublicKey(wallet.pubkey)
+    ?? normalizeCompressedSecp256k1PublicKey(readSyncMember(wallet, 'getPublicKey'))
+    ?? normalizeCompressedSecp256k1PublicKey(readSyncMember(wallet, 'getPubkey'));
+  const derivationProfile = asProfileId(wallet.derivationProfile)
+    ?? asProfileId(wallet.profileId)
+    ?? asProfileId(readSyncMember(wallet, 'getActiveDerivationProfile'))
+    ?? asProfileId(readSyncMember(wallet, 'getDerivationProfile'));
+  const hdPath = asCleanString(wallet.hdPath)
+    ?? asCleanString(wallet.derivationPath)
+    ?? asCleanString(readSyncMember(wallet, 'getDerivationPath'))
+    ?? asCleanString(readSyncMember(wallet, 'getHdPath'));
+
+  if (!address && !publicKey && !derivationProfile && !hdPath) return null;
+  return { address, publicKey, derivationProfile, hdPath };
 }
