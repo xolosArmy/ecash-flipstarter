@@ -1,0 +1,52 @@
+# CI del proceso x402 aislado (TA-2, PR-1). Solo pruebas: sin secretos, sin despliegue,
+# sin release, sin caché y sin artefactos (Auditor P-4, P4-L1 y P4-L7).
+# El ci.yml legacy (Node 20) no se modifica.
+name: x402-ta2
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  x402-teyolia:
+    name: x402-teyolia (Node 22.13.1)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: x402-teyolia
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '22.13.1'
+          package-manager-cache: false
+
+      - name: Verificar Node >= 22.13 (engines)
+        run: node -e "const [a,b]=process.versions.node.split('.').map(Number); if (a!==22||b<13) { console.error('Se requiere Node 22.13+; hay ' + process.version); process.exit(1); } console.log(process.version)"
+
+      - name: Instalar (lockfile propio, sin scripts)
+        run: npm ci --ignore-scripts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Pruebas T-10 / T-11 / kill switch (node:test)
+        run: npm test
+
+      - name: T-11 sobre dist/main.js (check-graph)
+        run: npm run check:graph
+
+      - name: Inventario 239f9dc sin cambios (inventory:check)
+        run: npm run inventory:check
