@@ -1,0 +1,28 @@
+{
+  "name": "x402-teyolia",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Proceso x402 aislado de Teyolia (TA-2, PR-1): esqueleto sin llaves, sin fondos, kill switch apagado por defecto.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "dist/main.js",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "node --test --test-reporter=spec test/*.test.mjs",
+    "check:graph": "node scripts/check-graph.mjs dist/main.js",
+    "inventory": "node scripts/inventory.mjs --write",
+    "inventory:check": "node scripts/inventory.mjs --check"
+  },
+  "dependencies": {
+    "express": "5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6",
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3"
+  }
+}

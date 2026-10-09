@@ -1,0 +1,57 @@
+{
+  "_doc": "Lista negativa de T-11b (OB-03 mínima de INF-044 §3.4 + columna «Falta» de INF-045 §4.3 + símbolos de firma). Vive en scripts/, fuera de src/ y dist/ (Auditor P4-L2), para que T-11b no se encuentre a sí misma en el bundle.",
+  "identifiers": [
+    "FinalizeService",
+    "AutoPayoutService",
+    "RefundService",
+    "CampaignService",
+    "covenantV1Integration",
+    "resolvePrivateKeyFromEnv",
+    "txBuilder",
+    "broadcastRawTx",
+    "broadcastTx",
+    "scriptCompiler",
+    "SQLiteStore",
+    "ecashClient",
+    "monetaryContractPolicy",
+    "serializeUnsignedTx",
+    "computeEcashSigHash",
+    "signHybridPayoutTx",
+    "loadDotEnv",
+    "derivePrivKeyFromSeed"
+  ],
+  "paths": [
+    "config/ecash",
+    "config/env",
+    "store/db",
+    "db/SQLiteStore",
+    "blockchain/ecashClient",
+    "blockchain/txBuilder",
+    "covenants/scriptCompiler",
+    "backend/src",
+    "refund.routes",
+    "finalize.routes",
+    "campaigns.routes",
+    "broadcast.routes",
+    "pledge.routes",
+    "walletconnect.routes"
+  ],
+  "patterns": [
+    "[A-Za-z0-9_-]+\\.routes(?![A-Za-z0-9_])"
+  ],
+  "ownBuiltins": [
+    "node:fs",
+    "node:path",
+    "node:process",
+    "node:url"
+  ],
+  "opaqueLoaders": [
+    "createRequire",
+    "eval(",
+    "new Function",
+    "process.binding",
+    "process.dlopen",
+    "module.constructor",
+    "require("
+  ]
+}
