@@ -9,7 +9,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, test } from 'node:test';
 import { pathToFileURL } from 'node:url';
-import { PACKAGE_ROOT, baselineEnv, http, launch, makeTmp } from './helpers.mjs';
+import { CODEGEN_FLAG, PACKAGE_ROOT, baselineEnv, http, launch, makeTmp } from './helpers.mjs';
 
 const dist = (f) => pathToFileURL(path.join(PACKAGE_ROOT, 'dist', f)).href;
 const { GrantDb } = await import(dist('grant-db.js'));
@@ -66,15 +66,15 @@ describe('PR-3 grant (INF-042 §8.2): T-01, T-04, contexto y restricciones', () 
       assert.deepEqual(g.recordGrant(s), { ok: false, httpStatus: 500, code: 'X402_CONTEXT_MISSING' });
     }
   });
-  test('esquema: UNIQUE en invoice_hash, settled_txid y nonce; state solo GRANTED; delivery_count 0 (se cuenta en PR-4)', () => {
+  test('esquema: UNIQUE en invoice_hash, settled_txid y nonce; state solo GRANTED; delivery_count solo reentregas (PR-4, D-4)', () => {
     const db = new DatabaseSync(path.join(dir, 'grant.sqlite'), { readOnly: true });
     const idx = db.prepare("SELECT name FROM pragma_index_list('x402_access_grant') WHERE \"unique\" = 1").all().length;
     assert.ok(idx >= 3);
     const cols = db.prepare("SELECT name FROM pragma_table_info('x402_access_grant')").all().map((r) => r.name);
     assert.deepEqual(cols, ['grant_id', 'invoice_hash', 'settled_txid', 'nonce', 'resource_hash', 'amount_sats', 'pay_to', 'state', 'created_at', 'first_delivery_at', 'delivery_count']);
-    assert.ok(db.prepare('SELECT delivery_count FROM x402_access_grant').all().every((r) => r.delivery_count === 0));
+    assert.ok(db.prepare('SELECT delivery_count FROM x402_access_grant').all().every((r) => r.delivery_count === 0 || r.delivery_count === 1), 'T-01 hizo una reentrega');
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => r.name);
-    assert.deepEqual(tables, ['x402_access_grant', 'x402_reconciliation'], 'sin ledger, contadores ni outbox (§8.2 paso 4)');
+    assert.deepEqual(tables, ['x402_access_grant', 'x402_late_payment_review', 'x402_reconciliation'], 'sin ledger, contadores ni outbox (§8.2 paso 4); PR-4 añade la revisión de pagos tardíos (M1/L-01)');
     db.close();
   });
   test('GrantDb rechaza rutas volátiles (:memory:, file:)', () => {
@@ -105,11 +105,13 @@ describe('PR-3 store + grant: T-02, T-03 (fallo entre commitPaid y el grant)', (
     const rec = synthInvoice();
     await store.issue(rec);
     const paid = await store.commitPaid(rec.invoiceHash, tx('8'), 9_000);
-    const src = paidSource([{ invoiceHash: rec.invoiceHash, settledTxid: tx('8'), settledAt: paid.record.settledAt }]);
-    assert.deepEqual(g.reconcile(src, 3_600), [], 'dentro de la ventana todavía no se marca');
-    now = 9_000 + 3_600;
-    assert.deepEqual(g.reconcile(src, 3_600), [rec.invoiceHash]);
-    assert.deepEqual(g.reconcile(src, 3_600), [], 'idempotente');
+    const src = paidSource([{ invoiceHash: rec.invoiceHash, settledTxid: tx('8'), settledAt: paid.record.settledAt, issuedAt: rec.issuedAt, expiresAt: rec.expiresAt }]);
+    // PR-4 (D-2 (a)) + Codex #66: umbral por factura = vida persistida (1000 s) + margen (300) = 1300 s.
+    now = 9_000 + 1_299;
+    assert.deepEqual(g.reconcile(src), [], 'dentro de la ventana todavía no se marca');
+    now = 9_000 + 1_300;
+    assert.deepEqual(g.reconcile(src), [rec.invoiceHash]);
+    assert.deepEqual(g.reconcile(src), [], 'idempotente');
     assert.equal(g.reconciliationState(rec.invoiceHash), 'RECONCILIATION_REQUIRED');
     assert.deepEqual(g.recordGrant({ ok: true, invoice: paid.record }), { ok: false, httpStatus: 409, code: 'RECONCILIATION_REQUIRED' });
     assert.equal((await store.getByInvoiceHash(rec.invoiceHash)).state, 'PAID', 'el store x402 no cambia');
@@ -119,9 +121,12 @@ describe('PR-3 store + grant: T-02, T-03 (fallo entre commitPaid y el grant)', (
     await store.issue(rec);
     const paid = await store.commitPaid(rec.invoiceHash, tx('9'), 1);
     assert.equal(g.recordGrant({ ok: true, invoice: paid.record }).status, 'GRANTED');
-    assert.deepEqual(g.reconcile(paidSource([{ invoiceHash: rec.invoiceHash, settledTxid: tx('9'), settledAt: 1 }]), 0), []);
+    assert.deepEqual(g.reconcile(paidSource([{ invoiceHash: rec.invoiceHash, settledTxid: tx('9'), settledAt: 1, issuedAt: rec.issuedAt, expiresAt: rec.expiresAt }])), []);
     assert.equal(g.reconciliationState(rec.invoiceHash), null);
-    assert.throws(() => g.reconcile(paidSource([]), -1), RangeError);
+    // Codex #66: la vida persistida inválida falla cerrada (antes: expirySeconds inválido -> RangeError).
+    for (const d of [-1, 0, 1.5, 3601, undefined]) {
+      assert.throws(() => g.reconcile(paidSource([{ invoiceHash: hex('e'), settledTxid: tx('e'), settledAt: 1, issuedAt: 1, expiresAt: d === undefined ? undefined : 1 + d }])), (e) => e?.name === 'ReconcileDataError');
+    }
   });
   test('el store es el de @x402-xec/core/sqlite (durable) y cierra con checkpoint; shutdown idempotente', () => {
     assert.equal(store.isDurable, true);
@@ -156,7 +161,7 @@ describe('PR-3 T-05: dos procesos Teyolia sobre la misma DB del grant', () => {
     new GrantDb(db).shutdown();
     const s = settlementOf(synthInvoice(), tx('e'));
     const json = JSON.stringify(s, (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
-    const [a, b] = await Promise.all([runner(db, json, 40), runner(db, json, 40)]);
+    const [a, b] = await Promise.all([runner(db, json, 5), runner(db, json, 5)]); // PR-4 (D-4): 1 entrega + 9 reentregas <= 10
     const all = [...a, ...b];
     assert.equal(all.filter((x) => x.startsWith('GRANTED:')).length, 1);
     assert.equal(new Set(all.map((x) => x.split(':')[1])).size, 1, 'mismo grant_id en todas las respuestas');
@@ -203,7 +208,7 @@ describe('PR-3 T-18 y configuración de persistencia (fail-closed)', () => {
     writeFileSync(path.join(legacy, 'campaigns.db'), 'LEGACY');
     const before = statSync(path.join(legacy, 'campaigns.db'));
     const env = { ...baselineEnv(home), TEYOLIA_X402_ENABLED: 'true', ...ok(home), TEYOLIA_X402_GRANT_DB_PATH: path.join(legacy, 'grant.sqlite') };
-    const r = await launch({ env, cwd: freshDir('x402-cwd-') });
+    const r = await launch({ env, cwd: freshDir('x402-cwd-'), execArgv: [CODEGEN_FLAG] });
     if (r.started) { await r.stop(); assert.fail('arrancó'); }
     assert.equal(r.code, 78);
     assert.match(r.stderr, /persistencia rechazada: TEYOLIA_X402_GRANT_DB_PATH \(el directorio contiene la DB legacy campaigns\.db \(T-18\)\)/);
@@ -226,7 +231,7 @@ describe('PR-3 T-07 (TR-01): cierre ordenado con el store x402 abierto', () => {
   const start = async () => {
     const home = freshDir('x402-pr3-t07-');
     const env = { ...baselineEnv(home), TEYOLIA_X402_ENABLED: 'true', TEYOLIA_X402_STORE_PATH: path.join(home, 'store.sqlite'), TEYOLIA_X402_GRANT_DB_PATH: path.join(home, 'grant.sqlite') };
-    const r = await launch({ env, cwd: freshDir('x402-cwd-') });
+    const r = await launch({ env, cwd: freshDir('x402-cwd-'), execArgv: [CODEGEN_FLAG] });
     assert.equal(r.started, true, r.stderr);
     return { home, env, r };
   };
@@ -241,7 +246,7 @@ describe('PR-3 T-07 (TR-01): cierre ordenado con el store x402 abierto', () => {
       const exit = await new Promise((res) => { r.child.once('exit', (code, signal) => res({ code, signal })); r.child.kill(sig); });
       assert.deepEqual(exit, { code: 0, signal: null });
       assert.deepEqual(side(home), []);
-      const again = await launch({ env, cwd: freshDir('x402-cwd-') });
+      const again = await launch({ env, cwd: freshDir('x402-cwd-'), execArgv: [CODEGEN_FLAG] });
       assert.equal(again.started, true, again.stderr);
       await again.stop();
       const db = new DatabaseSync(path.join(home, 'store.sqlite'), { readOnly: true });

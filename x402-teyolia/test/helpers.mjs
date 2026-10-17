@@ -12,6 +12,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PACKAGE_ROOT = path.resolve(HERE, '..');
 export const MAIN = path.join(PACKAGE_ROOT, 'dist', 'main.js');
 export const FIXTURES = path.join(HERE, 'fixtures');
+/** PR-4 (D-1): flag obligatorio con el kill switch ON. */
+export const CODEGEN_FLAG = '--disallow-code-generation-from-strings';
 
 const created = new Set();
 process.on('exit', () => {

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { after, before, describe, test } from 'node:test';
-import { PACKAGE_ROOT, baselineEnv, http, launch, makeTmp, rejections } from './helpers.mjs';
+import { CODEGEN_FLAG, PACKAGE_ROOT, baselineEnv, http, launch, makeTmp, rejections } from './helpers.mjs';
 
 let tmp;
 before(() => { tmp = makeTmp('x402-ks-'); });
@@ -12,10 +12,10 @@ after(() => tmp.cleanup());
 
 const policy = await import(pathToFileURL(path.join(PACKAGE_ROOT, 'dist', 'policy.js')).href);
 
-async function withServer(extraEnv, fn) {
+async function withServer(extraEnv, fn, execArgv = []) {
   const env = { ...baselineEnv(tmp.dir), ...extraEnv };
   for (const [k, v] of Object.entries(env)) if (v === undefined) delete env[k];
-  const r = await launch({ env, cwd: makeTmp('x402-cwd-').dir });
+  const r = await launch({ env, cwd: makeTmp('x402-cwd-').dir, execArgv });
   assert.equal(r.started, true, `stderr=${r.stderr}`);
   try {
     await fn(r.port, r);
@@ -48,7 +48,7 @@ describe('kill switch: ON solo con NODE_ENV=test (P4-L5 adelantado)', () => {
       assert.deepEqual(d.json, { error: 'TEYOLIA_X402_NOT_IMPLEMENTED' });
       const h = await http(port, 'GET', '/teyolia-x402/health');
       assert.equal(h.json.x402Enabled, true);
-    });
+    }, [CODEGEN_FLAG]); // PR-4 (D-1)
   });
   for (const nodeEnv of [undefined, 'production', 'development']) {
     test(`'true' + NODE_ENV=${String(nodeEnv)} -> no arranca`, async () => {

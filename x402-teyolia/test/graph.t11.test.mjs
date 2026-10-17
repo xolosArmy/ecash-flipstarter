@@ -224,7 +224,7 @@ describe('T-11a endurecido (PR-2 commit 1)', () => {
     symlinkSync(PACKAGE_ROOT, link, 'dir');
     const g = buildGraph(path.join(link, 'dist', 'main.js'));
     assert.deepEqual(checkT11a(g), []);
-    assert.equal([...g.nodes.values()].filter((n) => n.kind === 'own').length, 8); // PR-3: + grant-db, invoice-store, persistence-config
+    assert.equal([...g.nodes.values()].filter((n) => n.kind === 'own').length, 12); // PR-3: + grant-db, invoice-store, persistence-config; PR-4: + sqlite-wal, reconcile, issuance-limit, trust-proxy
   });
   test('n7: excepción que ya no coincide (SHA-256 o línea) -> falla', () => {
     const [e] = loadExceptions();

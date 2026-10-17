@@ -20,6 +20,7 @@ export type RejectionRule =
   | 'LISTEN'
   | 'ENV_FILE'
   | 'EXEC_ARGV'
+  | 'CODEGEN'
   | 'CWD';
 
 export interface Rejection {
@@ -54,6 +55,23 @@ const FORBIDDEN_EXEC_FLAGS: readonly string[] = [
   '--experimental-preload',
 ];
 const FORBIDDEN_EXEC_PREFIXES: readonly string[] = ['--inspect', '--debug'];
+
+/**
+ * Condición D-1 y P2b-L3 (PR-4): con el kill switch ON el proceso tiene que arrancar con
+ * `--disallow-code-generation-from-strings`, de modo que V8 rechaza eval, `new Function`,
+ * `Function(...)` y equivalentes ANTES de que se cargue nada de fase 2 (zod `allowsEval`/`Doc.compile`,
+ * get-intrinsic `%eval%`/`getEvalledConstructor`, function-bind, depd). Se exige la forma exacta
+ * del flag y que ningún otro argumento mencione la generación de código (p. ej. su negación
+ * `--no-disallow-code-generation-from-strings` o variantes con `_`). Opción alternativa
+ * documentada y NO elegida: `--jitless`, que solo desactiva el JIT y WebAssembly y no bloquea la
+ * generación de código desde cadenas. NODE_OPTIONS ya está prohibido (regla B).
+ */
+export const CODEGEN_FLAG = '--disallow-code-generation-from-strings';
+
+function codegenBlocked(execArgv: readonly string[]): boolean {
+  const mentions = execArgv.filter((a) => /code[-_]generation/i.test(a));
+  return mentions.length === 1 && mentions[0] === CODEGEN_FLAG;
+}
 
 export function isRuleANegative(name: string): boolean {
   if (NEGATIVE.has(name)) return true;
@@ -137,6 +155,9 @@ export function evaluateStartup(input: GuardInput): GuardResult {
   }
   if (input.env['TEYOLIA_X402_ENABLED'] === 'true' && nodeEnv !== 'test') {
     reject('TEYOLIA_X402_ENABLED', 'KILL_SWITCH');
+  }
+  if (input.env['TEYOLIA_X402_ENABLED'] === 'true' && !codegenBlocked(input.execArgv)) {
+    reject('CODEGEN_FLAG', 'CODEGEN');
   }
   const listen = input.env['TEYOLIA_X402_LISTEN'];
   if (listen === undefined || !isListenValid(listen)) {
