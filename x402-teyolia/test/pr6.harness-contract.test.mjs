@@ -1,6 +1,7 @@
 // PR-6 — contrato del arnés de aislamiento y del paso de CI (D-P6-1 (a), PM6-05; Fernando
-// 2026-10-24 09:21 CDMX; P6C-01 endurecido por la decisión de 11:28). Corre SIN privilegios dentro de `npm test`: el arnés falla cerrado si no
-// es root, y el workflow mantiene un único paso de aislamiento dentro del job requerido.
+// 2026-10-24 09:21 CDMX; P6C-01 endurecido por la decisión de 11:28). Corre SIN privilegios dentro
+// de `npm test`: el arnés falla cerrado si no es root, y el workflow mantiene un único paso de
+// aislamiento dentro del job requerido; la guarda es test/isolation/workflow-guard.mjs.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -56,7 +57,8 @@ describe('workflow x402-ta2.yml (D-P6-1 (a); P6C-01)', () => {
   });
   // Controles negativos en memoria: cada regresión de P6C-01 es detectada (y el original pasa arriba).
   const ISO_HARNESS = 'NFT_BIN=/usr/sbin/nft bash test/isolation/harness.sh';
-  const mutate = (from, to) => { assert.ok(WORKFLOW.includes(from), `ancla ausente: ${from}`); return WORKFLOW.replace(from, to); };
+  // Si el ancla no existe (workflow ya alterado), el caso falla en su propio test, no al declarar la suite.
+  const mutate = (from, to) => (WORKFLOW.includes(from) ? WORKFLOW.replace(from, to) : null);
   const cases = [
     ['|| true en el arnés', mutate(ISO_HARNESS, `${ISO_HARNESS} || true`), ['or-true', 'paso-de-aislamiento-exacto']],
     ['|| true en otro paso', mutate('run: npm test\n', 'run: npm test || true\n'), ['or-true']],
@@ -77,6 +79,7 @@ describe('workflow x402-ta2.yml (D-P6-1 (a); P6C-01)', () => {
   ];
   for (const [name, text, expected] of cases) {
     test(`control negativo P6C-01: ${name}`, () => {
+      assert.ok(text !== null, `${name}: ancla ausente en el workflow`);
       const got = workflowViolations(text);
       for (const e of expected) assert.ok(got.some((g) => g === e || g.startsWith(e)), `${name}: esperado ${e}; obtenido ${JSON.stringify(got)}`);
     });
