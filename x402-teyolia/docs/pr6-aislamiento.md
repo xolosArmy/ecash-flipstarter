@@ -154,19 +154,25 @@ bloqueadores del PASS de TA-2 y pasan a ser **precondiciones obligatorias del ga
 (decisión de Fernando, 2026-10-24 09:21 CDMX). PR1-L4 y P3-L3 pasan a **PR-6a** (hardening con
 `src/`, manifiesto nuevo). CoS registra la errata; PR-8 recoge esta lista con PT5-11, C66-A/B y P3-L2.
 
-Dueños (PROPUESTA para PR-8): **diseño** Xolo Arquitecto · **ejecución en host** operador del
-despliegue (Fernando) · **verificación** Xolo Auditor · **registro** CoS.
+**Dueños por rol — ACEPTADOS** por Fernando (decisión 2026-10-24 11:28 CDMX, `t120u`, sobre el
+dictamen del Auditor, P6C-07): **diseño** Xolo Arquitecto · **ejecución en host** operador del
+despliegue (Fernando) · **verificación** Xolo Auditor · **registro** CoS. Rige para G3-01..08: el
+Arquitecto diseña la unit/lanzador/política y el procedimiento de prueba; el operador lo ejecuta en
+el host y entrega la evidencia sanitizada; el Auditor emite el dictamen; CoS registra el cierre en el
+log de decisiones y en la matriz. Una precondición solo **cierra** cuando se cumplen a la vez su
+criterio objetivo, el dictamen PASS del Auditor sobre esa evidencia y el registro de CoS; el gate de
+TA-3 no abre con ninguna G3 abierta. PR-8 consolida esta tabla (con PT5-11, C66-A/B y P3-L2).
 
-| ID | Origen | Criterio verificable de cierre (antes de TA-3) |
-| :---- | :---- | :---- |
-| **G3-01** | P-4/L3 | Unit systemd propia `teyolia-x402.service` con `User=`/`Group=` propios y entorno solo por `Environment=`/`EnvironmentFile=` del propio servicio; `systemctl show -p Environment,PassEnvironment,UnsetEnvironment` sin `NODE_OPTIONS` ni ninguna `NODE_*` no autorizada, `PassEnvironment` vacío; prueba en el host: con `NODE_OPTIONS=--import …` en el entorno del gestor, el marcador de precarga NO se ejecuta |
-| **G3-02** | PR1-L1 (`ExecStart`) | `ExecStart` fijo y absoluto: `/<ruta node verificada por sha256> --disallow-code-generation-from-strings [--permission --allow-fs-read=<raíz del paquete>] <raíz>/dist/main.js`, sin argumentos variables; endurecido (`NoNewPrivileges=yes`, `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`, `ReadWritePaths=` solo el directorio OB-05); `systemd-analyze security` registrado; T-11d repetido en el host |
-| **G3-03** | P-4/L6 | Si el entorno de systemd (`INVOCATION_ID`, `JOURNAL_STREAM`, …) exige ampliar la allowlist: decisión registrada de Fernando y **re-auditoría** de la allowlist; si no se amplía, evidencia de que el proceso arranca bajo la unit sin esas variables (falla cerrado en caso contrario) |
-| **G3-04** | PR4-D (b) | Decisión registrada: exigir `--disallow-code-generation-from-strings` también con OFF en el `ExecStart`, o justificar no hacerlo; prueba en el host |
-| **G3-05** | P3-L4 | Directorio OB-05 fijado en disco persistente (no tmpfs) para store/grant; `findmnt` del directorio registrado; si se rechaza tmpfs en código, va con su propia re-auditoría |
-| **G3-06** | PM6-01 (iv) | Barrera real contra IPC abstracto y D-Bus: `RestrictAddressFamilies=AF_INET AF_INET6` (sin `AF_UNIX`) o `PrivateNetwork=`/netns propio equivalente, con la Chronik alcanzable solo por la política de egreso; prueba en el host: conexión a un socket abstracto sintético desde el uid x402 = fallo |
-| **G3-07** | T-12 en host (EN-2, INF-045 §6.2) | Política de egreso del host para el uid x402 (solo la Chronik configurada) y repetición de T-12/T-13 en mx2 por el operador |
-| **G3-08** | barrera de filesystem/launcher; PM6-09/PM6-10 | Lanzador con raíz propia: el uid x402 no puede leer el release, el estado, `campaigns.db` ni el `.env` legacy en el host real (T-13 en mx2, por el operador); la unit legacy (típicamente 0644) y `systemctl show -p Environment` (legible por D-Bus) no contienen secretos (los secretos solo en `EnvironmentFile=` 0600); `/proc/<pid legacy>/environ` ilegible para el uid x402; cualquier ampliación del allowlist o del `--allow-fs-read` exige re-auditoría |
+| ID | Origen | Rol accountable (cierre) | Evidencia requerida | Criterio objetivo de cierre (antes de TA-3) |
+| :---- | :---- | :---- | :---- | :---- |
+| **G3-01** | P-4/L3 | Ejecución: operador (Fernando); diseño de la unit: Arquitecto | Unit `teyolia-x402.service` versionada (sha256); salida de `systemctl show teyolia-x402 -p User,Group,Environment,EnvironmentFile,PassEnvironment,UnsetEnvironment`; log de la prueba de precarga con el marcador | Unit propia con `User=`/`Group=` propios (≠ legacy) y entorno solo por `Environment=`/`EnvironmentFile=` del servicio; `PassEnvironment` vacío; ninguna `NODE_OPTIONS` ni `NODE_*` no autorizada; con `NODE_OPTIONS=--import <marcador>` en el entorno del gestor, el marcador **no** se ejecuta (0 líneas del marcador) |
+| **G3-02** | PR1-L1 (`ExecStart`) | Ejecución: operador; diseño: Arquitecto | `ExecStart` literal de `systemctl cat`; sha256 del binario node; `systemd-analyze security teyolia-x402` completo; log de T-11d repetido en el host | `ExecStart` absoluto y sin variables: `/<node verificado por sha256> --disallow-code-generation-from-strings [--permission --allow-fs-read=<raíz>] <raíz>/dist/main.js`; `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`, `ReadWritePaths=` solo el directorio OB-05; T-11d PASS en el host |
+| **G3-03** | P-4/L6 | Decisión: Fernando; diseño: Arquitecto; re-auditoría: Auditor | Lista de variables que systemd inyecta (`INVOCATION_ID`, `JOURNAL_STREAM`, …) observada bajo la unit; log de arranque; si hay ampliación, fila del log de decisiones y dictamen de re-auditoría | O bien el proceso arranca bajo la unit **sin** ampliar la allowlist (y falla cerrado si no), o bien la ampliación está registrada por Fernando **y** re-auditada con PASS |
+| **G3-04** | PR4-D (b) | Decisión: Fernando; diseño: Arquitecto | Fila del log de decisiones; `ExecStart` resultante; prueba en el host (OFF con y sin la bandera) | Decisión registrada (exigir `--disallow-code-generation-from-strings` también con OFF, o justificación de no hacerlo) y prueba en el host coherente con ella |
+| **G3-05** | P3-L4 | Ejecución: operador; diseño: Arquitecto | `findmnt -T <dir OB-05>`; permisos/propietario del directorio; rutas de store/grant en la unit | Directorio OB-05 en disco persistente (FSTYPE ≠ tmpfs), propiedad del uid x402, 0700; store y grant dentro de él; si se rechaza tmpfs en código, ese cambio lleva su propia re-auditoría |
+| **G3-06** | PM6-01 (iv); P6C-05 | Ejecución: operador; diseño: Arquitecto | Unit (`RestrictAddressFamilies=` o netns); log de la **pareja**: (a) conexión a un socket abstracto sintético y al bus D-Bus del sistema desde el uid x402 bajo la unit; (b) consulta a la Chronik configurada desde el mismo proceso | **Negativo:** (a) falla (`EAFNOSUPPORT`/`ECONNREFUSED`, 0 accepts en el oyente sintético). **Positivo:** (b) la Chronik responde. Barrera aceptada: `RestrictAddressFamilies=AF_INET AF_INET6` (sin `AF_UNIX`) **o** un netns propio con egreso solo hacia la Chronik. `PrivateNetwork=yes` **no** basta como solución única: deja solo `lo` y corta también la Chronik (P6C-05). Mount/pid ns, DAC y `meta skuid` no aíslan el espacio abstracto |
+| **G3-07** | T-12/T-13 en host (EN-2; fila **T-13** de la matriz INF-045 —«la comprobación en mx2 es evidencia sanitizada del operador, fuera de TA-2»— y **TA2-R6**; corrige la cita «INF-045 §6.2», P6C-07) | Ejecución: operador; verificación: Auditor | Política de egreso del host (reglas sanitizadas) para el uid x402; log de T-12/T-13 repetidos en mx2 con contadores | Desde el uid x402 solo la Chronik configurada es alcanzable (resto rechazado y contado); T-12/T-13 PASS en mx2; ruleset del resto del host sin cambios no previstos |
+| **G3-08** | barrera fs/launcher; PM6-09/PM6-10 | Ejecución: operador; diseño del lanzador: Arquitecto | Log de T-13 en mx2 (lecturas del uid x402 sobre release, estado, `campaigns.db`, `.env` legacy y `/proc/<pid legacy>/environ`); `systemctl show <legacy> -p Environment`; permisos de la unit legacy | Todas esas lecturas = `EACCES`; la unit legacy y `systemctl show -p Environment` sin secretos (secretos solo en `EnvironmentFile=` 0600); cualquier ampliación del allowlist o del `--allow-fs-read` con re-auditoría PASS |
 
 ## 5 Residuales de PR-6
 
@@ -177,5 +183,14 @@ despliegue (Fernando) · **verificación** Xolo Auditor · **registro** CoS.
   inicia. Los servidores del proceso (listen en loopback) no son egreso.
 * **CI no ejecutado todavía:** el paso se probó en local (Debian 13, nft 1.1.3, kernel 6.12); en
   `ubuntu-24.04` con nft 1.0.9 se verá en el primer run tras el push autorizado.
+* **P6C-04 (registrado como residual):** la capa dinámica de T-12d es por ventana temporal y por
+  oyente: un egreso diferido más allá de la ventana o un intento IPC hacia un socket sin oyente
+  sintético no lo ve el arnés; sí lo ve T-06a (estático, mismo job). La cobertura es la combinación
+  estática + dinámica.
+* **P6C-03 (corregido en `test/`):** el driver mata a sus hijos y sale con 1 ante cualquier error, con
+  vigía global de 300 s.
+* **P6C-06:** el comentario de `src/main.ts` l.4–7 se corrige en PR-6a (regla «sin cambios en src/»).
+* **P6C-10:** la reproducción local de nft 1.0.9 es híbrida (binario y libnftables de Ubuntu sobre
+  libnftnl/libmnl/kernel de Debian); no sustituye al run en `ubuntu-24.04`.
 * **PR1-L1 (parte de evidencia `--permission`):** no se incluye; solo tiene valor si el `ExecStart`
   adopta `--permission` (G3-02), y se verifica allí. T-11d sigue cubriendo la fuga de resolución.
