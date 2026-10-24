@@ -11,14 +11,15 @@ fail() { echo "arnés PR-6: FALLA: $*" >&2; exit 1; }
 
 [ "$(id -u)" = "0" ] || fail "requiere root (sudo). No se omite: fail-closed"
 PKG="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-NODE_BIN="${NODE_BIN:-$(command -v node || true)}"
-NFT_BIN="${NFT_BIN:-$(command -v nft || true)}"
-[ -n "$NFT_BIN" ] || NFT_BIN=/usr/sbin/nft
-[ -x "$NODE_BIN" ] || fail "node no encontrado (NODE_BIN)"
+# P6C-01: sin «|| true»; los valores por defecto se resuelven con pruebas explícitas.
+NODE_BIN="${NODE_BIN:-}"
+if [ -z "$NODE_BIN" ] && command -v node >/dev/null; then NODE_BIN="$(command -v node)"; fi
+NFT_BIN="${NFT_BIN:-/usr/sbin/nft}"
+[ -n "$NODE_BIN" ] && [ -x "$NODE_BIN" ] || fail "node no encontrado (NODE_BIN)"
 [ -x "$NFT_BIN" ] || fail "nft no disponible (NFT_BIN); instala la versión fijada (ver README §PR-6)"
 for t in unshare setpriv ip sha256sum; do command -v "$t" >/dev/null || fail "$t no disponible"; done
 [ -f "$PKG/dist/main.js" ] && [ -f "$PKG/dist/build-info.json" ] || fail "falta dist/ (build previo como usuario sin privilegios)"
-[ -d "$PKG/node_modules" ] || fail "falta node_modules (npm ci previo como usuario sin privilegios)"
+[ -d "$PKG/node_modules" ] || fail "falta node_modules (instalación previa de dependencias como usuario sin privilegios)"
 
 echo "# arnés PR-6 (T-12/T-12e/T-13/T-06) — $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "# nft --version: $("$NFT_BIN" --version)"
@@ -41,7 +42,7 @@ unshare --mount --net --pid --fork --mount-proc --propagation private \
   env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 \
   ISO_STAGE="$STAGE" ISO_PKG="$PKG" ISO_NODE_SRC="$NODE_BIN" ISO_NFT="$NFT_BIN" \
   bash "$PKG/test/isolation/inner.sh" || rc=$?
-rmdir "$STAGE" 2>/dev/null || true
+if [ -d "$STAGE" ]; then rmdir "$STAGE"; fi
 
 HOST_RULESET_AFTER="$("$NFT_BIN" list ruleset 2>&1 | sha256sum | cut -d' ' -f1)"
 PASSWD_AFTER="$(sha256sum /etc/passwd /etc/group | sha256sum | cut -d' ' -f1)"

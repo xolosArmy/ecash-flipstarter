@@ -34,14 +34,27 @@
 * **CI** (D-P6-1 (a)): un único paso final dentro del job requerido «x402-teyolia (Node 22.13.1)»,
   sin workflow ni check nuevos, sin `continue-on-error`, `runs-on: ubuntu-24.04`,
   `permissions: contents: read`, `persist-credentials: false`, sin secretos.
-* **Dependencia (PM6-05), reproducible por el Auditor:** `nftables` fijado a
-  `1.0.9-1ubuntu0.1` (noble-updates, amd64; `.deb` sha256
-  `d648859fccde3c17b8b9b89993427564f91f394a39306db1f67bd5ea3ac42c6e`, índice
-  `archive.ubuntu.com/ubuntu/dists/noble-updates/main/binary-amd64/Packages.gz`; en noble base:
-  `1.0.9-1build1`, sha256 `539a2dec3d0178fdb401f7fc351c57b1bddb08024ede5555e33c49d944fa04eb`). Si
-  `dpkg-query` no da exactamente la versión fijada, el paso la instala con apt y vuelve a verificar;
-  si no coincide, falla. En local (Debian 13): `nftables 1.1.3-1` (`.deb` sha256
-  `2ddfa61baaf3a76e2c499db9e521ba6affb226f85af0b6fef739f346ac5f0c39`). Reproducción:
+* **Dependencia (PM6-05; P6C-02, Fernando 2026-10-24 11:28), reproducible por el Auditor:** `nftables`
+  fijado por **SHA-256** a `1.0.9-1ubuntu0.1` (noble-updates, amd64) con `test/isolation/nft-pin.sh install`
+  y el lock `test/isolation/nft-pin.lock` (formato `<sha256> <paquete> <versión> <arch>
+  <requerido|dependencia>`). Requeridos: `nftables` `d648859fccde3c17b8b9b89993427564f91f394a39306db1f67bd5ea3ac42c6e`
+  y `libnftables1` `fcaee001747a6adaa0cd9337fef437b3aa7a7a6d5246b62fbd4784d3d6a5009e`. Dependencias
+  fijadas por si la imagen no las trae (solo se descargan si `apt-get install -s` las planifica):
+  `libnftnl11 1.2.6-2build1`, `libjansson4 2.14-2build2`, `libmnl0 1.0.5-2build1`,
+  `libedit2 3.1-20230828-1build1`, `libxtables12 1.8.10-3ubuntu2`, `libgmp10 2:6.3.0+dfsg-2ubuntu6.1`
+  (hashes en el lock; todos verificados contra `dists/noble{,-updates}/main/binary-amd64/Packages.gz`).
+  Secuencia (usuario del runner; `sudo` solo en `apt-get update` y `dpkg -i`): `apt-get install -s
+  --no-install-recommends nftables=<v> libnftables1=<v>` → cada `Inst` del plan debe estar en el lock
+  con esa versión exacta (si apt ofrece otra versión o un paquete no fijado: **falla**) → `apt-get
+  download` sin privilegios → `verify`: cada `.deb` con `Package/Version/Architecture` (leídos con
+  `dpkg-deb -f`) esperado y sha256 igual al del lock, sin `.deb` faltantes ni sobrantes → `sudo dpkg -i`
+  de exactamente esos ficheros → `dpkg-query` = versión fijada → registra `nft --version` y el sha256 del
+  lock. **Sin fallback** (ni `|| true`, ni apt sin versión, ni `--allow-downgrades`); la guarda P6C-01
+  lo impone sobre el script. Pruebas offline: `test/pr6.nft-pin.test.mjs` (.deb sintéticos: hash
+  erróneo, byte alterado, faltante, sobrante, plan con paquete no fijado o versión distinta, lock mal
+  formado). En local (Debian 13): `nftables 1.1.3-1` (`.deb` sha256
+  `2ddfa61baaf3a76e2c499db9e521ba6affb226f85af0b6fef739f346ac5f0c39`); la variante 1.0.9 se reproduce
+  con los `.deb` oficiales extraídos (sin instalarlos en el host). Reproducción:
   `npm ci --ignore-scripts && npm run build` (usuario normal) y
   `sudo env NODE_BIN="$(command -v node)" NFT_BIN=/usr/sbin/nft bash test/isolation/harness.sh`.
   **Alternativa declarada (no activa):** `iptables -m owner --uid-owner 2002 -m conntrack --ctstate
@@ -49,7 +62,45 @@
   cadena OUTPUT del netns desechable; solo se adoptaría con nueva revisión del Auditor.
 * **Pruebas sin privilegios** (en `npm test`, corren en los cuatro escenarios bwrap):
   `test/pr6.t06.isolation.test.mjs`, `test/pr6.t12e.legacy-ipc.test.mjs`,
-  `test/pr6.harness-contract.test.mjs`.
+  `test/pr6.harness-contract.test.mjs` (con la guarda `test/isolation/workflow-guard.mjs`, P6C-01) y
+  `test/pr6.nft-pin.test.mjs` (P6C-02).
+* **Guarda del contrato (P6C-01):** `workflowViolations()` exige un único job con el nombre del check
+  requerido, `on:` exactamente `push:`/`pull_request:` sin filtros, ningún `if:` (job o paso),
+  `continue-on-error`, `shell:`, `needs:`/`strategy:`/`matrix`/`container`, ni secretos; en los `run:`
+  prohíbe `|| true`/`|| :`/`|| exit 0`/`|| echo`, `||` seguido de espacio, `set +e`/`set +o`, `exit 0`,
+  `true`/`:` sueltos, `su`/`doas`/`pkexec`/`runuser`/`nsenter`/`chroot`, todo `sudo` salvo la línea
+  exacta del arnés y cualquier `npm`/`npx`/`yarn`/`pnpm`/`corepack` en una línea con `sudo`/`su`; el paso de
+  aislamiento debe ser **textualmente** el fijado y el último. `rootScriptViolations()` exige en
+  `harness.sh`, `inner.sh` y `nft-pin.sh` `set -euo pipefail` y las mismas prohibiciones, y en todos los
+  scripts que corren como root (también `driver.mjs`, `probe.mjs`, `listener.mjs`,
+  `app-adapters.mjs`) ningún token de gestor de paquetes de Node; en `nft-pin.sh`, apt solo como
+  `update`, `install -s` y `download`, y `sudo` solo en sus dos órdenes fijas. Cada regla tiene control
+  negativo en memoria en `npm test` y mutación archivada (MW-xx/MP-xx).
+
+### 1.1 Runbook: actualizar la versión fijada de nftables y sus hashes (P6C-02)
+
+Lo ejecuta Xolo Arquitecto en un PR propio (nunca en el paso de CI); lo verifica Xolo Auditor; nada
+se instala en el host.
+
+1. Elegir la versión destino en `https://archive.ubuntu.com/ubuntu/dists/noble-updates/main/binary-amd64/Packages.gz`
+   (y `noble-security`/`noble` si aplica). Descargar ese índice y su `InRelease`; comprobar la firma
+   (`gpgv --keyring /usr/share/keyrings/ubuntu-archive-keyring.gpg InRelease`) y que el sha256 de
+   `Packages.gz` coincide con el listado en `InRelease`.
+2. Para `nftables` y `libnftables1` (misma versión) y cada dependencia que `apt-get install -s
+   --no-install-recommends` planifique en un `ubuntu-24.04` limpio (contenedor o VM desechable), tomar
+   `Package`, `Version`, `Architecture` y `SHA256` del índice.
+3. Descargar cada `.deb` (`apt-get download pkg=ver` o `curl` del `Filename` del índice) y comprobar
+   `sha256sum` = `SHA256` del índice y `dpkg-deb -f <deb> Package Version Architecture` = lock.
+4. Editar `test/isolation/nft-pin.lock` (una línea por paquete; `requerido` para `nftables` y
+   `libnftables1`, `dependencia` para el resto) y actualizar en este documento §1 y en el contrato
+   (`test/pr6.nft-pin.test.mjs`, aserción del lock real) los hashes y la versión.
+5. `bash test/isolation/nft-pin.sh verify <dir con los .deb> <plan apt-get -s>` → «verificación OK»;
+   con un hash alterado en una copia del lock (`X402_NFT_PIN_LOCK=…`) → debe fallar.
+6. Ejecutar el arnés con la nueva versión (en local, con los `.deb` extraídos y `NFT_BIN` apuntando a
+   un envoltorio) y `npm test`; registrar `nft --version`, los sha256 y el log en la evidencia del PR.
+7. El Auditor revisa los hashes contra el índice firmado; el cambio entra solo con su dictamen. Si en
+   CI la versión fijada desaparece del espejo, el paso **falla** (no hay fallback): se repite este
+   runbook, no se relaja el lock.
 
 ## 2 Matriz revisada
 
