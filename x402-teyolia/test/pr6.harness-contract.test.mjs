@@ -10,7 +10,8 @@ import path from 'node:path';
 import { describe, test } from 'node:test';
 import { PACKAGE_ROOT } from './helpers.mjs';
 import { REPO_ROOT } from '../scripts/inventory.mjs';
-import { rootScriptViolations, workflowViolations } from './isolation/workflow-guard.mjs';
+import { CANON, canonicalForm, rootScriptViolations, workflowViolations } from './isolation/workflow-guard.mjs';
+import { ROOT_VARIANTS, WORKFLOW_VARIANTS } from './isolation/p6d-variants.mjs';
 
 const ISO = path.join(PACKAGE_ROOT, 'test', 'isolation');
 const HARNESS = path.join(ISO, 'harness.sh');
@@ -133,4 +134,30 @@ describe('workflow x402-ta2.yml (D-P6-1 (a); P6C-01)', () => {
     const fv = rootScriptViolations('nft-pin.sh', fb);
     assert.ok(fv.some((x) => x.includes('apt-no-permitido')) && fv.some((x) => x.includes('sudo-no-permitido')), JSON.stringify(fv));
   });
+});
+
+describe('P6D-01: forma canónica del workflow y variantes naturales (dictamen delta f9ea355)', () => {
+  test('el workflow real coincide con la forma canónica permitida', () => {
+    assert.equal(canonicalForm(WORKFLOW), CANON);
+  });
+  test('los comentarios dentro de un bloque run: | NO se descartan (se comparan como contenido)', () => {
+    const t = WORKFLOW.replace('          npm run check:dist\n', '          # x\n          npm run check:dist\n');
+    assert.notEqual(t, WORKFLOW);
+    assert.ok(workflowViolations(t).some((x) => x.startsWith('canon:')));
+  });
+  for (const [name, [from, to, expected]] of Object.entries(WORKFLOW_VARIANTS)) {
+    test(`control negativo ${name}`, () => {
+      assert.ok(WORKFLOW.includes(from), `${name}: ancla ausente`);
+      const got = workflowViolations(WORKFLOW.replace(from, to));
+      for (const e of ['canon:', ...expected]) assert.ok(got.some((g) => g.startsWith(e)), `${name}: esperado ${e}; obtenido ${JSON.stringify(got)}`);
+    });
+  }
+  for (const [name, [file, from, to, expected]] of Object.entries(ROOT_VARIANTS)) {
+    test(`control negativo ${name}`, () => {
+      const orig = read(file);
+      assert.ok(orig.includes(from), `${name}: ancla ausente`);
+      const got = rootScriptViolations(file, orig.replace(from, to));
+      for (const e of expected) assert.ok(got.some((g) => g.startsWith(e)), `${name}: esperado ${e}; obtenido ${JSON.stringify(got)}`);
+    });
+  }
 });

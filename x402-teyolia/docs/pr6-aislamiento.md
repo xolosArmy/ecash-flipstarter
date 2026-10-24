@@ -77,6 +77,32 @@
   `update`, `install -s` y `download`, y `sudo` solo en sus dos órdenes fijas. Cada regla tiene control
   negativo en memoria en `npm test` y mutación archivada (MW-xx/MP-xx).
 
+* **Forma canónica y pines (P6D-01/P6D-02, dictamen delta f9ea355; decisión 11:28 «corregir antes del
+  push»):** sin dependencias nuevas (ni parser YAML: cambiaría lock/vendor). (1) `canonicalForm()` quita
+  solo los comentarios de línea completa fuera de bloques `run: |` y el resultado debe ser **idéntico**
+  a `CANON` (en `workflow-guard.mjs`): cualquier construcción fuera de la gramática permitida —claves
+  entre comillas (`"if": false`), `|+`/`|2`/`>`, flow-style, anclas/merge, escapes, `${{ }}` en `run:`,
+  `uses:` distinto de los dos fijados (incl. `docker://` y acciones locales), `env:` distinto de
+  `EXPECTED_COMMIT`, `BASH_ENV`/`$GITHUB_ENV`, otro `working-directory` o `timeout-minutes`, pasos
+  nuevos— falla; las reglas de §1 (ampliadas: `set +eu`/`+ex`, todo `exit` ≠ `exit 1`, `||/bin/true`,
+  `!`, `&`, `if … then` sin `exit 1`, globs, `exec`, `return`, `fail()` canónico, `process.exit(0)` en
+  el driver, override del lock) dan además el diagnóstico. (2) `test/isolation/root-pins.sha256` fija el
+  sha256 del workflow completo (con comentarios) y de los archivos que corren como root (`harness.sh`,
+  `inner.sh`, `driver.mjs`, `probe.mjs`, `listener.mjs`, `app-adapters.mjs`, `egress.nft`, `nft-pin.sh`,
+  `nft-pin.lock` y las fixtures que importa el driver). Sin circularidad: el sha256 de
+  `root-pins.sha256` vive en `test/pr6.harness-contract.test.mjs`, no en un archivo que él fije. Se
+  verifica tres veces: `npm test` (contrato), el paso de CI (`sha256sum --check --strict` antes del
+  `sudo`) y `harness.sh`/`inner.sh` (antes de ejecutar; `inner.sh` sobre la copia en tmpfs). (3) El
+  arnés exige la cuenta real: plan `1..22`, `ok 1..22` en orden, 0 `not ok`, `# pass 22`, `# fail 0` y
+  rc=0, e imprime `# arnés PR-6: OK 22/22`; el paso de CI vuelve a exigir esas líneas en el log. (4)
+  `nft-pin.sh` no admite `X402_NFT_PIN_LOCK` (P6D-03): si viene definido falla cerrado; el lock
+  explícito solo existe en `verify-lock` (pruebas), que nunca instala. **Límite declarado:** es un
+  control de regresiones contra cambios del diff auditado, no una frontera contra un PR deliberado que
+  actualice a la vez workflow, pines y contrato; ese caso lo cubre la revisión del Auditor sobre el SHA
+  exacto y la protección de `main`. Para actualizar el workflow o un script root:
+  `sha256sum` de la lista (orden fijo) → `root-pins.sha256` → `ROOT_PINS_SHA256` del contrato (y `CANON`
+  si cambia el workflow), todo en el mismo diff.
+
 ### 1.1 Runbook: actualizar la versión fijada de nftables y sus hashes (P6C-02)
 
 Lo ejecuta Xolo Arquitecto en un PR propio (nunca en el paso de CI); lo verifica Xolo Auditor; nada
