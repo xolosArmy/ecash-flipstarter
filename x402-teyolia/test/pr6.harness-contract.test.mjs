@@ -4,6 +4,7 @@
 // aislamiento dentro del job requerido; la guarda es test/isolation/workflow-guard.mjs.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
@@ -15,6 +16,16 @@ const ISO = path.join(PACKAGE_ROOT, 'test', 'isolation');
 const HARNESS = path.join(ISO, 'harness.sh');
 const WORKFLOW = readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'x402-ta2.yml'), 'utf8');
 const read = (f) => readFileSync(path.join(ISO, f), 'utf8');
+// P6D-02: sha256 del archivo de pines. Vive AQUÍ (no en root-pins.sha256 ni en el workflow) para evitar
+// la circularidad: root-pins.sha256 fija el workflow y los scripts root; este test fija root-pins.sha256.
+// Cualquier cambio del workflow o de un script root obliga a regenerar ambos en el mismo diff auditado.
+const ROOT_PINS_SHA256 = 'e2150851112ba799b373d1e4bdb1b74baf11fbeeadf857836bf10ed569042e4b';
+const ROOT_PINNED = [
+  '../.github/workflows/x402-ta2.yml', 'test/isolation/harness.sh', 'test/isolation/inner.sh', 'test/isolation/driver.mjs',
+  'test/isolation/probe.mjs', 'test/isolation/listener.mjs', 'test/isolation/app-adapters.mjs', 'test/isolation/egress.nft',
+  'test/isolation/nft-pin.sh', 'test/isolation/nft-pin.lock', 'test/fixtures/x402/c3b-client.mjs', 'test/fixtures/x402/chronik-fixtures.mjs',
+];
+const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 const ROOT_SCRIPTS = ['harness.sh', 'inner.sh', 'driver.mjs', 'probe.mjs', 'listener.mjs', 'app-adapters.mjs', 'nft-pin.sh'];
 
 describe('arnés test/isolation (contrato)', () => {
@@ -48,6 +59,32 @@ describe('arnés test/isolation (contrato)', () => {
   });
 });
 
+describe('pines sha256 del workflow y de los scripts root (P6D-02)', () => {
+  const pinsText = readFileSync(path.join(ISO, 'root-pins.sha256'));
+  test('root-pins.sha256 tiene el sha256 fijado en este contrato', () => {
+    assert.equal(sha256(pinsText), ROOT_PINS_SHA256);
+  });
+  test('root-pins.sha256 lista exactamente el workflow y los archivos root, en orden, formato sha256sum', () => {
+    const lines = pinsText.toString('utf8').split('\n');
+    assert.equal(lines.pop(), '');
+    assert.deepEqual(lines.map((l) => l.slice(66)), ROOT_PINNED);
+    for (const l of lines) assert.match(l, /^[0-9a-f]{64} {2}\S+$/);
+  });
+  test('cada archivo fijado coincide con su sha256 (workflow, harness.sh, inner.sh, driver.mjs, nft-pin.sh, …)', () => {
+    for (const l of pinsText.toString('utf8').trim().split('\n')) {
+      const [h, rel] = [l.slice(0, 64), l.slice(66)];
+      assert.equal(sha256(readFileSync(path.join(PACKAGE_ROOT, rel))), h, `pin: ${rel}`);
+    }
+  });
+  test('harness.sh verifica los pines antes de ejecutar y exige 1..22 / # pass 22 / # fail 0; el paso de CI los vuelve a exigir', () => {
+    const h = read('harness.sh');
+    assert.ok(h.indexOf('sha256sum --check --strict --quiet') < h.indexOf('bash "$PKG/test/isolation/inner.sh"'));
+    for (const x of ['EXPECTED_TESTS=22', 'grep -Fxq "1..$EXPECTED_TESTS"', 'grep -Fxq "# fail 0"', 'grep -Fxq "# pass $EXPECTED_TESTS"']) assert.ok(h.includes(x), x);
+    assert.match(read('inner.sh'), /sha256sum --check --strict --quiet/);
+    for (const x of ["grep -Fx '1..22'", "grep -Fx '# fail 0'", 'sha256sum --check --strict test/isolation/root-pins.sha256']) assert.ok(WORKFLOW.includes(x), x);
+  });
+});
+
 describe('workflow x402-ta2.yml (D-P6-1 (a); P6C-01)', () => {
   test('workflow real: 0 violaciones de la guarda (job único, nombre, ubuntu-24.04, permisos, paso exacto)', () => {
     assert.deepEqual(workflowViolations(WORKFLOW), []);
@@ -67,9 +104,9 @@ describe('workflow x402-ta2.yml (D-P6-1 (a); P6C-01)', () => {
     ['set +o errexit', mutate('          npm run check:dist\n', '          set +o errexit\n          npm run check:dist\n'), ['set+e']],
     ['exit 0 prematuro', mutate('          npm run check:dist\n', '          [ -n "${SKIP:-x}" ] && exit 0\n          npm run check:dist\n'), ['exit0']],
     ['if: false a nivel de job', mutate('    runs-on: ubuntu-24.04\n', '    if: ${{ false }}\n    runs-on: ubuntu-24.04\n'), ['if:']],
-    ['if: false en el paso', mutate('        run: |\n          set -euo pipefail\n          bash test/isolation/nft-pin.sh', '        if: false\n        run: |\n          set -euo pipefail\n          bash test/isolation/nft-pin.sh'), ['if:', 'paso-de-aislamiento-exacto']],
-    ['shell: bash {0} (quita -e)', mutate('        run: |\n          set -euo pipefail\n          bash test/isolation/nft-pin.sh', '        shell: bash {0}\n        run: |\n          set -euo pipefail\n          bash test/isolation/nft-pin.sh'), ['shell:']],
-    ['continue-on-error', mutate('        run: |\n          set -euo pipefail\n          bash test/isolation/nft-pin.sh', '        continue-on-error: true\n        run: |\n          set -euo pipefail\n          bash test/isolation/nft-pin.sh'), ['continue-on-error']],
+    ['if: false en el paso', mutate('        run: |\n          set -euo pipefail\n          sha256sum --check --strict', '        if: false\n        run: |\n          set -euo pipefail\n          sha256sum --check --strict'), ['if:', 'paso-de-aislamiento-exacto']],
+    ['shell: bash {0} (quita -e)', mutate('        run: |\n          set -euo pipefail\n          sha256sum --check --strict', '        shell: bash {0}\n        run: |\n          set -euo pipefail\n          sha256sum --check --strict'), ['shell:']],
+    ['continue-on-error', mutate('        run: |\n          set -euo pipefail\n          sha256sum --check --strict', '        continue-on-error: true\n        run: |\n          set -euo pipefail\n          sha256sum --check --strict'), ['continue-on-error']],
     ['on: con paths-ignore', mutate('  pull_request:\n', "  pull_request:\n    paths-ignore: ['x402-teyolia/**']\n"), ['on-sin-filtros']],
     ['sudo npm', mutate('run: npm test\n', 'run: sudo npm test\n'), ['npm-como-root: sudo npm test']],
     ['sudo -E env … bash -c "n\\pm"', mutate('run: npm ci --ignore-scripts\n', 'run: sudo -E env PATH="$PATH" bash -c "n\\pm ci"\n'), ['sudo-no-permitido: sudo -E env PATH="$PATH" bash -c "n\\pm ci"']],

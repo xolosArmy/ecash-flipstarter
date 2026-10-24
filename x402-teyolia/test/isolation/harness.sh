@@ -21,7 +21,20 @@ for t in unshare setpriv ip sha256sum; do command -v "$t" >/dev/null || fail "$t
 [ -f "$PKG/dist/main.js" ] && [ -f "$PKG/dist/build-info.json" ] || fail "falta dist/ (build previo como usuario sin privilegios)"
 [ -d "$PKG/node_modules" ] || fail "falta node_modules (instalación previa de dependencias como usuario sin privilegios)"
 
+# P6D-02: número exacto de comprobaciones TAP que debe reportar el driver (plan 1..N, N ok, 0 fallos).
+EXPECTED_TESTS=22
+# P6D-02: sha256 fijados de los archivos que corren como root (test/isolation/root-pins.sha256; el hash
+# del propio root-pins.sha256 lo fija test/pr6.harness-contract.test.mjs, no este script). Se verifican
+# ANTES de ejecutarlos; el paso de CI verifica además el workflow y este script antes del sudo.
+PINS="$PKG/test/isolation/root-pins.sha256"
+[ -f "$PINS" ] || fail "falta $PINS"
+PIN_LINES="$(grep -E '^[0-9a-f]{64}  test/' "$PINS")"
+[ "$(wc -l <<< "$PIN_LINES")" -ge 10 ] || fail "root-pins.sha256 incompleto"
+( cd "$PKG" && sha256sum --check --strict --quiet <<< "$PIN_LINES" ) || fail "sha256 de un script root distinto del fijado"
+PINS_SHA="$(sha256sum "$PINS" | cut -d' ' -f1)"
+
 echo "# arnés PR-6 (T-12/T-12e/T-13/T-06) — $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "# root-pins.sha256: $PINS_SHA ($(wc -l <<< "$PIN_LINES") archivos de test/ verificados)"
 echo "# nft --version: $("$NFT_BIN" --version)"
 echo "# uname -r: $(uname -r)"
 echo "# ImageVersion: ${ImageVersion:-<no definido: fuera de GitHub Actions>}"
@@ -37,11 +50,13 @@ PASSWD_BEFORE="$(sha256sum /etc/passwd /etc/group | sha256sum | cut -d' ' -f1)"
 echo "# ruleset del host (sha256, solo lectura) antes: $HOST_RULESET_BEFORE; /etc/passwd+group: $PASSWD_BEFORE"
 
 STAGE="$(mktemp -d /tmp/x402-iso.XXXXXX)"
+TAP="$(mktemp /tmp/x402-iso-tap.XXXXXX)"
+trap 'rm -f "$TAP"' EXIT
 rc=0
 unshare --mount --net --pid --fork --mount-proc --propagation private \
   env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 \
-  ISO_STAGE="$STAGE" ISO_PKG="$PKG" ISO_NODE_SRC="$NODE_BIN" ISO_NFT="$NFT_BIN" \
-  bash "$PKG/test/isolation/inner.sh" || rc=$?
+  ISO_STAGE="$STAGE" ISO_PKG="$PKG" ISO_NODE_SRC="$NODE_BIN" ISO_NFT="$NFT_BIN" ISO_PINS_SHA="$PINS_SHA" \
+  bash "$PKG/test/isolation/inner.sh" | tee "$TAP" || rc=$?
 if [ -d "$STAGE" ]; then rmdir "$STAGE"; fi
 
 HOST_RULESET_AFTER="$("$NFT_BIN" list ruleset 2>&1 | sha256sum | cut -d' ' -f1)"
@@ -50,4 +65,10 @@ echo "# ruleset del host después: $HOST_RULESET_AFTER; /etc/passwd+group: $PASS
 [ "$HOST_RULESET_BEFORE" = "$HOST_RULESET_AFTER" ] || fail "el ruleset del host cambió"
 [ "$PASSWD_BEFORE" = "$PASSWD_AFTER" ] || fail "/etc/passwd o /etc/group cambió"
 [ "$rc" = "0" ] || fail "el driver reportó fallos (exit $rc)"
-echo "# arnés PR-6: OK"
+# P6D-02: la cuenta real, no solo el código de salida.
+grep -Fxq "1..$EXPECTED_TESTS" "$TAP" || fail "plan TAP distinto de 1..$EXPECTED_TESTS"
+[ "$(grep -oE '^ok [0-9]+ - ' "$TAP" | awk '{print $2}' | tr '\n' ' ')" = "$(seq -s ' ' 1 "$EXPECTED_TESTS") " ] || fail "las comprobaciones ok no son exactamente 1..$EXPECTED_TESTS"
+[ "$(grep -cE '^not ok ' "$TAP")" = "0" ] || fail "hay comprobaciones «not ok»"
+grep -Fxq "# pass $EXPECTED_TESTS" "$TAP" || fail "el driver no reporta # pass $EXPECTED_TESTS"
+grep -Fxq "# fail 0" "$TAP" || fail "el driver no reporta # fail 0"
+echo "# arnés PR-6: OK $EXPECTED_TESTS/$EXPECTED_TESTS"

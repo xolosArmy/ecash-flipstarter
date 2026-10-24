@@ -9,6 +9,9 @@ for p in dist node_modules test package.json; do cp -a "$ISO_PKG/$p" "$ISO_STAGE
 cp "$ISO_NODE_SRC" "$ISO_STAGE/bin/node"
 chown -R 0:0 "$ISO_STAGE/pkg" "$ISO_STAGE/bin"
 chmod -R a+rX,go-w "$ISO_STAGE/pkg" "$ISO_STAGE/bin"
+# P6D-02: la copia que se ejecuta debe coincidir con los sha256 fijados (y root-pins.sha256 con el verificado por harness.sh).
+[ "$(sha256sum "$ISO_STAGE/pkg/test/isolation/root-pins.sha256" | cut -d' ' -f1)" = "$ISO_PINS_SHA" ] || { echo "inner: root-pins.sha256 de la copia distinto" >&2; exit 1; }
+( cd "$ISO_STAGE/pkg" && grep -E '^[0-9a-f]{64}  test/' test/isolation/root-pins.sha256 | sha256sum --check --strict --quiet ) || { echo "inner: sha256 de la copia distinto del fijado" >&2; exit 1; }
 echo "# staging: tmpfs $(findmnt -n -o SOURCE,FSTYPE "$ISO_STAGE" | tr -s ' ')"
 echo "# ruleset del netns antes de cargar la política: $("$ISO_NFT" list ruleset | wc -l) líneas"
 ISO_ROOT="$ISO_STAGE" ISO_NODE="$ISO_STAGE/bin/node" ISO_NFT="$ISO_NFT" "$ISO_STAGE/bin/node" "$ISO_STAGE/pkg/test/isolation/driver.mjs"

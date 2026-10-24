@@ -350,7 +350,8 @@ async function main() {
 
   const fail = results.filter((x) => !x.ok).length;
   process.stdout.write(`1..${results.length}\n# pass ${results.length - fail}\n# fail ${fail}\n`);
-  process.exitCode = fail === 0 ? 0 : 1;
+  // P6D-02: el plan refleja la cuenta real; harness.sh exige además exactamente 1..22 y # fail 0.
+  process.exitCode = fail === 0 && results.length > 0 ? 0 : 1;
 }
 
 main().catch((e) => { console.error(`driver: ERROR ${e.stack ?? e}`); killAll(); process.exit(1); });

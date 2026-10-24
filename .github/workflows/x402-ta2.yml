@@ -82,10 +82,18 @@ jobs:
       # oficiales de Ubuntu, versión y hashes en test/isolation/nft-pin.lock) (P6C-02: falla
       # cerrado si la versión no está disponible o el hash no coincide; sin fallback). Alternativa declarada:
       # iptables -m owner. Runbook de actualización: x402-teyolia/docs/pr6-aislamiento.md §1.1. El contrato
-      # test/pr6.harness-contract.test.mjs fija el texto exacto de este paso (P6C-01).
+      # test/pr6.harness-contract.test.mjs fija el texto exacto de este paso (P6C-01) y la forma canónica de
+      # todo el workflow (P6D-01). Antes del sudo se verifican los sha256 fijados del workflow y de los
+      # scripts root (test/isolation/root-pins.sha256; su propio hash lo fija el contrato) y después se
+      # exige el plan exacto 1..22, # pass 22 y # fail 0 (P6D-02).
       - name: Aislamiento del SO PR-6 (T-12 / T-12e / T-13 / T-06; nft fijado por sha256, fail-closed)
         run: |
           set -euo pipefail
+          sha256sum --check --strict test/isolation/root-pins.sha256
           bash test/isolation/nft-pin.sh install
           echo "ImageVersion: ${ImageVersion:-?}"; echo "runner: uid=$(id -u) gid=$(id -g)"
-          sudo env ImageVersion="${ImageVersion:-}" NODE_BIN="$(command -v node)" NFT_BIN=/usr/sbin/nft bash test/isolation/harness.sh
+          sudo env ImageVersion="${ImageVersion:-}" NODE_BIN="$(command -v node)" NFT_BIN=/usr/sbin/nft bash test/isolation/harness.sh | tee "$RUNNER_TEMP/pr6-arnes.log"
+          grep -Fx '1..22' "$RUNNER_TEMP/pr6-arnes.log"
+          grep -Fx '# pass 22' "$RUNNER_TEMP/pr6-arnes.log"
+          grep -Fx '# fail 0' "$RUNNER_TEMP/pr6-arnes.log"
+          grep -Fx '# arnés PR-6: OK 22/22' "$RUNNER_TEMP/pr6-arnes.log"

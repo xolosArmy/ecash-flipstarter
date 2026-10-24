@@ -8,13 +8,18 @@
 export const ISOLATION_STEP = `      - name: Aislamiento del SO PR-6 (T-12 / T-12e / T-13 / T-06; nft fijado por sha256, fail-closed)
         run: |
           set -euo pipefail
+          sha256sum --check --strict test/isolation/root-pins.sha256
           bash test/isolation/nft-pin.sh install
           echo "ImageVersion: \${ImageVersion:-?}"; echo "runner: uid=$(id -u) gid=$(id -g)"
-          sudo env ImageVersion="\${ImageVersion:-}" NODE_BIN="$(command -v node)" NFT_BIN=/usr/sbin/nft bash test/isolation/harness.sh
+          sudo env ImageVersion="\${ImageVersion:-}" NODE_BIN="$(command -v node)" NFT_BIN=/usr/sbin/nft bash test/isolation/harness.sh | tee "$RUNNER_TEMP/pr6-arnes.log"
+          grep -Fx '1..22' "$RUNNER_TEMP/pr6-arnes.log"
+          grep -Fx '# pass 22' "$RUNNER_TEMP/pr6-arnes.log"
+          grep -Fx '# fail 0' "$RUNNER_TEMP/pr6-arnes.log"
+          grep -Fx '# arnés PR-6: OK 22/22' "$RUNNER_TEMP/pr6-arnes.log"
 `;
 // Únicas líneas del workflow que pueden contener sudo.
 export const SUDO_ALLOWED = Object.freeze([
-  'sudo env ImageVersion="${ImageVersion:-}" NODE_BIN="$(command -v node)" NFT_BIN=/usr/sbin/nft bash test/isolation/harness.sh',
+  'sudo env ImageVersion="${ImageVersion:-}" NODE_BIN="$(command -v node)" NFT_BIN=/usr/sbin/nft bash test/isolation/harness.sh | tee "$RUNNER_TEMP/pr6-arnes.log"',
 ]);
 export const ON_BLOCK = 'on:\n  push:\n  pull_request:\n';
 
