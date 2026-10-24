@@ -45,13 +45,28 @@ echo "# node: $("$NODE_BIN" -v) sha256 $(sha256sum "$NODE_BIN" | cut -d' ' -f1)"
 echo "# unshare: $(unshare --version | head -1); setpriv: $(setpriv --version | head -1); ip: $(ip -V)"
 echo "# build-info: $(tr -d '\n ' < "$PKG/dist/build-info.json" | cut -c1-200)"
 
-HOST_RULESET_BEFORE="$("$NFT_BIN" list ruleset 2>&1 | sha256sum | cut -d' ' -f1)"
+# PR-69 (Fernando 2026-10-24 14:26, opción A): vista sin estado del ruleset del host (`-s`: sin contadores,
+# cuotas ni otros valores que cambian con el tráfico; sin `-a`: sin handles). Falla cerrado si nft devuelve
+# rc≠0 o escribe en stderr, y si la tabla del arnés (inet x402iso) aparece en el host. Ante una diferencia
+# imprime `diff -u` antes de fallar.
+RS_DIR="$(mktemp -d /tmp/x402-iso-rs.XXXXXX)"
+trap 'rm -rf "$RS_DIR"' EXIT
+host_ruleset() {
+  if ! "$NFT_BIN" -s list ruleset >"$RS_DIR/$1" 2>"$RS_DIR/$1.err"; then fail "nft -s list ruleset del host falló ($1): $(head -c 300 "$RS_DIR/$1.err")"; fi
+  [ ! -s "$RS_DIR/$1.err" ] || fail "nft -s list ruleset del host escribió en stderr ($1): $(head -c 300 "$RS_DIR/$1.err")"
+  if grep -Eq '^table inet x402iso( |$)' "$RS_DIR/$1"; then fail "la tabla del arnés inet x402iso está en el ruleset del host ($1)"; fi
+}
+host_ruleset antes
+HOST_RULESET_BEFORE="$(sha256sum "$RS_DIR/antes" | cut -d' ' -f1)"
+[ "${#HOST_RULESET_BEFORE}" = "64" ] || fail "sha256 del ruleset del host inválido"
+echo "# ruleset del host (nft -s list ruleset, $(wc -l < "$RS_DIR/antes") líneas; sin contadores ni handles; máx. 400):"
+head -n 400 "$RS_DIR/antes" | sed -e 's/^/#   /'
 PASSWD_BEFORE="$(sha256sum /etc/passwd /etc/group | sha256sum | cut -d' ' -f1)"
 echo "# ruleset del host (sha256, solo lectura) antes: $HOST_RULESET_BEFORE; /etc/passwd+group: $PASSWD_BEFORE"
 
 STAGE="$(mktemp -d /tmp/x402-iso.XXXXXX)"
 TAP="$(mktemp /tmp/x402-iso-tap.XXXXXX)"
-trap 'rm -f "$TAP"' EXIT
+trap 'rm -f "$TAP"; rm -rf "$RS_DIR"' EXIT
 rc=0
 unshare --mount --net --pid --fork --mount-proc --propagation private \
   env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 \
@@ -59,10 +74,16 @@ unshare --mount --net --pid --fork --mount-proc --propagation private \
   bash "$PKG/test/isolation/inner.sh" | tee "$TAP" || rc=$?
 if [ -d "$STAGE" ]; then rmdir "$STAGE"; fi
 
-HOST_RULESET_AFTER="$("$NFT_BIN" list ruleset 2>&1 | sha256sum | cut -d' ' -f1)"
+host_ruleset despues
+HOST_RULESET_AFTER="$(sha256sum "$RS_DIR/despues" | cut -d' ' -f1)"
+[ "${#HOST_RULESET_AFTER}" = "64" ] || fail "sha256 del ruleset del host inválido"
 PASSWD_AFTER="$(sha256sum /etc/passwd /etc/group | sha256sum | cut -d' ' -f1)"
 echo "# ruleset del host después: $HOST_RULESET_AFTER; /etc/passwd+group: $PASSWD_AFTER"
-[ "$HOST_RULESET_BEFORE" = "$HOST_RULESET_AFTER" ] || fail "el ruleset del host cambió"
+if [ "$HOST_RULESET_BEFORE" != "$HOST_RULESET_AFTER" ]; then
+  if diff -u "$RS_DIR/antes" "$RS_DIR/despues" >"$RS_DIR/diff"; then fail "sha256 del ruleset del host distinto con diff vacío"; fi
+  head -n 200 "$RS_DIR/diff" | sed -e 's/^/#   /'
+  fail "el ruleset del host cambió (nft -s list ruleset; diff -u arriba)"
+fi
 [ "$PASSWD_BEFORE" = "$PASSWD_AFTER" ] || fail "/etc/passwd o /etc/group cambió"
 [ "$rc" = "0" ] || fail "el driver reportó fallos (exit $rc)"
 # P6D-02: la cuenta real, no solo el código de salida.

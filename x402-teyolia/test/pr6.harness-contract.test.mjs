@@ -20,7 +20,7 @@ const read = (f) => readFileSync(path.join(ISO, f), 'utf8');
 // P6D-02: sha256 del archivo de pines. Vive AQUÍ (no en root-pins.sha256 ni en el workflow) para evitar
 // la circularidad: root-pins.sha256 fija el workflow y los scripts root; este test fija root-pins.sha256.
 // Cualquier cambio del workflow o de un script root obliga a regenerar ambos en el mismo diff auditado.
-const ROOT_PINS_SHA256 = 'e2150851112ba799b373d1e4bdb1b74baf11fbeeadf857836bf10ed569042e4b';
+const ROOT_PINS_SHA256 = '09dbcf4aef2fec7a50fd6e1fb4078c7ea853eb796d3b8f0e1126c76bedff0e02';
 const ROOT_PINNED = [
   '../.github/workflows/x402-ta2.yml', 'test/isolation/harness.sh', 'test/isolation/inner.sh', 'test/isolation/driver.mjs',
   'test/isolation/probe.mjs', 'test/isolation/listener.mjs', 'test/isolation/app-adapters.mjs', 'test/isolation/egress.nft',
@@ -40,11 +40,17 @@ describe('arnés test/isolation (contrato)', () => {
     assert.match(h, /^set -euo pipefail$/m);
     assert.match(h, /unshare --mount --net --pid --fork --mount-proc --propagation private/);
     for (const v of ['nft --version', 'uname -r', 'ImageVersion', 'uid=']) assert.ok(h.includes(v), v);
-    assert.match(h, /HOST_RULESET_BEFORE.*\n[\s\S]*\[ "\$HOST_RULESET_BEFORE" = "\$HOST_RULESET_AFTER" \] \|\| fail/);
+    // PR-69 (opción A): vista sin estado, rc y stderr verificados, x402iso prohibida en el host, diff -u antes de fallar.
+    assert.match(h, /^  if ! "\$NFT_BIN" -s list ruleset >"\$RS_DIR\/\$1" 2>"\$RS_DIR\/\$1\.err"; then fail /m);
+    assert.match(h, /^  \[ ! -s "\$RS_DIR\/\$1\.err" \] \|\| fail /m);
+    assert.match(h, /^  if grep -Eq '\^table inet x402iso\( \|\$\)' "\$RS_DIR\/\$1"; then fail /m);
+    assert.match(h, /^host_ruleset antes\n[\s\S]*^host_ruleset despues\n/m);
+    assert.match(h, /^if \[ "\$HOST_RULESET_BEFORE" != "\$HOST_RULESET_AFTER" \]; then\n  if diff -u "\$RS_DIR\/antes" "\$RS_DIR\/despues" >"\$RS_DIR\/diff"; then fail [^\n]*\n  head -n 200 "\$RS_DIR\/diff" \| sed -e 's\/\^\/#   \/'\n  fail "el ruleset del host cambió/m);
+    assert.ok(!/"\$NFT_BIN"[^\n]*2>&1/.test(h), 'la lectura del ruleset del host no mezcla stderr (2>&1)');
     assert.match(h, /\[ "\$PASSWD_BEFORE" = "\$PASSWD_AFTER" \] \|\| fail/);
     // Fuera del netns el arnés solo LEE el ruleset (list ruleset) y la versión.
-    const nftCalls = [...h.matchAll(/\$\("\$NFT_BIN" ([^)|]+)/g)].map((m) => m[1].trim());
-    assert.deepEqual([...new Set(nftCalls)].sort(), ['--version', 'list ruleset 2>&1']);
+    const nftCalls = [...h.matchAll(/(?:\$\(|if ! |^[ \t]*)"\$NFT_BIN" ([^)|>\n]+)/gm)].map((m) => m[1].trim());
+    assert.deepEqual([...new Set(nftCalls)].sort(), ['--version', '-s list ruleset']);
     assert.ok(!/(?:^|[;&|]|\$\()\s*(?:sudo\s+|env\s+[^\n]*\s)?npm\s/m.test(h + read('inner.sh')), 'el arnés no ejecuta npm');
     assert.ok(!/useradd|adduser|\/etc\/passwd\s*[<>]|>>\s*\/etc\//.test(h + read('inner.sh')), 'no toca /etc/passwd');
   });
