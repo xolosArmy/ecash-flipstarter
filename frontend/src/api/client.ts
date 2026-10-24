@@ -378,12 +378,14 @@ export interface CampaignPledgesResponse {
   pendingTotalPledged: number;
   pledgeCount: number;
   pledges: Array<{
+    pledgeId?: string;
     txid: string | null;
+    wcOfferId?: string | null;
     contributorAddress: string;
     amount: number;
     timestamp: string;
     message?: string;
-    status?: 'intent' | 'broadcasted' | 'seen_mempool' | 'confirmed' | 'finalized' | 'expired' | 'refunded' | 'invalid';
+    status?: 'intent' | 'broadcasted' | 'pending_verification' | 'seen_mempool' | 'confirmed' | 'finalized' | 'expired' | 'refunded' | 'invalid';
     statusReason?: string | null;
   }>;
 }
@@ -393,12 +395,14 @@ type CampaignPledgesApiPayload =
   | CampaignPledgesResponse['pledges'];
 
 const CONFIRMED_PLEDGE_STATUSES = new Set(['confirmed', 'finalized']);
-const PENDING_PLEDGE_STATUSES = new Set(['intent', 'broadcasted', 'seen_mempool']);
+const PENDING_PLEDGE_STATUSES = new Set(['intent', 'broadcasted', 'pending_verification', 'seen_mempool']);
 
 function normalizeCampaignPledgesPayload(payload: CampaignPledgesApiPayload): CampaignPledgesResponse {
   if (Array.isArray(payload)) {
     const pledges = payload.map((pledge) => ({
+      pledgeId: pledge.pledgeId,
       txid: pledge.txid ?? null,
+      wcOfferId: pledge.wcOfferId ?? null,
       contributorAddress: pledge.contributorAddress,
       amount: Number(pledge.amount) || 0,
       timestamp: pledge.timestamp,
@@ -422,7 +426,9 @@ function normalizeCampaignPledgesPayload(payload: CampaignPledgesApiPayload): Ca
 
   if (Array.isArray(payload.pledges)) {
     const pledges = payload.pledges.map((pledge) => ({
+      pledgeId: pledge.pledgeId,
       txid: pledge.txid ?? null,
+      wcOfferId: pledge.wcOfferId ?? null,
       contributorAddress: pledge.contributorAddress,
       amount: Number(pledge.amount) || 0,
       timestamp: pledge.timestamp,
