@@ -1,6 +1,6 @@
 // PR-6 / P6C-02 (Fernando 2026-10-24 11:28 CDMX): verificación por SHA-256 de los .deb de nftables
 // (test/isolation/nft-pin.sh + nft-pin.lock). Sin red ni root: .deb sintéticos construidos con
-// dpkg-deb y el modo `verify`. Falla cerrado ante hash erróneo, .deb faltante o no fijado, plan de apt
+// dpkg-deb y el modo `verify-lock`; `install` y `verify` usan siempre nft-pin.lock (P6D-03). Falla cerrado ante hash erróneo, .deb faltante o no fijado, plan de apt
 // con un paquete no fijado o una versión distinta (la fijada «no disponible»), y lock mal formado.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -24,8 +24,8 @@ function buildDeb(root, pkg, ver) {
   return out;
 }
 function verify(lock, dir, plan) {
-  const args = [SCRIPT, 'verify', dir, ...(plan ? [plan] : [])];
-  return spawnSync('bash', args, { env: { PATH: '/usr/bin:/bin', X402_NFT_PIN_LOCK: lock }, encoding: 'utf8' });
+  const args = [SCRIPT, 'verify-lock', lock, dir, ...(plan ? [plan] : [])];
+  return spawnSync('bash', args, { env: { PATH: '/usr/bin:/bin' }, encoding: 'utf8' });
 }
 function fixture() {
   const { dir } = makeTmp('x402-nftpin-');
@@ -43,6 +43,24 @@ function fixture() {
 }
 
 describe('P6C-02 — nft-pin.sh verify (fail-closed)', () => {
+  test('P6D-03: X402_NFT_PIN_LOCK definido (aunque esté vacío) -> falla cerrado en install, verify y verify-lock', () => {
+    const f = fixture(); copyFileSync(f.a, path.join(f.debs, 'x.deb')); copyFileSync(f.b, path.join(f.debs, 'y.deb'));
+    for (const [args, val] of [[['install'], f.lock], [['verify', f.debs], f.lock], [['verify-lock', f.lock, f.debs], ''], [['install'], '']]) {
+      const r = spawnSync('bash', [SCRIPT, ...args], { env: { PATH: '/usr/bin:/bin', X402_NFT_PIN_LOCK: val }, encoding: 'utf8' });
+      assert.equal(r.status, 1, `${args[0]}: ${r.stderr}`); assert.match(r.stderr, /X402_NFT_PIN_LOCK no se admite \(P6D-03\)/);
+    }
+  });
+  test('P6D-03: los .deb sintéticos NO pasan `verify` con el lock fijado (el lock alternativo solo existe en verify-lock)', () => {
+    const f = fixture(); copyFileSync(f.a, path.join(f.debs, 'x.deb')); copyFileSync(f.b, path.join(f.debs, 'y.deb'));
+    const r = spawnSync('bash', [SCRIPT, 'verify', f.debs], { env: { PATH: '/usr/bin:/bin' }, encoding: 'utf8' });
+    assert.equal(r.status, 1); assert.match(r.stderr, /no es un \.deb esperado/);
+  });
+  test('modo vacío o desconocido -> falla con uso', () => {
+    for (const args of [[], ['instalar']]) {
+      const r = spawnSync('bash', [SCRIPT, ...args], { env: { PATH: '/usr/bin:/bin' }, encoding: 'utf8' });
+      assert.equal(r.status, 1); assert.match(r.stderr, /uso: nft-pin\.sh install/);
+    }
+  });
   test('lock real: nftables y libnftables1 1.0.9-1ubuntu0.1 requeridos con los sha256 verificados contra el índice de noble-updates', () => {
     const l = readFileSync(REAL_LOCK, 'utf8');
     assert.match(l, /^d648859fccde3c17b8b9b89993427564f91f394a39306db1f67bd5ea3ac42c6e nftables 1\.0\.9-1ubuntu0\.1 amd64 requerido$/m);

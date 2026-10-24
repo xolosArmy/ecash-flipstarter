@@ -7,10 +7,21 @@
 #   nft-pin.sh install                    (CI: usuario del runner; sudo solo para apt-get update y dpkg -i)
 #   nft-pin.sh verify <dir> [<plan>]      (sin red ni root: verifica los .deb de <dir>; <plan> = salida
 #                                          de `apt-get install -s`; lo usan las pruebas y el runbook)
+#   nft-pin.sh verify-lock <lock> <dir> [<plan>]   (solo verificación con un lock explícito, para las
+#                                          pruebas con .deb sintéticos; `install` usa SIEMPRE nft-pin.lock)
+# P6D-03: no hay override por entorno; si X402_NFT_PIN_LOCK viene definido, falla cerrado.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOCK="${X402_NFT_PIN_LOCK:-$HERE/nft-pin.lock}"
 fail() { echo "nft-pin: FALLA: $*" >&2; exit 1; }
+[ -z "${X402_NFT_PIN_LOCK+definida}" ] || fail "X402_NFT_PIN_LOCK no se admite (P6D-03): el lock es siempre $HERE/nft-pin.lock"
+MODE="${1:-}"
+LOCK="$HERE/nft-pin.lock"
+if [ "$MODE" = verify-lock ]; then
+  [ -n "${2:-}" ] || fail "uso: nft-pin.sh verify-lock <lock> <dir> [<plan>]"
+  LOCK="$2"; shift 2; MODE=verify
+else
+  if [ "$#" -gt 0 ]; then shift; fi
+fi
 [ -f "$LOCK" ] || fail "no existe el lock $LOCK"
 for t in sha256sum dpkg-deb awk; do command -v "$t" >/dev/null || fail "$t no disponible"; done
 
@@ -62,15 +73,16 @@ verify_dir() {
 
 expected_set() { printf '%s\n' $REQUIRED $( [ -n "${1:-}" ] && planned "$1" ) | sort -u | tr '\n' ' '; }
 
-case "${1:-}" in
+case "$MODE" in
   verify)
-    [ -n "${2:-}" ] && [ -d "$2" ] || fail "uso: nft-pin.sh verify <dir> [<plan>]"
-    PLAN="${3:-}"
+    [ -n "${1:-}" ] && [ -d "$1" ] || fail "uso: nft-pin.sh verify <dir> [<plan>]"
+    PLAN="${2:-}"
     if [ -n "$PLAN" ]; then check_plan "$PLAN"; fi
-    verify_dir "$2" $(expected_set "$PLAN")
+    verify_dir "$1" $(expected_set "$PLAN")
     echo "nft-pin: verificación OK (lock sha256 $(sha256sum "$LOCK" | cut -d' ' -f1))"
     ;;
   install)
+    [ "$LOCK" = "$HERE/nft-pin.lock" ] || fail "install solo usa el lock fijado"
     [ "$(id -u)" != 0 ] || fail "ejecuta como usuario sin privilegios (la elevación se limita a dos órdenes fijas)"
     command -v apt-get >/dev/null || fail "apt-get no disponible"
     W="$(mktemp -d)"
@@ -89,5 +101,5 @@ case "${1:-}" in
     echo "nft-pin: nft --version: $(/usr/sbin/nft --version)"
     echo "nft-pin: lock sha256 $(sha256sum "$LOCK" | cut -d' ' -f1)"
     ;;
-  *) fail "uso: nft-pin.sh install | verify <dir> [<plan>]";;
+  *) fail "uso: nft-pin.sh install | verify <dir> [<plan>] | verify-lock <lock> <dir> [<plan>]";;
 esac

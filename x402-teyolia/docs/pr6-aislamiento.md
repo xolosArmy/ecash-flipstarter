@@ -95,7 +95,7 @@ se instala en el host.
    `libnftables1`, `dependencia` para el resto) y actualizar en este documento §1 y en el contrato
    (`test/pr6.nft-pin.test.mjs`, aserción del lock real) los hashes y la versión.
 5. `bash test/isolation/nft-pin.sh verify <dir con los .deb> <plan apt-get -s>` → «verificación OK»;
-   con un hash alterado en una copia del lock (`X402_NFT_PIN_LOCK=…`) → debe fallar.
+   con un hash alterado en una copia del lock (`nft-pin.sh verify-lock <copia> <dir> [<plan>]`) → debe fallar. `X402_NFT_PIN_LOCK` ya no existe: si viene definido, el script falla cerrado (P6D-03).
 6. Ejecutar el arnés con la nueva versión (en local, con los `.deb` extraídos y `NFT_BIN` apuntando a
    un envoltorio) y `npm test`; registrar `nft --version`, los sha256 y el log en la evidencia del PR.
 7. El Auditor revisa los hashes contra el índice firmado; el cambio entra solo con su dictamen. Si en
