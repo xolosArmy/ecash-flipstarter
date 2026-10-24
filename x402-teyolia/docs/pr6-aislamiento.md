@@ -109,9 +109,18 @@ Lo ejecuta Xolo Arquitecto en un PR propio (nunca en el paso de CI); lo verifica
 se instala en el host.
 
 1. Elegir la versión destino en `https://archive.ubuntu.com/ubuntu/dists/noble-updates/main/binary-amd64/Packages.gz`
-   (y `noble-security`/`noble` si aplica). Descargar ese índice y su `InRelease`; comprobar la firma
-   (`gpgv --keyring /usr/share/keyrings/ubuntu-archive-keyring.gpg InRelease`) y que el sha256 de
-   `Packages.gz` coincide con el listado en `InRelease`.
+   (y `noble-security`/`noble` si aplica). Descargar a la vez (solo lectura) el `InRelease` y el
+   `main/binary-amd64/Packages.gz` de **noble, noble-updates y noble-security**; verificar cada
+   `InRelease` con `gpgv --keyring ubuntu-archive-keyring.gpg` (keyring oficial del paquete
+   `ubuntu-keyring`; huella esperada de la clave 2018: `F6ECB3762474EDA9D21B7022871920D1991BC93C`,
+   contrastada por una vía independiente, p. ej. keyserver.ubuntu.com) → «Good signature»; comprobar
+   que el sha256 y el tamaño de cada `Packages.gz` son los listados en la sección `SHA256:` de su
+   `InRelease`, y que cada entrada del lock (paquete, versión, sha256) aparece en el índice firmado
+   correspondiente. Archivar el log (P6D-05; evidencia de 2026-10-24: 3/3 Good signature, 3/3
+   `Packages.gz` coinciden, 8/8 entradas del lock = índice firmado = `.deb` local; nftables y
+   libnftables1 1.0.9-1ubuntu0.1 y libgmp10 en noble-updates, las otras 5 en noble). Controles: un
+   `InRelease` alterado da «BAD signature» y un keyring sin la clave da «No public key». Nada se
+   instala en el host: `gpgv` y el keyring de Ubuntu se extraen con `dpkg-deb -x`.
 2. Para `nftables` y `libnftables1` (misma versión) y cada dependencia que `apt-get install -s
    --no-install-recommends` planifique en un `ubuntu-24.04` limpio (contenedor o VM desechable), tomar
    `Package`, `Version`, `Architecture` y `SHA256` del índice.
@@ -124,7 +133,9 @@ se instala en el host.
    con un hash alterado en una copia del lock (`nft-pin.sh verify-lock <copia> <dir> [<plan>]`) → debe fallar. `X402_NFT_PIN_LOCK` ya no existe: si viene definido, el script falla cerrado (P6D-03).
 6. Ejecutar el arnés con la nueva versión (en local, con los `.deb` extraídos y `NFT_BIN` apuntando a
    un envoltorio) y `npm test`; registrar `nft --version`, los sha256 y el log en la evidencia del PR.
-7. El Auditor revisa los hashes contra el índice firmado; el cambio entra solo con su dictamen. Si en
+7. El Auditor revisa los hashes contra el índice firmado; el cambio entra solo con su dictamen y el
+   push requiere una fila de Fernando en el registro de decisiones (P6D-07). Como `nft-pin.lock` y el
+   workflow están en `root-pins.sha256`, el cambio regenera también los pines y `ROOT_PINS_SHA256`. Si en
    CI la versión fijada desaparece del espejo, el paso **falla** (no hay fallback): se repite este
    runbook, no se relaja el lock.
 
