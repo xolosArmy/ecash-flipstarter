@@ -13,7 +13,8 @@ permissions:
 jobs:
   x402-teyolia:
     name: x402-teyolia (Node 22.13.1)
-    runs-on: ubuntu-latest
+    # PR-6, D-P6-1 (a) (Fernando, 2026-10-24 09:21): imagen fijada para el paso de aislamiento.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
       run:
@@ -71,3 +72,25 @@ jobs:
           d="$(mktemp -d)"; cp -R dist "$d/dist"; printf ' ' >> "$d/dist/server.js"
           if node scripts/dist-manifest.mjs --check "$d/dist"; then echo "control negativo M5-V1: un dist/ mutado NO falló"; exit 1; fi
           echo "control negativo M5-V1: dist/ mutado rechazado"
+
+      # PR-6, D-P6-1 (a) / PM6-05: aislamiento del SO (T-12 egreso, T-12e IPC, T-13 DAC, T-06 runtime).
+      # Un ÚNICO paso dentro de este job requerido (sin workflow ni check nuevo), fail-closed (sin
+      # continue-on-error). Namespaces desechables (unshare --mount --net --pid) con uids numéricos
+      # 2001/2002 sin /etc/passwd; el ruleset nft vive SOLO en el netns desechable; el arnés verifica que
+      # el ruleset del host y /etc/passwd no cambian. npm NO se ejecuta como root (dist/ ya construido
+      # arriba por el usuario del runner); sin secretos. Dependencia: nftables fijado a la versión de
+      # noble-updates (alternativa declarada: iptables -m owner; ver x402-teyolia/docs/pr6-aislamiento.md).
+      - name: Aislamiento del SO PR-6 (T-12 / T-12e / T-13 / T-06; nft fijado, fail-closed)
+        env:
+          NFT_PIN: '1.0.9-1ubuntu0.1'
+        run: |
+          set -euo pipefail
+          have="$(dpkg-query -W -f='${Version}' nftables 2>/dev/null || true)"
+          if [ "$have" != "$NFT_PIN" ]; then
+            sudo apt-get update -o Acquire::Retries=3
+            sudo apt-get install -y --no-install-recommends --allow-downgrades "nftables=$NFT_PIN"
+          fi
+          got="$(dpkg-query -W -f='${Version}' nftables)"
+          if [ "$got" != "$NFT_PIN" ]; then echo "nftables $got != fijado $NFT_PIN"; exit 1; fi
+          echo "nftables (dpkg): $got"; echo "ImageVersion: ${ImageVersion:-?}"; echo "runner: uid=$(id -u) gid=$(id -g)"
+          sudo env ImageVersion="${ImageVersion:-}" NODE_BIN="$(command -v node)" NFT_BIN=/usr/sbin/nft bash test/isolation/harness.sh

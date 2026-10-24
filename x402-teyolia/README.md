@@ -107,10 +107,11 @@ Rutas del proceso (solo `127.0.0.1`, puerto `TEYOLIA_X402_LISTEN`, distinto de 3
 * **T-10i (Auditor P-4/L3):** el guard **detecta** `NODE_OPTIONS`, `--import`, `--require` y
   `--experimental-loader` y rechaza el arranque, pero el código precargado **ya se ejecutó**
   antes de `main.ts` (las pruebas lo demuestran con un marcador). La barrera real es el
-  lanzador (unidad con `Environment=` propio, sin `PassEnvironment`, `ExecStart` fijo), en PR-6.
+  lanzador (unidad con `Environment=` propio, sin `PassEnvironment`, `ExecStart` fijo):
+  **precondición del gate de TA-3** (D-P6-2 (A), G3-01/G3-02 de `docs/pr6-aislamiento.md` §4).
 * **Variables de systemd (P-4/L6):** el conjunto de sistema no incluye `INVOCATION_ID`,
-  `JOURNAL_STREAM`, etc.; bajo systemd el proceso no arrancaría (falla cerrado). Se resuelve en PR-6
-  con decisión registrada.
+  `JOURNAL_STREAM`, etc.; bajo systemd el proceso no arrancaría (falla cerrado). **Precondición del
+  gate de TA-3** (D-P6-2 (A), G3-03): ampliar la allowlist exige decisión registrada y re-auditoría.
 * **Rate limit de emisión en memoria (PR4-E, bajo G-12):** los contadores por IP y global de M3
   viven en la memoria del proceso: se reinician con él y no se comparten entre instancias. Vale
   porque G-12 fija una sola instancia; el tope de facturas ISSUED vigentes sí se cuenta en la base.
@@ -134,8 +135,10 @@ Rutas del proceso (solo `127.0.0.1`, puerto `TEYOLIA_X402_LISTEN`, distinto de 3
   precondiciones del gate de TA-3 (PT5-11): A-02 concede con un bloque sin finalidad Avalanche y,
   tras un reorg, el grant y PAID persisten sin revocación; allí se decide si con recursos reales se
   exige `isFinal: true` antes de conceder.
-* **T-06 abierto hasta PR-6:** hoy lo componen T-10a/b/c/h, T-11a/b/c/d y T-18; faltan T-12 (red:
-  el `fetch` global hacia `127.0.0.1:3011`) y T-13 (archivos del legacy).
+* **T-06 cubierto por PR-6:** T-06a/b/c (`test/pr6.t06.isolation.test.mjs`) más T-12 (egreso),
+  T-12e (IPC) y T-13 (archivos del legacy) con dos uids reales y egreso controlado en el arnés
+  `test/isolation/` (EN-2). Matriz, residuales y precondiciones del gate de TA-3:
+  `docs/pr6-aislamiento.md`. El socket UNIX abstracto no tiene barrera en TA-2 (G3-06).
 * Correspondencia PT-01..PT-07 ↔ INF-042 §11 ↔ tests: `docs/pr5-pt-correspondencia.md` (tabla PT v1.1).
 * `debug` (dependencia de Express) intenta un `require('supports-color')` opcional que no está
   instalado: `check-graph` lo reporta como aviso. Si un `node_modules` superior lo tuviera, se
@@ -150,3 +153,18 @@ propósito**. Para correr las pruebas en local, usa un host limpio o un sandbox 
 solo `/usr`, `/etc`, la cadena de herramientas de Node verificada por SHA-256 y el checkout, con
 `/tmp` y `HOME` vacíos (`--tmpfs /tmp --clearenv --setenv HOME /tmp/home`). El CI (`x402-ta2`)
 corre en un runner sin `/node_modules`.
+
+## Aislamiento del SO (PR-6): `test/isolation/`
+
+Arnés privilegiado para T-12 / T-12e / T-13 y la parte de runtime de T-06 (D-P6-1 (a)). Construye
+primero como usuario normal y luego ejecuta el arnés como root (npm nunca corre como root):
+
+```sh
+npm ci --ignore-scripts && npm run build
+sudo env NODE_BIN="$(command -v node)" NFT_BIN=/usr/sbin/nft bash test/isolation/harness.sh
+```
+
+Requiere `nftables` (CI: `1.0.9-1ubuntu0.1` fijado en `ubuntu-24.04`), `unshare`/`setpriv`
+(util-linux) e `ip` (iproute2). Todo corre en namespaces desechables (mount, net, pid) sobre un
+tmpfs, con uids numéricos 2001 (legacy) y 2002 (x402) sin tocar `/etc/passwd`; el ruleset nft vive
+solo en el netns y el arnés verifica que el del host no cambia. Sin root falla cerrado.
