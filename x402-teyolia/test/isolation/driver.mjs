@@ -87,13 +87,21 @@ function counters() {
   return out;
 }
 
+// P6C-03: registro de hijos para matarlos ante cualquier error (antes el driver quedaba colgado si
+// un paso fallaba con un hijo vivo) y vigía global que aborta con exit 1 (fail-closed).
+const CHILDREN = new Set();
+const track = (child) => { CHILDREN.add(child); child.once('exit', () => CHILDREN.delete(child)); return child; };
+const killAll = () => { for (const c of CHILDREN) { if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL'); } };
+const WATCHDOG_MS = Number(process.env.ISO_WATCHDOG_MS ?? 300_000);
+setTimeout(() => { console.error(`driver: ERROR vigía: ${WATCHDOG_MS} ms sin terminar`); killAll(); process.exit(1); }, WATCHDOG_MS).unref();
+
 // Oyentes: anuncian cada accept en stdout.
 const accepts = {};
 function startListeners(uid, specs, env) {
   return new Promise((resolve, reject) => {
     const [cmd, pre] = uid === 0 ? [NODE, []] : asUid(uid);
     const args = uid === 0 ? [path.join(HERE, 'listener.mjs'), JSON.stringify(specs)] : [...pre, NODE, path.join(HERE, 'listener.mjs'), JSON.stringify(specs)];
-    const child = spawn(cmd, args, { env, stdio: ['ignore', 'pipe', 'inherit'] });
+    const child = track(spawn(cmd, args, { env, stdio: ['ignore', 'pipe', 'inherit'] }));
     let buf = '';
     child.stdout.on('data', (d) => {
       buf += d;
@@ -146,7 +154,7 @@ function httpReq(port, method, urlPath, headers = {}) {
 
 function spawnAs(uid, args, { env, cwd, stdin = 'ignore' }) {
   const [cmd, pre] = asUid(uid);
-  return spawn(cmd, [...pre, ...args], { env, cwd, stdio: [stdin, 'pipe', 'pipe'] });
+  return track(spawn(cmd, [...pre, ...args], { env, cwd, stdio: [stdin, 'pipe', 'pipe'] }));
 }
 
 function waitLine(child, re, ms = 10_000) {
@@ -345,4 +353,4 @@ async function main() {
   process.exitCode = fail === 0 ? 0 : 1;
 }
 
-main().catch((e) => { console.error(`driver: ERROR ${e.stack ?? e}`); process.exitCode = 1; });
+main().catch((e) => { console.error(`driver: ERROR ${e.stack ?? e}`); killAll(); process.exit(1); });
