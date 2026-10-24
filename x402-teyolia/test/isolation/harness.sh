@@ -49,12 +49,22 @@ echo "# build-info: $(tr -d '\n ' < "$PKG/dist/build-info.json" | cut -c1-200)"
 # cuotas ni otros valores que cambian con el tráfico; sin `-a`: sin handles). Falla cerrado si nft devuelve
 # rc≠0 o escribe en stderr, y si la tabla del arnés (inet x402iso) aparece en el host. Ante una diferencia
 # imprime `diff -u` antes de fallar.
+# P70 (Fernando 2026-10-24 16:36, t132u): nft escribe en stderr «# Warning: table <familia> <tabla> is managed
+# by iptables-nft, do not touch!» por cada tabla con expresiones xt (src/rule.c, table_print; iptables-nft de
+# Docker/waagent en el runner). Solo esas líneas EXACTAS se admiten: se imprimen como evidencia y se añaden, en
+# su orden, a la vista comparada antes/después. Cualquier otra línea de stderr queda en $1.err y falla.
+XT_AVISO='^# Warning: table (ip|ip6|inet|arp|bridge) [a-z0-9_]+ is managed by iptables-nft, do not touch!$'
 RS_DIR="$(mktemp -d /tmp/x402-iso-rs.XXXXXX)"
 trap 'rm -rf "$RS_DIR"' EXIT
 host_ruleset() {
   if ! "$NFT_BIN" -s list ruleset >"$RS_DIR/$1" 2>"$RS_DIR/$1.err"; then fail "nft -s list ruleset del host falló ($1): $(head -c 300 "$RS_DIR/$1.err")"; fi
-  [ ! -s "$RS_DIR/$1.err" ] || fail "nft -s list ruleset del host escribió en stderr ($1): $(head -c 300 "$RS_DIR/$1.err")"
+  mv "$RS_DIR/$1.err" "$RS_DIR/$1.stderr"
+  LC_ALL=C sed -nE "/$XT_AVISO/p" "$RS_DIR/$1.stderr" >"$RS_DIR/$1.xt"
+  LC_ALL=C sed -E "/$XT_AVISO/d" "$RS_DIR/$1.stderr" >"$RS_DIR/$1.err"
+  [ ! -s "$RS_DIR/$1.err" ] || fail "nft -s list ruleset del host escribió en stderr algo distinto del aviso de iptables-nft ($1): $(head -c 300 "$RS_DIR/$1.err")"
   if grep -Eq '^table inet x402iso( |$)' "$RS_DIR/$1"; then fail "la tabla del arnés inet x402iso está en el ruleset del host ($1)"; fi
+  sed -e "s/^/# aviso de nft ($1, admitido): /" "$RS_DIR/$1.xt"
+  { echo "#-- stderr de nft: avisos de iptables-nft admitidos, en orden --"; cat "$RS_DIR/$1.xt"; } >>"$RS_DIR/$1"
 }
 host_ruleset antes
 HOST_RULESET_BEFORE="$(sha256sum "$RS_DIR/antes" | cut -d' ' -f1)"

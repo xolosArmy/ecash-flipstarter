@@ -20,7 +20,7 @@ const read = (f) => readFileSync(path.join(ISO, f), 'utf8');
 // P6D-02: sha256 del archivo de pines. Vive AQUÍ (no en root-pins.sha256 ni en el workflow) para evitar
 // la circularidad: root-pins.sha256 fija el workflow y los scripts root; este test fija root-pins.sha256.
 // Cualquier cambio del workflow o de un script root obliga a regenerar ambos en el mismo diff auditado.
-const ROOT_PINS_SHA256 = '09dbcf4aef2fec7a50fd6e1fb4078c7ea853eb796d3b8f0e1126c76bedff0e02';
+const ROOT_PINS_SHA256 = '190a30c688e645b0fd7619fce8868717144a1b045c1aa478c1cba01371464805';
 const ROOT_PINNED = [
   '../.github/workflows/x402-ta2.yml', 'test/isolation/harness.sh', 'test/isolation/inner.sh', 'test/isolation/driver.mjs',
   'test/isolation/probe.mjs', 'test/isolation/listener.mjs', 'test/isolation/app-adapters.mjs', 'test/isolation/egress.nft',
