@@ -1,0 +1,13 @@
+# PR-6 (T-12; D-P6-1 (a)). Política de egreso por uid para el netns DESECHABLE del arnés. Nunca se
+# carga en el ruleset del host. @X402_UID@ = usuario de SO del proceso x402 (sintético);
+# @CHRONIK_HOST@:@CHRONIK_PORT@ = destino derivado de TEYOLIA_X402_CHRONIK_URL (DM-1, endpoint fijo).
+# Solo cuenta conexiones NUEVAS (ct state new): las respuestas del proceso a conexiones entrantes
+# son tráfico «established» y no cuentan como egreso.
+table inet x402iso {
+  chain out {
+    type filter hook output priority 0; policy accept;
+    meta skuid @X402_UID@ ct state new counter comment "x402-new"
+    meta skuid @X402_UID@ ct state new ip daddr @CHRONIK_HOST@ tcp dport @CHRONIK_PORT@ counter accept comment "x402-chronik"
+    meta skuid @X402_UID@ ct state new counter reject comment "x402-deny"
+  }
+}
