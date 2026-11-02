@@ -3,6 +3,11 @@
 // son archivos propios y distintos. Falla cerrado (por configuración) si alguno apunta a la DB
 // legacy (`campaigns.db`) o vive en un directorio que la contiene, si no es una ruta absoluta de
 // archivo, si es volátil (`:memory:`, URI `file:`) o si los dos coinciden.
+// P3-L3 (PR-6a; t117u): también si el archivo YA existe y tiene más de un enlace duro (nlink > 1):
+// un hardlink a `campaigns.db` (u otra DB) en otro directorio no lo detectan ni el nombre ni
+// realpath. Se comprueba aquí, antes de abrir o crear nada: openPersistence llama a
+// readPersistenceConfig antes de crear el store o el grant, y en startServer eso corre después de
+// la identidad de build (M5-V1 opción B, exit 78) y de validateAppConfig.
 
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -46,7 +51,9 @@ function resolveOne(env: Env, variable: string): string {
   if (existsSync(full)) {
     const real = realpathSync(full);
     if (path.basename(real).toLowerCase() === LEGACY_DB_BASENAME) throw new PersistenceConfigError(variable, 'enlace hacia la DB legacy campaigns.db (T-18)');
-    if (!statSync(real).isFile()) throw new PersistenceConfigError(variable, 'no es un archivo regular');
+    const st = statSync(real);
+    if (!st.isFile()) throw new PersistenceConfigError(variable, 'no es un archivo regular');
+    if (st.nlink > 1) throw new PersistenceConfigError(variable, 'archivo existente con más de un enlace duro (nlink > 1; P3-L3)');
     return real;
   }
   return full;

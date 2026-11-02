@@ -43,19 +43,6 @@ export interface GuardInput {
 const ALLOWED = new Set<string>([...NORMATIVE_ALLOWLIST, ...SYSTEM_ALLOWLIST]);
 const NEGATIVE = new Set<string>(NEGATIVE_EXACT);
 
-/** Flags de execArgv prohibidos (T-10g estricto y T-10i). Se compara el nombre antes de '='. */
-const FORBIDDEN_EXEC_FLAGS: readonly string[] = [
-  '--env-file',
-  '--env-file-if-exists',
-  '--require',
-  '-r',
-  '--import',
-  '--experimental-loader',
-  '--loader',
-  '--experimental-preload',
-];
-const FORBIDDEN_EXEC_PREFIXES: readonly string[] = ['--inspect', '--debug'];
-
 /**
  * Condición D-1 y P2b-L3 (PR-4): con el kill switch ON el proceso tiene que arrancar con
  * `--disallow-code-generation-from-strings`, de modo que V8 rechaza eval, `new Function`,
@@ -75,6 +62,17 @@ const FORBIDDEN_EXEC_PREFIXES: readonly string[] = ['--inspect', '--debug'];
  * residual LOW documentado (P4-L2 (PR-4)).
  */
 export const CODEGEN_FLAG = '--disallow-code-generation-from-strings';
+
+/**
+ * PR1-L4 (PR-6a; t117u): execArgv deny-by-default. Solo se admiten los argumentos de esta lista,
+ * comparados de forma EXACTA (cadena completa, sin `=valor`, sin variantes con `_`). Cualquier otro
+ * argumento de Node (`--import`, `--require`/`-r`, `--loader`, `--env-file*`, `--inspect*`, `--debug*`,
+ * `--expose-*`, `--max-old-space-size=…`, `--title=…`, `--permission`, …) -> regla EXEC_ARGV y exit 78.
+ * Sustituye a la lista negra anterior (T-10i), que dejaba pasar todo lo no enumerado.
+ * Ampliar esta lista (p. ej. `--permission`/`--allow-fs-read` si G3-02 los adopta) es un cambio de
+ * control: requiere decisión registrada y re-auditoría.
+ */
+export const ALLOWED_EXEC_ARGV: readonly string[] = Object.freeze([CODEGEN_FLAG]);
 
 function codegenBlocked(execArgv: readonly string[]): boolean {
   const mentions = execArgv.filter((a) => /code[-_]generation/i.test(a));
@@ -172,11 +170,11 @@ export function evaluateStartup(input: GuardInput): GuardResult {
     if (!nameRejected.has('TEYOLIA_X402_LISTEN')) reject('TEYOLIA_X402_LISTEN', 'LISTEN');
   }
 
+  // PR1-L4: deny-by-default. Se registra solo el NOMBRE del flag (antes de '='), nunca su valor.
   for (const arg of input.execArgv) {
-    const flag = arg.split('=', 1)[0] ?? arg;
-    if (FORBIDDEN_EXEC_FLAGS.includes(flag) || FORBIDDEN_EXEC_PREFIXES.some((p) => flag.startsWith(p))) {
-      reject(/^-{1,2}[A-Za-z0-9-]{1,64}$/.test(flag) ? flag : '<flag>', 'EXEC_ARGV');
-    }
+    if (typeof arg === 'string' && ALLOWED_EXEC_ARGV.includes(arg)) continue;
+    const flag = typeof arg === 'string' ? (arg.split('=', 1)[0] ?? arg) : '';
+    reject(/^-{1,2}[A-Za-z0-9-]{1,64}$/.test(flag) ? flag : '<flag>', 'EXEC_ARGV');
   }
 
   let entries: readonly string[] = [];
