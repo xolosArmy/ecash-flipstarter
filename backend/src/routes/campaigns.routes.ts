@@ -28,6 +28,11 @@ import {
   legacyPlaceholderDisabledBody,
   LEGACY_PLACEHOLDER_DISABLED_STATUS,
 } from '../security/legacyPlaceholderFreeze';
+import {
+  campaignFinalizeDisabledBody,
+  isCampaignFinalizeEnabled,
+  MONETARY_ROUTE_DISABLED_STATUS,
+} from '../security/monetaryRouteGates';
 
 type CampaignStatus =
   | 'draft'
@@ -862,6 +867,9 @@ router.get('/campaigns/:id/activation/status', activationStatusHandler);
 router.get('/campaign/:id/activation/status', activationStatusHandler);
 
 const finalizeCampaignHandler: Parameters<typeof router.post>[1] = async (req, res) => {
+  if (!isCampaignFinalizeEnabled()) {
+    return res.status(MONETARY_ROUTE_DISABLED_STATUS).json(campaignFinalizeDisabledBody());
+  }
   let campaign: CampaignApiRecord | null = null;
   try {
     const campaignId = validateCampaignIdParam(req.params.id);

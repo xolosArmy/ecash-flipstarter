@@ -1,7 +1,17 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
+
+// P7A-07: la ruta está apagada por defecto (ENABLE_PUBLIC_BROADCAST, solo 'true' exacto); este test
+// cubre la ruta habilitada y restaura el valor previo.
+const previousPublicBroadcast = process.env.ENABLE_PUBLIC_BROADCAST;
+
+afterEach(() => {
+  if (previousPublicBroadcast === undefined) delete process.env.ENABLE_PUBLIC_BROADCAST;
+  else process.env.ENABLE_PUBLIC_BROADCAST = previousPublicBroadcast;
+});
 
 beforeEach(() => {
   vi.resetModules();
+  process.env.ENABLE_PUBLIC_BROADCAST = 'true';
   process.env.E_CASH_BACKEND = 'chronik';
   process.env.CHRONIK_BASE_URL = 'https://chronik.example';
   process.env.ALLOWED_ORIGIN = '*';

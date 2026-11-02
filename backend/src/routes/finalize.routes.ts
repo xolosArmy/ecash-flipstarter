@@ -5,11 +5,19 @@ import {
   legacyPlaceholderDisabledBody,
   LEGACY_PLACEHOLDER_DISABLED_STATUS,
 } from '../security/legacyPlaceholderFreeze';
+import {
+  campaignFinalizeDisabledBody,
+  isCampaignFinalizeEnabled,
+  MONETARY_ROUTE_DISABLED_STATUS,
+} from '../security/monetaryRouteGates';
 
 const router = Router();
 const service = new FinalizeService();
 
 router.post('/campaign/:id/finalize', async (req, res) => {
+  if (!isCampaignFinalizeEnabled()) {
+    return res.status(MONETARY_ROUTE_DISABLED_STATUS).json(campaignFinalizeDisabledBody());
+  }
   try {
     const result = await service.finalizeCampaign(req.params.id);
     res.json({

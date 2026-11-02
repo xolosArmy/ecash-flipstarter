@@ -14,6 +14,8 @@ Base path: `/api`
 - Response: `{ unsignedTx, rawHex, unsignedTxHex }` (unsigned transaction) plus any fee/change metadata if available.
 
 ## POST /api/campaign/:id/finalize
+- **Disabled by default (P7A-07).** Requires `ENABLE_CAMPAIGN_FINALIZE=true` (exact, case-sensitive string; any other value or an unset variable keeps it disabled). When disabled it responds `403` with `{ "error": "campaign-finalize-disabled", "code": "campaign-finalize-disabled" }` before reading the body, the campaign or any signing key.
+- The same flag gates the aliases `POST /api/campaigns/:id/finalize-request`, `POST /api/campaign/:id/finalize-request` and `POST /api/campaigns/:id/payout/build` (they reach the same signing path).
 - Body: `{ beneficiaryAddress? }` (optional override if allowed)
 - Response: `{ unsignedTx, rawHex }` (unsigned transaction to beneficiary).
 
@@ -22,6 +24,8 @@ Base path: `/api`
 - Response: `{ unsignedTx, rawHex }` (unsigned refund transaction).
 
 ## POST /api/tx/broadcast
+- **Disabled by default (P7A-07).** Requires `ENABLE_PUBLIC_BROADCAST=true` (exact, case-sensitive string; any other value or an unset variable keeps it disabled). When disabled it responds `403` with `{ "error": "public-broadcast-disabled", "code": "public-broadcast-disabled" }` and nothing is broadcast.
+- The same flag gates the alias `POST /api/broadcast`.
 - Body: `{ rawTxHex }`
 - Response: `{ txid, backendMode, message }`
 
