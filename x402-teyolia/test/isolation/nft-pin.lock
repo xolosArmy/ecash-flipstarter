@@ -1,0 +1,14 @@
+# PR-6 / P6C-02 (Fernando 2026-10-24 11:28 CDMX): .deb de nftables fijados por SHA-256 para el paso de
+# aislamiento en ubuntu-24.04. Formato: <sha256> <paquete> <versión> <arquitectura> <requerido|dependencia>
+# «requerido»: se descarga, se verifica y se instala SIEMPRE. «dependencia»: solo se admite si apt la
+# planifica (porque falta en la imagen); cualquier paquete planificado que no esté aquí hace fallar el
+# paso. Fuente: archive.ubuntu.com/ubuntu/dists/{noble,noble-updates}/main/binary-amd64/Packages.gz
+# (24-oct-2026). Procedimiento de actualización: x402-teyolia/docs/pr6-aislamiento.md §1.1 (runbook).
+d648859fccde3c17b8b9b89993427564f91f394a39306db1f67bd5ea3ac42c6e nftables 1.0.9-1ubuntu0.1 amd64 requerido
+fcaee001747a6adaa0cd9337fef437b3aa7a7a6d5246b62fbd4784d3d6a5009e libnftables1 1.0.9-1ubuntu0.1 amd64 requerido
+e5bde5c9cbb95082700011f0b7ef2c0a41900b0a9fd7434f6e90448e2a7b4e50 libnftnl11 1.2.6-2build1 amd64 dependencia
+0cf79113f5d193ce9af2be2ff4b2c3b30dd4e55a0b6c47f7d28f6c849ff3aa60 libjansson4 2.14-2build2 amd64 dependencia
+5170658bf0eaf54a8c7d53061ca6b47a6cf33a83543a75fa521de7046cb7197a libmnl0 1.0.5-2build1 amd64 dependencia
+3afbc8ddf835049dd4d88275b9d13680e4c4cdd59e191cbd63424152cc08e00e libedit2 3.1-20230828-1build1 amd64 dependencia
+c94063499d1b0b336f39607107efb7de95d52a5d4e7e6a9368a5f7308f05b714 libxtables12 1.8.10-3ubuntu2 amd64 dependencia
+285f8a505dfa8e1b33f357a9d8d3477ad35bf18c0b34771a6df4c25923f3ae0d libgmp10 2:6.3.0+dfsg-2ubuntu6.1 amd64 dependencia

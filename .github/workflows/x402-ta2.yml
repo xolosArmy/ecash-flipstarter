@@ -13,7 +13,8 @@ permissions:
 jobs:
   x402-teyolia:
     name: x402-teyolia (Node 22.13.1)
-    runs-on: ubuntu-latest
+    # PR-6, D-P6-1 (a) (Fernando, 2026-10-24 09:21): imagen fijada para el paso de aislamiento.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
       run:
@@ -71,3 +72,28 @@ jobs:
           d="$(mktemp -d)"; cp -R dist "$d/dist"; printf ' ' >> "$d/dist/server.js"
           if node scripts/dist-manifest.mjs --check "$d/dist"; then echo "control negativo M5-V1: un dist/ mutado NO falló"; exit 1; fi
           echo "control negativo M5-V1: dist/ mutado rechazado"
+
+      # PR-6, D-P6-1 (a) / PM6-05: aislamiento del SO (T-12 egreso, T-12e IPC, T-13 DAC, T-06 runtime).
+      # Un ÚNICO paso dentro de este job requerido (sin workflow ni check nuevo), fail-closed (sin
+      # continue-on-error). Namespaces desechables (unshare --mount --net --pid) con uids numéricos
+      # 2001/2002 sin /etc/passwd; el ruleset nft vive SOLO en el netns desechable; el arnés verifica que
+      # el ruleset del host y /etc/passwd no cambian. npm NO se ejecuta como root (dist/ ya construido
+      # arriba por el usuario del runner); sin secretos. Dependencia: nftables fijado por SHA-256 (.deb
+      # oficiales de Ubuntu, versión y hashes en test/isolation/nft-pin.lock) (P6C-02: falla
+      # cerrado si la versión no está disponible o el hash no coincide; sin fallback). Alternativa declarada:
+      # iptables -m owner. Runbook de actualización: x402-teyolia/docs/pr6-aislamiento.md §1.1. El contrato
+      # test/pr6.harness-contract.test.mjs fija el texto exacto de este paso (P6C-01) y la forma canónica de
+      # todo el workflow (P6D-01). Antes del sudo se verifican los sha256 fijados del workflow y de los
+      # scripts root (test/isolation/root-pins.sha256; su propio hash lo fija el contrato) y después se
+      # exige el plan exacto 1..22, # pass 22 y # fail 0 (P6D-02).
+      - name: Aislamiento del SO PR-6 (T-12 / T-12e / T-13 / T-06; nft fijado por sha256, fail-closed)
+        run: |
+          set -euo pipefail
+          sha256sum --check --strict test/isolation/root-pins.sha256
+          bash test/isolation/nft-pin.sh install
+          echo "ImageVersion: ${ImageVersion:-?}"; echo "runner: uid=$(id -u) gid=$(id -g)"
+          sudo env ImageVersion="${ImageVersion:-}" NODE_BIN="$(command -v node)" NFT_BIN=/usr/sbin/nft bash test/isolation/harness.sh | tee "$RUNNER_TEMP/pr6-arnes.log"
+          grep -Fx '1..22' "$RUNNER_TEMP/pr6-arnes.log"
+          grep -Fx '# pass 22' "$RUNNER_TEMP/pr6-arnes.log"
+          grep -Fx '# fail 0' "$RUNNER_TEMP/pr6-arnes.log"
+          grep -Fx '# arnés PR-6: OK 22/22' "$RUNNER_TEMP/pr6-arnes.log"
