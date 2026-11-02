@@ -2,10 +2,10 @@
 # Generador: x402-teyolia/scripts/inventory.mjs (formato v1). Salida determinista: sin fechas.
 commit_base: 239f9dc9d64361700b798cebde0f30a0dc368e7b
 alcance: backend/src (excluye __tests__/, *.test.*, *.spec.*)
-archivos: 42
-digest_backend_src: sha256:9b6320581c669519649b9c96520e9951a4ea8ed85624e9b664694134970ae9f9 (sha256 de las líneas "<sha256>  <ruta>" ordenadas, una por archivo)
+archivos: 43
+digest_backend_src: sha256:f2605c98c15ef6abcf4c7730ede00c5e67dc0762853bbb5316d7f2b26770ca65 (sha256 de las líneas "<sha256>  <ruta>" ordenadas, una por archivo)
 
-## 1 Variables de entorno leídas (42 nombres)
+## 1 Variables de entorno leídas (44 nombres)
 # NOMBRE | clase | disposición en el proceso x402 | lecturas (módulo:línea (tipo))
 ENV API_PORT | configuración | rechazada en x402 (regla B) | server:48 (directa); server:49 (directa)
 ENV BENEFICIARY_PRIVKEY | secreto (llave/semilla) | rechazada en x402 (regla A) | services/CampaignService:83 (directa); services/FinalizeService:77 (vía resolvePrivateKeyFromEnv); services/FinalizeService:220 (vía resolvePrivateKeyFromEnv)
@@ -19,18 +19,20 @@ ENV ECASH_NETWORK | configuración | rechazada en x402 (regla B) | config/env:8 
 ENV ECASH_RPC_PASS | credencial | rechazada en x402 (regla A) | config/ecash:3 (directa); config/ecash:10 (directa)
 ENV ECASH_RPC_URL | url (puede llevar credencial) | rechazada en x402 (regla A) | config/ecash:4 (directa); config/ecash:8 (directa); config/env:7 (directa)
 ENV ECASH_RPC_USER | credencial | rechazada en x402 (regla A) | config/ecash:2 (directa); config/ecash:9 (directa)
+ENV ENABLE_CAMPAIGN_FINALIZE | flag de control | rechazada en x402 (regla B) | security/monetaryRouteGates:21 (directa)
+ENV ENABLE_PUBLIC_BROADCAST | flag de control | rechazada en x402 (regla B) | security/monetaryRouteGates:17 (directa)
 ENV ENABLE_PUBLIC_REFUNDS | flag de control | rechazada en x402 (regla A) | routes/refund.routes:20 (directa)
 ENV E_CASH_BACKEND | configuración | rechazada en x402 (regla B) | config/ecash:13 (directa)
 ENV E_CASH_RPC_PASS | credencial | rechazada en x402 (regla A) | config/ecash:3 (directa); config/ecash:10 (directa)
 ENV E_CASH_RPC_URL | url (puede llevar credencial) | rechazada en x402 (regla A) | config/ecash:4 (directa); config/ecash:8 (directa); config/env:7 (directa)
 ENV E_CASH_RPC_USER | credencial | rechazada en x402 (regla A) | config/ecash:2 (directa); config/ecash:9 (directa)
-ENV FORCE_RESCUE_CAMPAIGN_ID | flag de control | rechazada en x402 (regla A) | routes/campaigns.routes:883 (directa); services/AutoPayoutService:129 (directa)
+ENV FORCE_RESCUE_CAMPAIGN_ID | flag de control | rechazada en x402 (regla A) | routes/campaigns.routes:891 (directa); services/AutoPayoutService:129 (directa)
 ENV GAS_WALLET_ADDRESS | identificador no secreto | rechazada en x402 (regla B) | services/AutoPayoutService:222 (directa); services/FinalizeService:104 (directa); services/FinalizeService:202 (directa)
 ENV GAS_WALLET_PRIVKEY | secreto (llave/semilla) | rechazada en x402 (regla A) | services/FinalizeService:102 (directa); services/FinalizeService:118 (vía resolvePrivateKeyFromEnv); services/FinalizeService:200 (directa)
 ENV GAS_WALLET_SEED | secreto (llave/semilla) | rechazada en x402 (regla A) | services/AutoPayoutService:221 (directa); services/FinalizeService:100 (directa); services/FinalizeService:118 (vía resolvePrivateKeyFromEnv)
 ENV HOST | configuración | rechazada en x402 (regla B) | server:85 (directa)
 ENV MIGRATE_ON_START | configuración | rechazada en x402 (regla B) | store/campaignPersistence:36 (directa)
-ENV NODE_ENV | configuración | admitida en x402 (allowlist normativa) | app:20 (directa); routes/campaigns.routes:739 (directa); routes/campaigns.routes:822 (directa); routes/walletconnect.routes:18 (directa); routes/walletconnect.routes:36 (directa); server:88 (directa)
+ENV NODE_ENV | configuración | admitida en x402 (allowlist normativa) | app:20 (directa); routes/campaigns.routes:744 (directa); routes/campaigns.routes:827 (directa); routes/walletconnect.routes:18 (directa); routes/walletconnect.routes:36 (directa); server:88 (directa)
 ENV PORT | configuración | rechazada en x402 (regla B) | server:48 (directa); server:49 (escritura); server:84 (directa)
 ENV REFUND_ORACLE_PRIVKEY | secreto (llave/semilla) | rechazada en x402 (regla A) | services/RefundService:189 (vía resolvePrivateKeyFromEnv)
 ENV REFUND_ORACLE_PUBKEY | identificador no secreto | rechazada en x402 (regla A) | covenants/scriptCompiler:534 (directa); covenants/scriptCompiler:566 (directa); services/CampaignService:520 (directa)
@@ -79,9 +81,9 @@ MODULO covenants/campaignDefinition | - | - | blockchain/covenantIndex, covenant
 MODULO covenants/scriptCompiler | - | - | covenants/campaignDefinition, ext:crypto, ext:ecashaddrjs, utils/validation
 MODULO db/SQLiteStore | DB_LEGACY | - | config/constants, ext:fs, ext:path, ext:sqlite, ext:sqlite3, types/tokenOutput
 MODULO db/migrateCampaigns | DB_LEGACY | DB_LEGACY<-db/SQLiteStore | db/SQLiteStore, ext:fs, ext:path
-MODULO routes/broadcast.routes | TRANSMITE | TRANSMITE<-blockchain/ecashClient,LEE_CREDENCIAL<-blockchain/ecashClient | blockchain/ecashClient, config/ecash, ext:express, utils/validation
-MODULO routes/campaigns.routes | - | FIRMA<-blockchain/txBuilder,TRANSMITE<-blockchain/ecashClient,LEE_LLAVE<-services/CampaignService,LEE_CREDENCIAL<-blockchain/ecashClient,DB_LEGACY<-services/CampaignService | blockchain/ecashClient, config/constants, ext:express, security/legacyPlaceholderFreeze, services/CampaignService, services/FinalizeService, services/PledgeReconciliationService, services/WalletConnectOfferStore, store/simplePledges, types/tokenOutput, utils/ecashUnits, utils/validation
-MODULO routes/finalize.routes | - | FIRMA<-blockchain/txBuilder,TRANSMITE<-services/FinalizeService,LEE_LLAVE<-services/FinalizeService,LEE_CREDENCIAL<-blockchain/ecashClient,DB_LEGACY<-services/CampaignService | ext:express, security/legacyPlaceholderFreeze, services/FinalizeService
+MODULO routes/broadcast.routes | TRANSMITE | TRANSMITE<-blockchain/ecashClient,LEE_CREDENCIAL<-blockchain/ecashClient | blockchain/ecashClient, config/ecash, ext:express, security/monetaryRouteGates, utils/validation
+MODULO routes/campaigns.routes | - | FIRMA<-blockchain/txBuilder,TRANSMITE<-blockchain/ecashClient,LEE_LLAVE<-services/CampaignService,LEE_CREDENCIAL<-blockchain/ecashClient,DB_LEGACY<-services/CampaignService | blockchain/ecashClient, config/constants, ext:express, security/legacyPlaceholderFreeze, security/monetaryRouteGates, services/CampaignService, services/FinalizeService, services/PledgeReconciliationService, services/WalletConnectOfferStore, store/simplePledges, types/tokenOutput, utils/ecashUnits, utils/validation
+MODULO routes/finalize.routes | - | FIRMA<-blockchain/txBuilder,TRANSMITE<-services/FinalizeService,LEE_LLAVE<-services/FinalizeService,LEE_CREDENCIAL<-blockchain/ecashClient,DB_LEGACY<-services/CampaignService | ext:express, security/legacyPlaceholderFreeze, security/monetaryRouteGates, services/FinalizeService
 MODULO routes/pledge.build | - | FIRMA<-blockchain/txBuilder,TRANSMITE<-blockchain/ecashClient,LEE_LLAVE<-services/CampaignService,LEE_CREDENCIAL<-blockchain/ecashClient,DB_LEGACY<-services/CampaignService | ext:express, routes/campaigns.routes, routes/pledgePayload, security/legacyPlaceholderFreeze, services/CampaignService, services/PledgeOfferService, utils/validation
 MODULO routes/pledge.routes | - | FIRMA<-blockchain/txBuilder,TRANSMITE<-blockchain/ecashClient,LEE_LLAVE<-services/CampaignService,LEE_CREDENCIAL<-blockchain/ecashClient,DB_LEGACY<-services/CampaignService | ext:express, routes/campaigns.routes, routes/pledgePayload, security/legacyPlaceholderFreeze, services/CampaignService, services/PledgeOfferService, services/PledgeVerificationService, store/simplePledges, utils/validation
 MODULO routes/pledgePayload | - | - | -
@@ -90,6 +92,7 @@ MODULO routes/serialize | - | FIRMA<-blockchain/txBuilder,TRANSMITE<-blockchain/
 MODULO routes/walletconnect.routes | - | FIRMA<-blockchain/txBuilder,TRANSMITE<-blockchain/ecashClient,LEE_LLAVE<-services/CampaignService,LEE_CREDENCIAL<-blockchain/ecashClient,DB_LEGACY<-services/CampaignService | ext:express, security/legacyPlaceholderFreeze, services/CampaignService, services/WalletConnectOfferStore
 MODULO scripts/migrateCampaigns | DB_LEGACY | DB_LEGACY<-db/SQLiteStore | db/SQLiteStore, store/campaignPersistence
 MODULO security/legacyPlaceholderFreeze | - | - | covenants/scriptCompiler
+MODULO security/monetaryRouteGates | - | - | -
 MODULO server | DB_LEGACY,CANAL | FIRMA<-blockchain/txBuilder,TRANSMITE<-blockchain/ecashClient,LEE_LLAVE<-services/CampaignService,LEE_CREDENCIAL<-blockchain/ecashClient,DB_LEGACY<-services/CampaignService | app, blockchain/ecashClient, config/ecash, db/SQLiteStore, ext:fs, ext:path, services/CampaignService, store/campaignPersistence, store/db
 MODULO services/AutoPayoutService | FIRMA,TRANSMITE,LEE_LLAVE | FIRMA<-blockchain/txBuilder,TRANSMITE<-blockchain/ecashClient,LEE_LLAVE<-blockchain/txBuilder,LEE_CREDENCIAL<-blockchain/ecashClient,DB_LEGACY<-services/CampaignService | blockchain/ecashClient, blockchain/txBuilder, blockchain/types, covenants/scriptCompiler, ext:crypto, security/legacyPlaceholderFreeze, services/CampaignService, utils/ecashUnits, utils/validation
 MODULO services/CampaignService | LEE_LLAVE,DB_LEGACY | FIRMA<-blockchain/txBuilder,TRANSMITE<-blockchain/ecashClient,LEE_LLAVE<-blockchain/txBuilder,LEE_CREDENCIAL<-blockchain/ecashClient,DB_LEGACY<-db/SQLiteStore | blockchain/covenantIndex, blockchain/txBuilder, config/constants, covenants/campaignDefinition, covenants/scriptCompiler, db/SQLiteStore, ext:@noble/curves/secp256k1, security/legacyPlaceholderFreeze, store/campaignPersistence, store/db, types/tokenOutput, utils/ecashUnits
