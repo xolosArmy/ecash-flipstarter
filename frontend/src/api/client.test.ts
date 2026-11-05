@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { confirmActivationTx, confirmLatestPendingPledgeTx, confirmLatestPendingPledgeTxWithRetry } from './client';
+import {
+  confirmActivationTx,
+  confirmLatestPendingPledgeTx,
+  confirmLatestPendingPledgeTxWithRetry,
+  fetchCampaignPledges,
+} from './client';
 
 describe('confirmActivationTx', () => {
   afterEach(() => {
@@ -27,7 +32,6 @@ describe('confirmActivationTx', () => {
     );
   });
 });
-
 
 describe('confirmLatestPendingPledgeTx', () => {
   afterEach(() => {
@@ -86,5 +90,50 @@ describe('confirmLatestPendingPledgeTx', () => {
       confirmLatestPendingPledgeTxWithRetry('camp-1', txid, 'offer-1', { retryDelayMs: 0, timeoutMs: 1 }),
     ).resolves.toMatchObject({ status: 'confirmed', txid });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('fetchCampaignPledges', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('preserves pledgeId and wcOfferId from the backend response', async () => {
+    const txid = 'd'.repeat(64);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        totalPledged: 500000,
+        pendingTotalPledged: 0,
+        pledgeCount: 1,
+        pledges: [
+          {
+            pledgeId: 'pledge-123456789',
+            wcOfferId: 'wc-offer-abc123',
+            txid,
+            contributorAddress: 'ecash:qr0ft6aq66hnj4xcfecqvskvh5ssu8cgjs53pqwyca',
+            amount: 500000,
+            timestamp: '2026-08-12T19:00:00.000Z',
+            status: 'confirmed',
+          },
+        ],
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchCampaignPledges('campaign-test');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/campaigns/campaign-test/pledges',
+      expect.objectContaining({ headers: { 'Content-Type': 'application/json' } }),
+    );
+    expect(result.pledges[0]).toMatchObject({
+      pledgeId: 'pledge-123456789',
+      wcOfferId: 'wc-offer-abc123',
+      txid,
+      amount: 500000,
+      status: 'confirmed',
+    });
   });
 });
