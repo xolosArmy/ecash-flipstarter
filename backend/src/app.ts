@@ -13,6 +13,11 @@ import {
   getEffectiveChronikBaseUrl,
   getTipHeight,
 } from './blockchain/ecashClient';
+import {
+  monetaryFlowsDisabledBody,
+  monetaryFlowsEnabled,
+  MONETARY_FLOWS_DISABLED_STATUS,
+} from './security/monetaryContractPolicy';
 
 export function createApp() {
   const app = express();
@@ -47,6 +52,42 @@ export function createApp() {
   app.options('*', cors(corsOptions));
 
   app.use(express.json());
+
+  app.use((req, res, next) => {
+    const path = req.path;
+    const method = req.method.toUpperCase();
+
+    if (method === 'POST' && /^\/api\/campaigns?\/[^/]+\/payout$/.test(path)) {
+      return res.status(403).json({
+        error: 'legacy-payout-route-disabled',
+        code: 'legacy-payout-route-disabled',
+      });
+    }
+    if (method === 'POST' && /^\/api\/campaigns\/[^/]+\/payout\/confirm$/.test(path)) {
+      return res.status(403).json({
+        error: 'unverified-payout-confirm-disabled',
+        code: 'unverified-payout-confirm-disabled',
+      });
+    }
+
+    const monetaryPost =
+      method === 'POST'
+      && (
+        /^\/api\/campaigns?\/[^/]+\/(?:activate|pay-activation-fee|activation(?:\/.*)?|pledge(?:\/.*)?|finalize(?:-request)?|payout\/build|refund)$/.test(path)
+        || path === '/api/broadcast'
+        || path === '/api/tx/broadcast'
+      );
+    const monetaryOfferRead =
+      method === 'GET' && /^\/api\/walletconnect\/offers\/[^/]+$/.test(path);
+
+    if ((monetaryPost || monetaryOfferRead) && !monetaryFlowsEnabled()) {
+      return res
+        .status(MONETARY_FLOWS_DISABLED_STATUS)
+        .json(monetaryFlowsDisabledBody());
+    }
+
+    next();
+  });
 
   // Healthchecks
   app.get('/health', (_req, res) => {

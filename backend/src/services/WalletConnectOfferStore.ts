@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'crypto';
 import type { ActivationOfferOutput } from '../types/tokenOutput';
+import { assertMonetaryFlowsEnabled } from '../security/monetaryContractPolicy';
 
 export type WalletConnectOffer = {
   offerId: string;
@@ -34,6 +35,7 @@ export class WalletConnectOfferStore {
   createOffer(
     data: Omit<WalletConnectOffer, 'offerId' | 'createdAt' | 'expiresAt'>
   ): WalletConnectOffer {
+    assertMonetaryFlowsEnabled();
     const offerId = this.createOfferId();
     const createdAt = Date.now();
     const expiresAt = createdAt + this.ttlMs;
