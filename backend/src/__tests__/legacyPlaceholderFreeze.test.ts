@@ -166,15 +166,24 @@ describe('legacy-placeholder security freeze', () => {
   });
 
   it('rejects finalize, payout build, payout confirmation, and the legacy payout alias', async () => {
-    const responses = await Promise.all([
-      request(app).post(`/api/campaign/${LEGACY_CAMPAIGN_ID}/finalize`).send({}),
-      request(app).post(`/api/campaigns/${LEGACY_CAMPAIGN_ID}/finalize-request`).send({}),
-      request(app).post(`/api/campaigns/${LEGACY_CAMPAIGN_ID}/payout/build`).send({}),
-      request(app).post(`/api/campaigns/${LEGACY_CAMPAIGN_ID}/payout/confirm`).send({}),
-      request(app).post(`/api/campaigns/${LEGACY_CAMPAIGN_ID}/payout`).send({}),
-    ]);
+    // P7A-07: finalize / finalize-request / payout/build están detrás de ENABLE_CAMPAIGN_FINALIZE
+    // (apagado por defecto). Se habilita aquí para seguir probando el congelamiento legacy detrás del gate.
+    const previous = process.env.ENABLE_CAMPAIGN_FINALIZE;
+    process.env.ENABLE_CAMPAIGN_FINALIZE = 'true';
 
-    responses.forEach(expectDisabled);
+    try {
+      const responses = await Promise.all([
+        request(app).post(`/api/campaign/${LEGACY_CAMPAIGN_ID}/finalize`).send({}),
+        request(app).post(`/api/campaigns/${LEGACY_CAMPAIGN_ID}/finalize-request`).send({}),
+        request(app).post(`/api/campaigns/${LEGACY_CAMPAIGN_ID}/payout/build`).send({}),
+        request(app).post(`/api/campaigns/${LEGACY_CAMPAIGN_ID}/payout/confirm`).send({}),
+        request(app).post(`/api/campaigns/${LEGACY_CAMPAIGN_ID}/payout`).send({}),
+      ]);
+
+      responses.forEach(expectDisabled);
+    } finally {
+      restoreEnv('ENABLE_CAMPAIGN_FINALIZE', previous);
+    }
   });
 
   it('rejects the public refund path for legacy-placeholder when public refunds are enabled', async () => {

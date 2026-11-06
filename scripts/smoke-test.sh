@@ -125,9 +125,25 @@ fi
 
 if [ -n "$SIGNED_TX_HEX" ]; then
   broadcast_payload="$(jq -n --arg rawTxHex "$SIGNED_TX_HEX" '{rawTxHex:$rawTxHex}')"
-  broadcast_json="$(curl -sS -f -X POST "${API_BASE_URL}/tx/broadcast" \
+  # P7A-07: /tx/broadcast está apagado por defecto en el servidor (ENABLE_PUBLIC_BROADCAST, solo 'true'
+  # exacto). Este script no puede ni debe encenderlo: si el servidor responde 403
+  # public-broadcast-disabled, se informa y se termina con error sin reintentar.
+  broadcast_response="$(curl -sS -X POST "${API_BASE_URL}/tx/broadcast" \
     -H 'Content-Type: application/json' \
-    -d "$broadcast_payload")"
+    -d "$broadcast_payload" \
+    -w '\n%{http_code}')"
+  broadcast_http="${broadcast_response##*$'\n'}"
+  broadcast_json="${broadcast_response%$'\n'*}"
+  if [ "$broadcast_http" = "403" ] && [ "$(echo "$broadcast_json" | jq -r '.code // empty' 2>/dev/null)" = "public-broadcast-disabled" ]; then
+    echo "Broadcast disabled on the server (403 public-broadcast-disabled): ENABLE_PUBLIC_BROADCAST is not 'true'." >&2
+    echo "Broadcast the signed hex with your wallet instead, or enable the flag only in an authorized environment." >&2
+    exit 1
+  fi
+  if [ "${broadcast_http:0:1}" != "2" ]; then
+    echo "Broadcast failed (HTTP ${broadcast_http}):" >&2
+    echo "$broadcast_json" >&2
+    exit 1
+  fi
   txid="$(echo "$broadcast_json" | jq -r '.txid // empty')"
   if [ -z "$txid" ]; then
     echo "Broadcast failed:" >&2

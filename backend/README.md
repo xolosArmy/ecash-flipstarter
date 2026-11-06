@@ -35,12 +35,14 @@ curl https://chronik.xolosarmy.xyz/chronik-info
 - `TEYOLIA_GAS_WALLET_PRIVKEY` or `GAS_WALLET_PRIVKEY`: optional hex private key for auxiliary P2PKH gas inputs used by V1 `finalize`.
 - `TEYOLIA_GAS_WALLET_SEED` or `GAS_WALLET_SEED`: optional mnemonic seed alternative for the gas wallet signer.
 - `TEYOLIA_GAS_WALLET_ADDRESS` or `GAS_WALLET_ADDRESS`: optional address from which auxiliary gas UTXOs are loaded for V1 `finalize`. If omitted, V1 finalize still builds without gas inputs and the covenant output covers the fee.
+- `ENABLE_CAMPAIGN_FINALIZE` (P7A-07): fail-closed gate for `POST /api/campaign/:id/finalize`, `POST /api/campaigns/:id/finalize-request`, `POST /api/campaign/:id/finalize-request` and `POST /api/campaigns/:id/payout/build`. Only the exact value `true` enables them; otherwise they answer `403 { error: 'campaign-finalize-disabled', code: 'campaign-finalize-disabled' }` before any signing key is read.
+- `ENABLE_PUBLIC_BROADCAST` (P7A-07): fail-closed gate for `POST /api/broadcast` and `POST /api/tx/broadcast`. Only the exact value `true` enables them; otherwise they answer `403 { error: 'public-broadcast-disabled', code: 'public-broadcast-disabled' }` and nothing is broadcast.
 
 ## WalletConnect Offer Flow
 
 - Build pledge offer: `POST /api/campaigns/:id/pledge/build` with `{ "contributorAddress": "ecash:...", "amount": 3000 }`.
 - Build activation offer: `POST /api/campaigns/:id/activation/build` with `{ "payerAddress": "ecash:..." }`.
-- Build payout offer: `POST /api/campaigns/:id/payout/build`.
+- Build payout offer: `POST /api/campaigns/:id/payout/build` (disabled by default: requires `ENABLE_CAMPAIGN_FINALIZE=true`, otherwise `403 campaign-finalize-disabled`; see below).
 - Activation build now returns `mode: "intent"` with `outputs` only (no `rawHex`, no inputs/change).
 - Backend creates an opaque UUID `wcOfferId`; pledge/payout offers still include `unsignedTxHex` while activation uses intent payload.
 - Wallet side resolves offer data via `GET /api/walletconnect/offers/:offerId`.

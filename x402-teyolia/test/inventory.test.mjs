@@ -1,5 +1,5 @@
 // Inventario del commit exacto (TA1-M1): archivado, reproducible y completo frente a la
-// referencia independiente del Auditor (P-4 I-3: 42 nombres).
+// referencia independiente del Auditor (P-4 I-3: 42 nombres; P7A-07 añade 2 flags: 44).
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -10,6 +10,8 @@ import { FIXTURES } from './helpers.mjs';
 import { BASE_COMMIT, INVENTORY_FILE, INVENTORY_SHA_FILE, generateInventory, parseInventory } from '../scripts/inventory.mjs';
 
 const sha = (s) => createHash('sha256').update(s).digest('hex');
+// P7A-07: nombres añadidos a backend/src tras la referencia I-3 (42 -> 44).
+const P7A07_FLAGS = ['ENABLE_CAMPAIGN_FINALIZE', 'ENABLE_PUBLIC_BROADCAST'];
 const archived = readFileSync(INVENTORY_FILE, 'utf8');
 const inv = parseInventory(archived);
 
@@ -28,7 +30,19 @@ describe('inventario archivado de 239f9dc', () => {
     const ref = refRaw.toString('utf8').split('\n').filter(Boolean);
     assert.equal(ref.length, 42);
     for (const n of ref) assert.ok(inv.envNames.has(n), `falta ${n}`);
-    assert.equal(inv.envNames.size, 42);
+    // P7A-07 (decisión t147s733, DEC-P7A07-5): el inventario se regeneró en el mismo PR como cambio de
+    // control; backend/src añade exactamente 2 nombres a los 42 de la referencia del Auditor (44).
+    const added = [...inv.envNames].filter((n) => !ref.includes(n)).sort();
+    assert.deepEqual(added, P7A07_FLAGS);
+    assert.equal(inv.envNames.size, 44);
+  });
+  test('P7A-07: las 2 flags nuevas son flags de control, leídas solo en security/monetaryRouteGates y rechazadas en x402 (regla B)', () => {
+    for (const n of P7A07_FLAGS) {
+      const lines = archived.split('\n').filter((l) => l.startsWith(`ENV ${n} |`));
+      assert.equal(lines.length, 1, n);
+      assert.match(lines[0], new RegExp(`^ENV ${n} \\| flag de control \\| rechazada en x402 \\(regla B\\) \\| security/monetaryRouteGates:\\d+ \\(directa\\)$`), n);
+    }
+    assert.match(archived, /^MODULO security\/monetaryRouteGates \| - \| - \| -$/m);
   });
   test('variables I-3 del apéndice delta exigidas por el plan §4.2.8', () => {
     for (const n of ['BENEFICIARY_PUBKEY', 'TEYOLIA_BENEFICIARY_PUBKEY', 'REFUND_ORACLE_PUBKEY', 'GAS_WALLET_ADDRESS', 'TEYOLIA_GAS_WALLET_ADDRESS', 'TEYOLIA_TREASURY_ADDRESS', 'TEYOLIA_ACTIVATION_FEE_XEC', 'ECASH_NETWORK', 'E_CASH_BACKEND']) {
