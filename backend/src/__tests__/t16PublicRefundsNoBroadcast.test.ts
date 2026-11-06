@@ -9,6 +9,13 @@
 import express from 'express';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  installDeniedNetwork,
+  expectNetworkDeniedUnused,
+  flushAsyncWork,
+  clearDeniedNetworkSpies,
+  type DeniedNetworkSpies,
+} from './helpers/denyNetwork';
 
 const CAMPAIGN_ID = 'campaign-t16-1';
 const CAMPAIGN_SCRIPT = '76a914' + '22'.repeat(20) + '88ac';
@@ -26,10 +33,11 @@ type Spies = {
   markPledgeRefunded: ReturnType<typeof vi.fn>;
   getPledgeById: ReturnType<typeof vi.fn>;
   fetch: ReturnType<typeof vi.fn>;
+  net: DeniedNetworkSpies;
 };
 
 function installFakes(): Spies {
-  const spies: Spies = {
+  const spies = {
     broadcastRawTx: vi.fn().mockResolvedValue({ txid: FAKE_TXID }),
     broadcastTx: vi.fn().mockResolvedValue({ txid: FAKE_TXID }),
     rpcCall: vi.fn().mockRejectedValue(new Error('t16: rpcCall no permitido')),
@@ -97,7 +105,9 @@ function installFakes(): Spies {
     reconcilePendingPledgesForCampaign: vi.fn().mockResolvedValue({ inspected: 0, updated: 0, confirmed: 0, invalid: 0 }),
   }));
   vi.stubGlobal('fetch', spies.fetch);
-  return spies;
+  // P8G-06 / P7A-04: niega http|https|net.
+  const net = installDeniedNetwork();
+  return { ...spies, net };
 }
 
 async function loadRefundApp() {
@@ -121,9 +131,14 @@ function expectNoRefundAndNoBroadcast(spies: Spies, refundSpy: unknown) {
   expect(spies.getUtxosForAddress).not.toHaveBeenCalled();
   expect(spies.getPledgeById).not.toHaveBeenCalled();
   expect(spies.markPledgeRefunded).not.toHaveBeenCalled();
+
+  expectNetworkDeniedUnused(spies.net);
 }
 
-const DISABLED_VALUES: Array<string | undefined> = [undefined, '', 'false', 'FALSE', '0', 'no', 'off', ' false '];
+const DISABLED_VALUES: Array<string | undefined> = [
+  // parseBooleanEnv solo enciende con 1|true|yes (trim+lower). 'on' y basura deben seguir en 403 (P7A-04).
+  undefined, '', 'false', 'FALSE', '0', 'no', 'off', ' false ', 'on', 'enabled', '2', 'TRUE!',
+];
 const BODIES: Array<Record<string, unknown>> = [
   { pledgeId: PLEDGE_ID },
   {},
@@ -137,7 +152,8 @@ describe('T-16 reforzado: reembolsos públicos deshabilitados sin refundCampaign
     delete process.env.ENABLE_PUBLIC_REFUNDS;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await flushAsyncWork(); // P7A-04
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.doUnmock('../blockchain/ecashClient');
@@ -190,6 +206,20 @@ describe('T-16 reforzado: reembolsos públicos deshabilitados sin refundCampaign
     // Ni siquiera en el control hay red: el broadcast es un fake.
     expect(spies.fetch).not.toHaveBeenCalled();
     expect(spies.rpcCall).not.toHaveBeenCalled();
+  });
+
+
+  it('P8G-06/P7A-04 E-A: https.request externo denegado; refund apagado no toca red nativa', async () => {
+    const spies = installFakes();
+    const { app, refundSpy } = await loadRefundApp();
+    expect(() => { (spies.net.httpsRequest as any)('https://chronik.t16.invalid/x'); }).toThrow(
+      /p8a: https\.request denegado/,
+    );
+    clearDeniedNetworkSpies(spies.net);
+    const res = await request(app).post(`/api/campaign/${CAMPAIGN_ID}/refund`).send({ pledgeId: PLEDGE_ID });
+    expect(res.status).toBe(403);
+    expectNoRefundAndNoBroadcast(spies, refundSpy);
+    await flushAsyncWork();
   });
 
   it('control de cableado en la app completa (flag ON): refundCampaign y el broadcast falso se observan', async () => {

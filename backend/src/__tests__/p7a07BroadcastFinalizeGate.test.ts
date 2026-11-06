@@ -8,7 +8,17 @@
 // Los controles con el flag ON prueban que los espías están en el camino real de producción.
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import http from 'node:http';
 import { makeTestDbPath } from './helpers/testDbPath';
+import {
+  installDeniedNetwork,
+  expectNetworkDeniedUnused,
+  flushAsyncWork,
+  resolveNetTarget,
+  isAllowedLocalTarget,
+  clearDeniedNetworkSpies,
+  type DeniedNetworkSpies,
+} from './helpers/denyNetwork';
 
 const CAMPAIGN_ID = 'campaign-p7a07-1';
 const CAMPAIGN_SCRIPT = '76a914' + '22'.repeat(20) + '88ac';
@@ -53,7 +63,7 @@ type Spies = Record<
   | 'buildFinalizeTx' | 'buildPayoutTx' | 'signHybridPayoutTx' | 'derivePrivKeyFromSeed'
   | 'resolvePrivateKeyFromEnv' | 'isV1Campaign' | 'selectCampaignCovenantUtxo',
   ReturnType<typeof vi.fn>
->;
+> & { net: DeniedNetworkSpies };
 
 function fakeCampaign() {
   return {
@@ -75,7 +85,7 @@ function fakeCampaign() {
 }
 
 function installFakes(): Spies {
-  const spies: Spies = {
+  const spies = {
     broadcastTx: vi.fn().mockResolvedValue({ txid: FAKE_TXID }),
     broadcastRawTx: vi.fn().mockResolvedValue({ txid: FAKE_TXID }),
     rpcCall: vi.fn().mockRejectedValue(new Error('p7a07: rpcCall no permitido')),
@@ -127,7 +137,9 @@ function installFakes(): Spies {
     reconcilePendingPledgesForCampaign: vi.fn().mockResolvedValue({ inspected: 0, updated: 0, confirmed: 0, invalid: 0 }),
   }));
   vi.stubGlobal('fetch', spies.fetch);
-  return spies;
+  // P8G-06: niega http|https|net (MA8-17).
+  const net = installDeniedNetwork();
+  return { ...spies, net };
 }
 
 async function loadApp() {
@@ -183,6 +195,7 @@ function expectNothingMonetary(spies: Spies, loaded: Loaded, reads: string[]) {
   expect(loaded.service.getCampaign).not.toHaveBeenCalled();
   expect(loaded.service.markPayoutComplete).not.toHaveBeenCalled();
   expect(reads).toEqual([]);
+  expectNetworkDeniedUnused(spies.net);
 }
 
 function setFlag(name: (typeof FLAGS)[number], value: string | undefined) {
@@ -202,7 +215,8 @@ describe('P7A-07: broadcast y finalize apagados por defecto, sin broadcast, firm
     process.env.CAMPAIGNS_DUAL_WRITE_JSON = 'false';
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await flushAsyncWork(); // P7A-04: vaciar trabajo diferido antes de asertar/limpiar
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.doUnmock('../blockchain/ecashClient');
@@ -349,6 +363,690 @@ describe('P7A-07: broadcast y finalize apagados por defecto, sin broadcast, firm
     expect(reads).toEqual(expect.arrayContaining(['FORCE_RESCUE_CAMPAIGN_ID', 'GAS_WALLET_SEED', 'GAS_WALLET_PRIVKEY']));
     expect(spies.fetch).not.toHaveBeenCalled();
     expect(spies.rpcCall).not.toHaveBeenCalled();
+  });
+
+
+
+
+
+
+
+
+  it('P8G-06 H12a: hostname heredado en prototipo de options NO overridea URL externa', async () => {
+    // Dictamen Auditor dd5795a H12: `in` veía hostname loopback heredado; Node lo ignora.
+    const opts = Object.assign(Object.create({ hostname: '127.0.0.1' }), {
+      port: 80,
+      method: 'POST' as const,
+    });
+    expect(resolveNetTarget(['http://198.51.100.1/', opts], 'http')).toEqual({
+      kind: 'host',
+      host: '198.51.100.1',
+    });
+    expect(isAllowedLocalTarget(resolveNetTarget(['http://198.51.100.1/', opts], 'http'))).toBe(false);
+    // URL object
+    expect(resolveNetTarget([new URL('http://198.51.100.1/'), opts], 'http')).toEqual({
+      kind: 'host',
+      host: '198.51.100.1',
+    });
+
+    const spies = installFakes();
+    const loaded = await loadApp();
+    expect(() => {
+      (spies.net.httpRequest as any)('http://198.51.100.1/', opts);
+    }).toThrow(/p8a: http\.request denegado.*198\.51\.100\.1/);
+    expect(() => {
+      (spies.net.httpsRequest as any)(new URL('https://198.51.100.1/'), Object.assign(Object.create({ hostname: '127.0.0.1' }), { port: 443, method: 'POST' }));
+    }).toThrow(/p8a: https\.request denegado.*198\.51\.100\.1/);
+    expect(() => {
+      (spies.net.httpGet as any)(new URL('http://198.51.100.1/'), Object.assign(Object.create({ hostname: '127.0.0.1' }), { port: 80 }));
+    }).toThrow(/p8a: http\.get denegado.*198\.51\.100\.1/);
+
+    clearDeniedNetworkSpies(spies.net);
+    const res = await request(loaded.app).post(`/api/campaign/${CAMPAIGN_ID}/finalize`).send({});
+    expect(res.status).toBe(403);
+    expectNetworkDeniedUnused(spies.net);
+    await flushAsyncWork();
+  });
+
+  it('P8G-06 H12b: hostname propio no enumerable NO overridea URL externa', async () => {
+    // Dictamen: hasOwn solo no basta — Node solo copia enumerables.
+    const opts: Record<string, unknown> = { port: 80, method: 'POST' };
+    Object.defineProperty(opts, 'hostname', {
+      value: '127.0.0.1',
+      enumerable: false,
+      configurable: true,
+      writable: true,
+    });
+    expect(resolveNetTarget(['http://198.51.100.1/', opts], 'http')).toEqual({
+      kind: 'host',
+      host: '198.51.100.1',
+    });
+    expect(isAllowedLocalTarget(resolveNetTarget(['http://198.51.100.1/', opts], 'http'))).toBe(false);
+
+    const spies = installFakes();
+    const loaded = await loadApp();
+    expect(() => {
+      (spies.net.httpRequest as any)('http://198.51.100.1/', opts);
+    }).toThrow(/p8a: http\.request denegado.*198\.51\.100\.1/);
+    expect(() => {
+      (spies.net.httpsGet as any)(new URL('https://198.51.100.1/'), opts);
+    }).toThrow(/p8a: https\.get denegado.*198\.51\.100\.1/);
+
+    clearDeniedNetworkSpies(spies.net);
+    const res = await request(loaded.app).post(`/api/campaign/${CAMPAIGN_ID}/finalize`).send({});
+    expect(res.status).toBe(403);
+    expectNetworkDeniedUnused(spies.net);
+    await flushAsyncWork();
+  });
+
+  it('P8G-06 H11: URL+options con hostname:undefined limpia URL y usa host externo', async () => {
+    // Dictamen Auditor f4314dc H11: `'hostname' in options` con undefined conservaba loopback de la URL.
+    const opts = { hostname: undefined as unknown as string, host: '198.51.100.1', port: 80, method: 'POST' as const };
+    expect(resolveNetTarget(['http://127.0.0.1/', opts], 'http')).toEqual({
+      kind: 'host',
+      host: '198.51.100.1',
+    });
+    expect(isAllowedLocalTarget(resolveNetTarget(['http://127.0.0.1/', opts], 'http'))).toBe(false);
+    // URL object + misma options
+    expect(resolveNetTarget([new URL('http://127.0.0.1/'), opts], 'http')).toEqual({
+      kind: 'host',
+      host: '198.51.100.1',
+    });
+    // https.get misma semántica in-operator
+    expect(
+      resolveNetTarget([new URL('https://127.0.0.1/'), { hostname: undefined, host: '198.51.100.1', port: 443 }], 'http'),
+    ).toEqual({ kind: 'host', host: '198.51.100.1' });
+
+    const spies = installFakes();
+    const loaded = await loadApp();
+    expect(() => {
+      (spies.net.httpRequest as any)('http://127.0.0.1/', opts);
+    }).toThrow(/p8a: http\.request denegado.*198\.51\.100\.1/);
+    expect(() => {
+      (spies.net.httpsRequest as any)(new URL('https://127.0.0.1/'), {
+        hostname: undefined,
+        host: '198.51.100.1',
+        port: 443,
+        method: 'POST',
+      });
+    }).toThrow(/p8a: https\.request denegado.*198\.51\.100\.1/);
+    expect(() => {
+      (spies.net.httpGet as any)(new URL('http://127.0.0.1/'), {
+        hostname: undefined,
+        host: '198.51.100.1',
+        port: 80,
+      });
+    }).toThrow(/p8a: http\.get denegado.*198\.51\.100\.1/);
+
+    clearDeniedNetworkSpies(spies.net);
+    const res = await request(loaded.app).post(`/api/campaign/${CAMPAIGN_ID}/finalize`).send({});
+    expect(res.status).toBe(403);
+    expectNetworkDeniedUnused(spies.net);
+    await flushAsyncWork();
+  });
+
+  it('P8G-06 H9: http.request(new URL(loopback), {hostname: externo}) destino efectivo remoto', async () => {
+    // Dictamen Auditor 27a705d H9: URL object no se fusionaba con options (solo string).
+    const url = new URL('http://127.0.0.1/');
+    const opts = { hostname: '198.51.100.1', port: 80, method: 'POST' as const };
+    expect(resolveNetTarget([url, opts], 'http')).toEqual({ kind: 'host', host: '198.51.100.1' });
+    expect(isAllowedLocalTarget(resolveNetTarget([url, opts], 'http'))).toBe(false);
+    // URL object solo (sin override) sigue loopback
+    expect(isAllowedLocalTarget(resolveNetTarget([url], 'http'))).toBe(true);
+    // https.get / http.get con URL object + options
+    expect(resolveNetTarget([new URL('https://127.0.0.1/'), { hostname: '198.51.100.1', port: 443 }], 'http')).toEqual({
+      kind: 'host',
+      host: '198.51.100.1',
+    });
+
+    const spies = installFakes();
+    const loaded = await loadApp();
+    expect(() => {
+      (spies.net.httpRequest as any)(url, opts);
+    }).toThrow(/p8a: http\.request denegado.*198\.51\.100\.1/);
+    expect(() => {
+      (spies.net.httpsRequest as any)(new URL('https://127.0.0.1/'), {
+        hostname: '198.51.100.1',
+        port: 443,
+        method: 'POST',
+      });
+    }).toThrow(/p8a: https\.request denegado.*198\.51\.100\.1/);
+    expect(() => {
+      (spies.net.httpGet as any)(new URL('http://127.0.0.1/'), { hostname: '198.51.100.1', port: 80 });
+    }).toThrow(/p8a: http\.get denegado.*198\.51\.100\.1/);
+
+    clearDeniedNetworkSpies(spies.net);
+    const res = await request(loaded.app).post(`/api/campaign/${CAMPAIGN_ID}/finalize`).send({});
+    expect(res.status).toBe(403);
+    expectNetworkDeniedUnused(spies.net);
+    await flushAsyncWork();
+  });
+
+  it('P8G-06 H10: net.connect({host: externo, hostname: loopback}) usa host (semántica net)', async () => {
+    // Dictamen Auditor 27a705d H10: resolver HTTP (hostname-first) se aplicaba a net.
+    const opts = { host: '198.51.100.1', hostname: '127.0.0.1', port: 443 };
+    expect(resolveNetTarget([opts], 'net')).toEqual({ kind: 'host', host: '198.51.100.1' });
+    expect(isAllowedLocalTarget(resolveNetTarget([opts], 'net'))).toBe(false);
+    // Contraste: misma options bajo semántica HTTP verían hostname loopback
+    expect(resolveNetTarget([opts], 'http')).toEqual({ kind: 'host', host: '127.0.0.1' });
+    expect(isAllowedLocalTarget(resolveNetTarget([opts], 'http'))).toBe(true);
+    // createConnection misma regla
+    expect(resolveNetTarget([{ host: '198.51.100.1', hostname: '127.0.0.1', port: 443 }], 'net')).toEqual({
+      kind: 'host',
+      host: '198.51.100.1',
+    });
+
+    const spies = installFakes();
+    const loaded = await loadApp();
+    expect(() => {
+      (spies.net.netConnect as any)(opts);
+    }).toThrow(/p8a: net\.connect denegado.*198\.51\.100\.1/);
+    expect(() => {
+      (spies.net.netCreateConnection as any)(opts);
+    }).toThrow(/p8a: net\.createConnection denegado.*198\.51\.100\.1/);
+
+    clearDeniedNetworkSpies(spies.net);
+    const res = await request(loaded.app).post(`/api/campaign/${CAMPAIGN_ID}/finalize`).send({});
+    expect(res.status).toBe(403);
+    expectNetworkDeniedUnused(spies.net);
+    await flushAsyncWork();
+  });
+
+  it('P8G-06 H7: http.get({hostname,port,path}) externo se deniega (API hermana de request)', async () => {
+    // Dictamen Auditor 345ffaf H7: http.get no estaba stubbeado → 37/37 verdes.
+    const opts = { hostname: '198.51.100.1', port: 80, path: '/' };
+    expect(resolveNetTarget([opts])).toEqual({ kind: 'host', host: '198.51.100.1' });
+    expect(isAllowedLocalTarget(resolveNetTarget([opts]))).toBe(false);
+
+    const spies = installFakes();
+    const loaded = await loadApp();
+    expect(() => {
+      (spies.net.httpGet as any)(opts);
+    }).toThrow(/p8a: http\.get denegado.*198\.51\.100\.1/);
+    expect(() => {
+      (spies.net.httpsGet as any)({ hostname: '198.51.100.1', port: 443, path: '/' });
+    }).toThrow(/p8a: https\.get denegado.*198\.51\.100\.1/);
+    // También forma string URL
+    expect(() => {
+      (spies.net.httpGet as any)('http://198.51.100.1/');
+    }).toThrow(/p8a: http\.get denegado.*198\.51\.100\.1/);
+
+    clearDeniedNetworkSpies(spies.net);
+    const res = await request(loaded.app).post(`/api/campaign/${CAMPAIGN_ID}/finalize`).send({});
+    expect(res.status).toBe(403);
+    expectNetworkDeniedUnused(spies.net);
+    await flushAsyncWork();
+  });
+
+  it('P8G-06 H8: destino efectivo — URL loopback+options hostname externo; host loopback+hostname externo', async () => {
+    // Dictamen Auditor 345ffaf H8: Node usa options sobre URL y prioriza hostname sobre host.
+    const urlOpts: unknown[] = [
+      'http://127.0.0.1/',
+      { hostname: '198.51.100.1', port: 80, method: 'POST' },
+    ];
+    expect(resolveNetTarget(urlOpts)).toEqual({ kind: 'host', host: '198.51.100.1' });
+    expect(isAllowedLocalTarget(resolveNetTarget(urlOpts))).toBe(false);
+
+    const hostHostname = {
+      host: '127.0.0.1',
+      hostname: '198.51.100.1',
+      port: 80,
+      path: '/',
+      method: 'POST',
+    };
+    expect(resolveNetTarget([hostHostname])).toEqual({ kind: 'host', host: '198.51.100.1' });
+    expect(isAllowedLocalTarget(resolveNetTarget([hostHostname]))).toBe(false);
+
+    // Control: solo host loopback sigue permitido
+    expect(isAllowedLocalTarget(resolveNetTarget([{ host: '127.0.0.1', port: 80, path: '/' }]))).toBe(
+      true,
+    );
+    // URL loopback sin options override → permitido
+    expect(isAllowedLocalTarget(resolveNetTarget(['http://127.0.0.1/']))).toBe(true);
+
+    const spies = installFakes();
+    const loaded = await loadApp();
+    expect(() => {
+      (spies.net.httpRequest as any)(...urlOpts);
+    }).toThrow(/p8a: http\.request denegado.*198\.51\.100\.1/);
+    expect(() => {
+      (spies.net.httpRequest as any)(hostHostname);
+    }).toThrow(/p8a: http\.request denegado.*198\.51\.100\.1/);
+    // https con misma forma de override también denegado
+    expect(() => {
+      (spies.net.httpsRequest as any)('https://127.0.0.1/', {
+        hostname: '198.51.100.1',
+        port: 443,
+        method: 'POST',
+      });
+    }).toThrow(/p8a: https\.request denegado.*198\.51\.100\.1/);
+
+    clearDeniedNetworkSpies(spies.net);
+    const res = await request(loaded.app).post(`/api/campaign/${CAMPAIGN_ID}/finalize`).send({});
+    expect(res.status).toBe(403);
+    expectNetworkDeniedUnused(spies.net);
+    await flushAsyncWork();
+  });
+
+  it('P8G-06 H6: http.request({hostname,port,path:"/"}) NO es IPC y se deniega', async () => {
+    // Dictamen Auditor ff09d20 H6: path:"/" + hostname se clasificaba IPC y escapaba.
+    const opts = { hostname: '198.51.100.1', port: 80, path: '/', method: 'POST' };
+    expect(resolveNetTarget([opts])).toEqual({ kind: 'host', host: '198.51.100.1' });
+    expect(isAllowedLocalTarget(resolveNetTarget([opts]))).toBe(false);
+    expect(resolveNetTarget([{ host: '198.51.100.1', port: 443, path: '/x' }])).toEqual({
+      kind: 'host',
+      host: '198.51.100.1',
+    });
+    // IPC real sin host sigue permitido
+    expect(resolveNetTarget([{ path: '/var/run/teyolia.sock' }])).toEqual({ kind: 'ipc' });
+    expect(isAllowedLocalTarget(resolveNetTarget([{ path: '/var/run/teyolia.sock' }]))).toBe(true);
+
+    const spies = installFakes();
+    const loaded = await loadApp();
+    expect(() => {
+      (spies.net.httpRequest as any)(opts);
+    }).toThrow(/p8a: http\.request denegado.*198\.51\.100\.1/);
+    expect(() => {
+      (spies.net.httpsRequest as any)({ hostname: '198.51.100.1', port: 443, path: '/', method: 'POST' });
+    }).toThrow(/p8a: https\.request denegado.*198\.51\.100\.1/);
+
+    clearDeniedNetworkSpies(spies.net);
+    const res = await request(loaded.app).post(`/api/campaign/${CAMPAIGN_ID}/finalize`).send({});
+    expect(res.status).toBe(403);
+    expectNetworkDeniedUnused(spies.net);
+    await flushAsyncWork();
+  });
+
+  it('P8G-06 H1: net.connect(port, host) externo se deniega y cuenta (overload posicional)', async () => {
+    // Dictamen Auditor b8dd400 H1: connect(443, '198.51.100.1') evadía el stub.
+    expect(resolveNetTarget([443, '198.51.100.1'])).toEqual({ kind: 'host', host: '198.51.100.1' });
+    expect(isAllowedLocalTarget(resolveNetTarget([443, '198.51.100.1']))).toBe(false);
+    expect(resolveNetTarget([443])).toEqual({ kind: 'loopback-implicit' });
+    expect(isAllowedLocalTarget(resolveNetTarget([443]))).toBe(true);
+    expect(resolveNetTarget([{ port: 443, host: '198.51.100.1' }], 'net')).toEqual({
+      kind: 'host',
+      host: '198.51.100.1',
+    });
+
+    const spies = installFakes();
+    const loaded = await loadApp();
+    expect(() => {
+      (spies.net.netConnect as any)(443, '198.51.100.1');
+    }).toThrow(/p8a: net\.connect denegado.*198\.51\.100\.1/);
+    expect(() => {
+      (spies.net.netCreateConnection as any)(443, '198.51.100.1');
+    }).toThrow(/p8a: net\.createConnection denegado.*198\.51\.100\.1/);
+
+    // Tras disparos directos, limpiar y comprobar que finalize/broadcast apagados no usan net remoto.
+    clearDeniedNetworkSpies(spies.net);
+    const res = await request(loaded.app).post(`/api/campaign/${CAMPAIGN_ID}/finalize`).send({});
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual(FINALIZE_BODY);
+    expectNetworkDeniedUnused(spies.net);
+    await flushAsyncWork();
+  });
+
+  it('P8G-06 E-A: https.request externo se registra y falla el test; loopback http sigue para supertest', async () => {
+    const spies = installFakes();
+    const loaded = await loadApp();
+    // Disparo directo sobre el stub (misma referencia que vería un import de https en producción).
+    expect(() => { (spies.net.httpsRequest as any)('https://chronik.p7a07.invalid/broadcast-tx'); }).toThrow(
+      /p8a: https\.request denegado/,
+    );
+    expect(() => { (spies.net.httpRequest as any)('http://evil.example/x'); }).toThrow(/p8a: http\.request denegado/);
+    // Supertest (loopback) debe seguir funcionando con el stub instalado.
+    const res = await request(loaded.app).post('/api/broadcast').send({ rawTxHex: '00' });
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual(BROADCAST_BODY);
+    // Tras un 403 limpio no debe quedar https.request pendiente de la app.
+    // (el disparo directo anterior sí contó: lo limpiamos para la aserción de rama apagada)
+    clearDeniedNetworkSpies(spies.net);
+    const res2 = await request(loaded.app).post('/api/tx/broadcast').send({ rawTxHex: '00' });
+    expect(res2.status).toBe(403);
+    expectNetworkDeniedUnused(spies.net);
+    await flushAsyncWork();
+  });
+
+
+  it('P8G-06 H13: net host remoto heredado + hostname loopback propio → remoto (Node [[Get]])', async () => {
+    // Dictamen Auditor d7d819b H13: ownEnumerable ignoraba host heredado; Node sí lo lee.
+    const opts = Object.assign(Object.create({ host: '198.51.100.1' }), {
+      hostname: '127.0.0.1',
+      port: 443,
+    });
+    expect(resolveNetTarget([opts], 'net')).toEqual({ kind: 'host', host: '198.51.100.1' });
+    expect(isAllowedLocalTarget(resolveNetTarget([opts], 'net'))).toBe(false);
+    // Espejo createConnection
+    expect(resolveNetTarget([Object.assign(Object.create({ host: '198.51.100.1' }), { hostname: '127.0.0.1', port: 443 })], 'net')).toEqual({
+      kind: 'host',
+      host: '198.51.100.1',
+    });
+    // Control cercano: host heredado loopback + hostname propio remoto → remoto (fail-closed)
+    const localInherited = Object.assign(Object.create({ host: '127.0.0.1' }), {
+      hostname: '198.51.100.1',
+      port: 443,
+    });
+    // Conflicto host(loopback heredado) vs hostname(remoto propio): fail-closed UNTRUSTED (H14 familia /
+    // denegación conservadora del dictamen SW-net-inherited-local DETECTADA).
+    const localT = resolveNetTarget([localInherited], 'net');
+    expect(localT.kind).toBe('host');
+    expect(isAllowedLocalTarget(localT)).toBe(false);
+
+    const spies = installFakes();
+    const loaded = await loadApp();
+    expect(() => {
+      (spies.net.netConnect as any)(opts);
+    }).toThrow(/p8a: net\.connect denegado.*198\.51\.100\.1/);
+    expect(() => {
+      (spies.net.netCreateConnection as any)(
+        Object.assign(Object.create({ host: '198.51.100.1' }), { hostname: '127.0.0.1', port: 443 }),
+      );
+    }).toThrow(/p8a: net\.createConnection denegado.*198\.51\.100\.1/);
+
+    clearDeniedNetworkSpies(spies.net);
+    const res = await request(loaded.app).post(`/api/campaign/${CAMPAIGN_ID}/finalize`).send({});
+    expect(res.status).toBe(403);
+    expectNetworkDeniedUnused(spies.net);
+    await flushAsyncWork();
+  });
+
+  it('P8G-06 H14a: getter hostname variable (4ª lectura remota) se deniega fail-closed', async () => {
+    // Dictamen Auditor d7d819b H14: stub muestreaba temprano loopback; Node leía remoto en 4ª.
+    const opts = (() => {
+      let n = 0;
+      return {
+        port: 80,
+        method: 'POST' as const,
+        get hostname() {
+          return ++n === 4 ? '198.51.100.1' : '127.0.0.1';
+        },
+      };
+    })();
+    const t = resolveNetTarget(['http://198.51.100.1/', opts], 'http');
+    expect(t.kind).toBe('host');
+    expect(isAllowedLocalTarget(t)).toBe(false);
+
+    const spies = installFakes();
+    const loaded = await loadApp();
+    expect(() => {
+      (spies.net.httpRequest as any)('http://198.51.100.1/', opts);
+    }).toThrow(/p8a: http\.request denegado/);
+    expect(() => {
+      // Getter constante remoto sobre URL loopback — también denegado (accessor).
+      (spies.net.httpRequest as any)('http://127.0.0.1/', {
+        port: 80,
+        get hostname() {
+          return '198.51.100.1';
+        },
+      });
+    }).toThrow(/p8a: http\.request denegado/);
+
+    clearDeniedNetworkSpies(spies.net);
+    const res = await request(loaded.app).post(`/api/campaign/${CAMPAIGN_ID}/finalize`).send({});
+    expect(res.status).toBe(403);
+    expectNetworkDeniedUnused(spies.net);
+    await flushAsyncWork();
+  });
+
+  it('P8G-06 H14b: Proxy hostname variable se deniega fail-closed', async () => {
+    const opts = (() => {
+      let n = 0;
+      return new Proxy(
+        { hostname: '127.0.0.1', port: 80, method: 'POST' },
+        {
+          get(t, k, r) {
+            if (k === 'hostname') return ++n === 4 ? '198.51.100.1' : '127.0.0.1';
+            return Reflect.get(t, k, r);
+          },
+        },
+      );
+    })();
+    const t = resolveNetTarget(['http://198.51.100.1/', opts], 'http');
+    expect(t.kind).toBe('host');
+    expect(isAllowedLocalTarget(t)).toBe(false);
+
+    const spies = installFakes();
+    const loaded = await loadApp();
+    expect(() => {
+      (spies.net.httpRequest as any)('http://198.51.100.1/', opts);
+    }).toThrow(/p8a: http\.request denegado/);
+    expect(() => {
+      (spies.net.httpsRequest as any)(
+        'https://198.51.100.1/',
+        new Proxy({ hostname: '127.0.0.1', port: 443 }, {
+          get(t, k, r) {
+            return k === 'hostname' ? '127.0.0.1' : Reflect.get(t, k, r);
+          },
+        }),
+      );
+    }).toThrow(/p8a: https\.request denegado/);
+
+    clearDeniedNetworkSpies(spies.net);
+    const res = await request(loaded.app).post(`/api/campaign/${CAMPAIGN_ID}/finalize`).send({});
+    expect(res.status).toBe(403);
+    expectNetworkDeniedUnused(spies.net);
+    await flushAsyncWork();
+  });
+
+
+  it('P8G-06 H15: Proxy en prototipo cambia host en 5ª lectura → UNTRUSTED (net)', async () => {
+    // Dictamen Auditor b1697e0 H15: 4 lecturas veían loopback; Node consumía remoto en 5ª.
+    const opts = (() => {
+      let n = 0;
+      return Object.assign(
+        Object.create(
+          new Proxy(
+            { host: '127.0.0.1' },
+            {
+              get(t, k, r) {
+                if (k === 'host') return ++n === 5 ? '198.51.100.1' : '127.0.0.1';
+                return Reflect.get(t, k, r);
+              },
+            },
+          ),
+        ),
+        { port: 443 },
+      );
+    })();
+    const resolved = resolveNetTarget([opts], 'net');
+    expect(resolved.kind).toBe('host');
+    expect(isAllowedLocalTarget(resolved)).toBe(false);
+
+    const spies = installFakes();
+    const loaded = await loadApp();
+    expect(() => {
+      (spies.net.netConnect as any)(opts);
+    }).toThrow(/p8a: net\.connect denegado/);
+    expect(() => {
+      (spies.net.netCreateConnection as any)(
+        (() => {
+          let n = 0;
+          return Object.assign(
+            Object.create(
+              new Proxy(
+                { host: '127.0.0.1' },
+                {
+                  get(t, k, r) {
+                    if (k === 'host') return ++n === 5 ? '198.51.100.1' : '127.0.0.1';
+                    return Reflect.get(t, k, r);
+                  },
+                },
+              ),
+            ),
+            { port: 443 },
+          );
+        })(),
+      );
+    }).toThrow(/p8a: net\.createConnection denegado/);
+
+    clearDeniedNetworkSpies(spies.net);
+    const res = await request(loaded.app).post(`/api/campaign/${CAMPAIGN_ID}/finalize`).send({});
+    expect(res.status).toBe(403);
+    expectNetworkDeniedUnused(spies.net);
+    await flushAsyncWork();
+  });
+
+  it('P8G-06 H16: lookup custom localhost→IP remota se deniega (http y net)', async () => {
+    // Dictamen Auditor b1697e0 H16: destino textual loopback; lookup resuelve remoto.
+    const netOpts = {
+      host: 'localhost',
+      port: 443,
+      lookup: ((_h: any, _o: any, cb: any) => cb(null, '198.51.100.1', 4)) as any,
+    };
+    const httpOpts = {
+      hostname: 'localhost',
+      port: 80,
+      lookup: ((_h: any, _o: any, cb: any) => cb(null, '198.51.100.1', 4)) as any,
+    };
+    expect(isAllowedLocalTarget(resolveNetTarget([netOpts], 'net'))).toBe(false);
+    expect(isAllowedLocalTarget(resolveNetTarget([httpOpts], 'http'))).toBe(false);
+
+    const spies = installFakes();
+    const loaded = await loadApp();
+    expect(() => {
+      (spies.net.netConnect as any)(netOpts);
+    }).toThrow(/p8a: net\.connect denegado/);
+    expect(() => {
+      (spies.net.httpRequest as any)(httpOpts);
+    }).toThrow(/p8a: http\.request denegado/);
+    expect(() => {
+      (spies.net.httpGet as any)({
+        hostname: 'localhost',
+        port: 80,
+        lookup: ((_h: any, _o: any, cb: any) => cb(null, '198.51.100.1', 4)) as any,
+      });
+    }).toThrow(/p8a: http\.get denegado/);
+
+    clearDeniedNetworkSpies(spies.net);
+    const res = await request(loaded.app).post(`/api/campaign/${CAMPAIGN_ID}/finalize`).send({});
+    expect(res.status).toBe(403);
+    expectNetworkDeniedUnused(spies.net);
+    await flushAsyncWork();
+  });
+
+
+  it('P8G-06 H17a: Agent.lookup custom localhost→IP remota se deniega (AUD-H17-agent-lookup)', async () => {
+    // Dictamen Auditor efab7ee H17: hasUntrustedTransportHook no miraba options.agent.
+    const opts = {
+      hostname: 'localhost',
+      port: 80,
+      agent: new http.Agent({
+        lookup: ((_h: any, _o: any, cb: any) => cb(null, '198.51.100.1', 4)) as any,
+      }),
+    };
+    expect(isAllowedLocalTarget(resolveNetTarget([opts], 'http'))).toBe(false);
+
+    const spies = installFakes();
+    const loaded = await loadApp();
+    expect(() => {
+      (spies.net.httpRequest as any)(opts);
+    }).toThrow(/p8a: http\.request denegado/);
+    expect(() => {
+      (spies.net.httpsRequest as any)({
+        hostname: 'localhost',
+        port: 443,
+        agent: new http.Agent({
+          lookup: ((_h: any, _o: any, cb: any) => cb(null, '198.51.100.1', 4)) as any,
+        }),
+      });
+    }).toThrow(/p8a: https\.request denegado/);
+
+    clearDeniedNetworkSpies(spies.net);
+    const res = await request(loaded.app).post(`/api/campaign/${CAMPAIGN_ID}/finalize`).send({});
+    expect(res.status).toBe(403);
+    expectNetworkDeniedUnused(spies.net);
+    await flushAsyncWork();
+  });
+
+  it('P8G-06 H17b: Agent.createConnection propio se deniega (AUD-H17-agent-createConnection)', async () => {
+    const opts = {
+      hostname: 'localhost',
+      port: 80,
+      agent: (() => {
+        const a = new http.Agent();
+        a.createConnection = ((o: any, cb: any) => {
+          throw new Error('REMOTE_FACTORY_REACHED');
+        }) as any;
+        return a;
+      })(),
+    };
+    expect(isAllowedLocalTarget(resolveNetTarget([opts], 'http'))).toBe(false);
+
+    const spies = installFakes();
+    const loaded = await loadApp();
+    expect(() => {
+      (spies.net.httpRequest as any)(opts);
+    }).toThrow(/p8a: http\.request denegado/);
+    expect(() => {
+      (spies.net.httpGet as any)({
+        hostname: 'localhost',
+        port: 80,
+        agent: (() => {
+          const a = new http.Agent();
+          a.createConnection = ((o: any, cb: any) => {
+            throw new Error('REMOTE_FACTORY_REACHED');
+          }) as any;
+          return a;
+        })(),
+      });
+    }).toThrow(/p8a: http\.get denegado/);
+
+    clearDeniedNetworkSpies(spies.net);
+    const res = await request(loaded.app).post(`/api/campaign/${CAMPAIGN_ID}/finalize`).send({});
+    expect(res.status).toBe(403);
+    expectNetworkDeniedUnused(spies.net);
+    await flushAsyncWork();
+  });
+
+
+  it('P8G-06 H18a: globalAgent.lookup in-place sin options.agent → UNTRUSTED (AUD-H18c)', async () => {
+    // Dictamen Auditor 1331c58 H18: Agent efectivo no se evaluaba si options.agent ausente.
+    const prev = Object.getOwnPropertyDescriptor(http.globalAgent, 'lookup');
+    try {
+      (http.globalAgent as any).lookup = ((_h: any, _o: any, cb: any) =>
+        cb(null, '198.51.100.1', 4)) as any;
+      const opts = { hostname: 'localhost', port: 80 };
+      expect(isAllowedLocalTarget(resolveNetTarget([opts], 'http'))).toBe(false);
+
+      const spies = installFakes();
+      const loaded = await loadApp();
+      expect(() => {
+        (spies.net.httpRequest as any)(opts);
+      }).toThrow(/p8a: http\.request denegado/);
+      clearDeniedNetworkSpies(spies.net);
+      const res = await request(loaded.app).post(`/api/campaign/${CAMPAIGN_ID}/finalize`).send({});
+      expect(res.status).toBe(403);
+      expectNetworkDeniedUnused(spies.net);
+      await flushAsyncWork();
+    } finally {
+      if (prev) Object.defineProperty(http.globalAgent, 'lookup', prev);
+      else delete (http.globalAgent as any).lookup;
+    }
+  });
+
+  it('P8G-06 H18b: globalAgent.createConnection in-place sin options.agent → UNTRUSTED (AUD-H18c)', async () => {
+    const prev = Object.getOwnPropertyDescriptor(http.globalAgent, 'createConnection');
+    try {
+      (http.globalAgent as any).createConnection = ((o: any, cb: any) => {
+        throw new Error('REMOTE_FACTORY_REACHED');
+      }) as any;
+      const opts = { hostname: 'localhost', port: 80 };
+      expect(isAllowedLocalTarget(resolveNetTarget([opts], 'http'))).toBe(false);
+
+      const spies = installFakes();
+      const loaded = await loadApp();
+      expect(() => {
+        (spies.net.httpRequest as any)(opts);
+      }).toThrow(/p8a: http\.request denegado/);
+      clearDeniedNetworkSpies(spies.net);
+      const res = await request(loaded.app).post(`/api/campaign/${CAMPAIGN_ID}/finalize`).send({});
+      expect(res.status).toBe(403);
+      expectNetworkDeniedUnused(spies.net);
+      await flushAsyncWork();
+    } finally {
+      if (prev) Object.defineProperty(http.globalAgent, 'createConnection', prev);
+      else delete (http.globalAgent as any).createConnection;
+    }
   });
 
   it('control de cableado finalize legacy (flag ON, fakes): llega a AutoPayoutService (falso)', async () => {
